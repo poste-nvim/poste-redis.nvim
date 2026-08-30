@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        nvim_version:
+          - stable
+          - nightly
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 16379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout poste-redis.nvim
+        uses: actions/checkout@v4
+
+      - name: Checkout poste.nvim (sibling dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: beyondlex/poste.nvim
+          path: poste.nvim
+
+      - name: Install Neovim ${{ matrix.nvim_version }}
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.nvim_version }}
+
+      - name: Install plenary.nvim
+        run: |
+          git clone --depth 1 https://github.com/nvim-lua/plenary.nvim \
+            "$HOME/.local/share/nvim/lazy/plenary.nvim"
+
+      - name: Run tests
+        working-directory: poste-redis.nvim
+        env:
+          REDIS_TEST_URL: redis://127.0.0.1:16379/0
+        run: |
+          ./tests/run.sh
