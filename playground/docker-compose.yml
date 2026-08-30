@@ -2,4 +2,4 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "16379:6379"
+      - "16479:6379"
