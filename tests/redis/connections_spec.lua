@@ -1,0 +1,264 @@
+--- connections spec — connections.toml redis 段解析 + {{var}} 展开 + 错误路径。
+--- Covers EXECUTION-PLAN §5: url form, field form, tls, env expansion,
+--- validation errors, and the USE-driven context apply.
+local connections = require("poste-redis.connections")
+local redis_state = require("poste-redis.state")
+
+describe("poste-redis connections", function()
+  local tmpdir
+  local dir
+
+  before_each(function()
+    tmpdir = vim.fn.tempname()
+    vim.fn.mkdir(tmpdir, "p")
+    connections._test.reset_caches()
+    redis_state.context = { connection = nil, db = nil }
+    redis_state.current_url = nil
+  end)
+
+  after_each(function()
+    connections._test.reset_caches()
+    pcall(vim.fn.delete, tmpdir, "rf")
+  end)
+
+  --- Write a file into the temp dir and return its path.
+  local function write(name, content)
+    local path = vim.fn.fnameescape(tmpdir .. "/" .. name)
+    vim.fn.writefile(vim.split(content, "\n", { plain = true }), path)
+    return path
+  end
+
+  local function reset()
+    connections._test.reset_caches()
+    redis_state.context = { connection = nil, db = nil }
+    redis_state.current_url = nil
+    dir = {}
+  end
+
+  before_each(reset)
+
+  it("resolves a connection using the url field", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+url = "redis://127.0.0.1:16379/2"
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(err)
+    assert.equals("redis://127.0.0.1:16379/2", url)
+  end)
+
+  it("accepts a rediss:// url (tls via url form)", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+url = "rediss://:pass@host:6380/0"
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(err)
+    assert.equals("rediss://:pass@host:6380/0", url)
+  end)
+
+  it("builds a URL from individual fields", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "127.0.0.1"
+port = 6379
+db = 3
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(err)
+    assert.equals("redis://127.0.0.1:6379/3", url)
+  end)
+
+  it("uses tls = true to switch the scheme", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "db.internal"
+tls = true
+db = 0
+]])
+    local url = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.equals("rediss://db.internal:6379/0", url)
+  end)
+
+  it("expands {{VAR}} from .env into the password and percent-encodes", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "127.0.0.1"
+password = "{{REDIS_PASS}}"
+]])
+    write(".env", [[
+REDIS_PASS=pa:ss/wd
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(err)
+    assert.equals("redis://:pa%3Ass%2Fwd@127.0.0.1:6379/0", url)
+  end)
+
+  it("prefers OS env over .env", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "h"
+password = "{{REDIS_PASS}}"
+]])
+    write(".env", [[
+REDIS_PASS=from_env_file
+]])
+    vim.env.REDIS_PASS = "from_os"
+    connections._test.reset_caches()
+    local url = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.equals("redis://:from_os@h:6379/0", url)
+    vim.env.REDIS_PASS = nil
+  end)
+
+  it("percent-encodes an unresolved {{VAR}} ref left literal in the value", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "h"
+password = "{{NOT_SET_ANYWHERE}}"
+]])
+    local url = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.equals("redis://:%7B%7BNOT_SET_ANYWHERE%7D%7D@h:6379/0", url)
+  end)
+
+  it("rejects a connection without a host when url is absent", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+port = 6379
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.truthy(err)
+    assert.match("host", err)
+  end)
+
+  it("rejects a non-redis dialect", function()
+    write("connections.toml", [[
+[pg]
+dialect = "postgres"
+host = "h"
+url = "postgres://h/db"
+]])
+    local url, err = connections.resolve_redis_url("pg", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.match("not a redis connection", err)
+  end)
+
+  it("rejects a url with the wrong scheme", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+url = "postgres://h/db"
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.match("redis:// or rediss://", err)
+  end)
+
+  it("errors when connections.toml is absent", function()
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.truthy(err)
+    assert.match("connections.toml", err)
+  end)
+
+  it("errors when the named connection is missing", function()
+    write("connections.toml", [[
+[other]
+dialect = "redis"
+url = "redis://h:6379/0"
+]])
+    local url, err = connections.resolve_redis_url("missing", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.match("not found", err)
+  end)
+
+  it("only lists redis connections", function()
+    write("connections.toml", [[
+[my-redis]
+dialect = "redis"
+url = "redis://127.0.0.1:6379/0"
+
+[my-pg]
+dialect = "postgres"
+host = "pg-host"
+]])
+    local list = {}
+    connections.list_connections(function(l) list = l end, { search_dir = tmpdir })
+    assert.equals(true, vim.wait(500, function() return #list > 0 end, 5))
+    assert.equals(1, #list)
+    assert.equals("my-redis", list[1].name)
+    assert.equals("redis://127.0.0.1:6379/0", list[1].url)
+    assert.equals("127.0.0.1", list[1].host)
+    assert.equals("0", list[1].db)
+  end)
+
+  it("list_connections yields nothing without a config file", function()
+    local list = nil
+    local done = false
+    connections.list_connections(function(l) list = l; done = true end, { search_dir = tmpdir })
+    assert.equals(true, vim.wait(500, function() return done end, 5))
+    assert.is_table(list)
+    assert.equals(0, #list)
+  end)
+
+  it("get_connection_config returns env-expanded values", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "127.0.0.1"
+port = 6379
+password = "{{REDIS_PASS}}"
+]])
+    write(".env", "REDIS_PASS=topsecret")
+    vim.api.nvim_set_current_dir(tmpdir)
+    connections._test.reset_caches()
+    local cfg = connections.get_connection_config("srv")
+    assert.is_not_nil(cfg)
+    assert.equals("topsecret", cfg.password)
+    assert.equals(6379, cfg.port)
+  end)
+
+  it("use_connection applies the connection to state", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+url = "redis://127.0.0.1:6379/0"
+]])
+    vim.api.nvim_set_current_dir(tmpdir)
+    connections._test.reset_caches()
+    local ok, err = connections.use_connection("srv")
+    assert.is_true(ok)
+    assert.is_nil(err)
+    assert.equals("srv", redis_state.context.connection)
+    assert.equals("redis://127.0.0.1:6379/0", redis_state.current_url)
+  end)
+
+  it("use_connection reports a resolution failure without touching state", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+port = 6379
+]])
+    local ok, err = connections.use_connection("srv")
+    assert.is_false(ok)
+    assert.truthy(err)
+    assert.is_nil(redis_state.current_url)
+  end)
+
+  it("find_connections_toml walks up from a nested directory", function()
+    write("connections.toml", "[srv]\ndialect = \"redis\"\nurl = \"redis://h:6379/0\"\n")
+    vim.fn.mkdir(tmpdir .. "/sub/deep", "p")
+    connections._test.reset_caches()
+    local path = connections.find_connections_toml(tmpdir .. "/sub/deep")
+    assert.truthy(path)
+    assert.match("connections%.toml$", path)
+  end)
+end)
