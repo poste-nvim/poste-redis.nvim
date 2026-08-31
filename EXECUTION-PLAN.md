@@ -4,8 +4,8 @@
 > 阅读顺序：`requirements.md`（为什么）→ 本文档（怎么干）→ 各仓库 AGENTS.md（仓库规矩）。
 > 与 requirements.md 冲突时以本文档为准（更具体、更新）。
 >
-> 现状：M1 已在本仓库实现并通过 `tests/run.sh`；本文保留为执行记录和 M2/P2
-> 后续 backlog 的来源。
+> 现状：M1 与 M2 均已在本仓库实现并通过测试；本文保留为执行记录和
+> P2 后续 backlog 的来源（见 §10）。
 
 ---
 
@@ -270,12 +270,14 @@ db = 0                      # 可选，默认 0
 
 ## 10. 后续 TODO（整理版）
 
-### M2
+> 现状：M2 已完成（P1 全部验收达成，含 10 万 key 验收脚本）。以下为 P2 起点。
 
-- `browser/` 键浏览器
-- `redis-session` 长驻传输
-- 值查看与大 key 导航
-- tree-sitter grammar / highlights / install.lua
+### M2 ✅（已完成）
+
+- `redis-session` 长驻传输（`poste redis-session` + `session_conn.lua`，SELECT 状态保持）
+- `browser/` 键浏览器（SCAN 分批、MATCH 过滤、`:` 前缀树视图/平铺、TTL/删除/重命名）
+- 值查看与大 key 导航（HSCAN/SSCAN/ZSCAN/LRANGE 分页、大 String 全量加载）
+- tree-sitter grammar / highlights / install.lua（regex 降级可用）
 
 ### P2
 
