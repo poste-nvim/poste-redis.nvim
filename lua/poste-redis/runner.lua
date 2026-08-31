@@ -10,6 +10,15 @@ local redis_state = require("poste-redis.state")
 
 local M = {}
 
+--- Collect the panel's current rendered lines for the history snapshot.
+local function buffer_lines()
+  local b = buffer.buf()
+  if b and vim.api.nvim_buf_is_valid(b) then
+    return vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  end
+  return {}
+end
+
 --- Render a batch of results into the panel and push one history entry.
 --- @param results table[] result events
 --- @param summaries table[] summary events
@@ -41,15 +50,6 @@ local function present(results, summaries, opts)
       indicators.set_indicator(src, vim.fn.line(".") - 1, "success")
     end
   end
-end
-
---- Collect the panel's current rendered lines for the history snapshot.
-local function buffer_lines()
-  local b = buffer.buf()
-  if b and vim.api.nvim_buf_is_valid(b) then
-    return vim.api.nvim_buf_get_lines(b, 0, -1, false)
-  end
-  return {}
 end
 
 --- Run the entry under the cursor, or the visual selection.
