@@ -245,6 +245,53 @@ local function setup_browser_buffer()
   if k then vim.keymap.set("n", k, search_filter, opts) end
   k = config.get_keymap("redis_browser", "close", "q")
   if k then vim.keymap.set("n", k, function() M.close() end, opts) end
+
+  --- P1-4 write actions (delete / TTL / rename) via browser/actions.lua.
+  local actions = require("poste-redis.browser.actions")
+  --- Build the action context for the node under the cursor: enclosing db
+  --- node (for reload) + render callback.
+  local function action_ctx(node)
+    local db_node = node
+    while db_node and db_node.node_type ~= "db" do db_node = db_node.parent end
+    return { db_node = db_node, render = render_tree }
+  end
+  k = config.get_keymap("redis_browser", "delete", "d")
+  if k then
+    vim.keymap.set("n", k, function()
+      local node = current_node()
+      if not node or node.node_type ~= "key" then return end
+      actions.delete_key(node, action_ctx(node))
+    end, opts)
+  end
+  k = config.get_keymap("redis_browser", "delete_prefix", "D")
+  if k then
+    vim.keymap.set("n", k, function()
+      local node = current_node()
+      if not node or node.node_type ~= "group" then
+        vim.notify("Move to a group node to delete by prefix",
+          vim.log.levels.INFO, { title = redis_state.TITLE })
+        return
+      end
+      actions.delete_prefix(node, action_ctx(node))
+    end, opts)
+  end
+  k = config.get_keymap("redis_browser", "ttl", "t")
+  if k then
+    vim.keymap.set("n", k, function()
+      local node = current_node()
+      if not node or node.node_type ~= "key" then return end
+      actions.set_ttl(node, action_ctx(node))
+    end, opts)
+  end
+  k = config.get_keymap("redis_browser", "rename", "R")
+  if k then
+    vim.keymap.set("n", k, function()
+      local node = current_node()
+      if not node or node.node_type ~= "key" then return end
+      actions.rename_key(node, action_ctx(node))
+    end, opts)
+  end
+
   k = config.get_keymap("redis_browser", "help", "g?")
   if k then
     vim.keymap.set("n", k, function()
@@ -256,6 +303,10 @@ local function setup_browser_buffer()
         "  l     expand / first child",
         "  r     reload node",
         "  /     SCAN MATCH filter on the enclosing db",
+        "  d     delete key (confirm)",
+        "  D     delete all keys under prefix (count + confirm)",
+        "  t     show/edit TTL (secs, -1 = PERSIST)",
+        "  R     rename key (conflict-checked)",
         "  q     close browser",
       }
       vim.api.nvim_echo(lines, true, {})

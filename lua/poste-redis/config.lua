@@ -41,6 +41,10 @@ M.defaults = {
       search_filter = "/",
       close = "q",
       help = "g?",
+      delete = "d",
+      delete_prefix = "D",
+      ttl = "t",
+      rename = "R",
     },
   },
 }

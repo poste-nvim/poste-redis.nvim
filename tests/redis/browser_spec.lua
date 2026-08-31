@@ -145,12 +145,21 @@ describe("poste-redis browser e2e (live redis)", function()
     local async = require("poste-redis.browser.async")
     local session_conn = require("poste-redis.session_conn")
 
+    -- ensure the fixture keys exist (the suite may have deleted some)
+    local seeded = false
+    session_conn.execute(url, {
+      "MSET", "user:1", "alice", "user:2", "bob", "cache:a", "1", "plain", "x",
+    }, {
+      on_response = function() seeded = true end,
+    })
+    vim.wait(3000, function() return seeded end, 5)
+
     async.tree_view = true
     local db = tree.make_db_node({ db = 0 }, "browser-e2e")
     local done = false
     async.scan_keys(db, url, "browser-e2e")
     -- SCAN is async; poll for loading to finish
-    local wait_ok = vim.wait(3000, function()
+    local wait_ok = vim.wait(8000, function()
       return not db.loading and db.children ~= nil and #db.children > 0
     end, 5)
     assert.is_true(wait_ok)
@@ -186,5 +195,129 @@ describe("poste-redis browser e2e (live redis)", function()
     local joined = table.concat(lines, "\n")
     assert.is_true(joined:find("alice") ~= nil, "value not rendered: " .. joined)
     buffer.close()
+  end)
+end)
+
+describe("poste-redis browser actions e2e (live redis)", function()
+  local url = vim.env.REDIS_TEST_URL
+
+  local function live_available()
+    if not url or url == "" then return false end
+    local binary = require("poste.state").find_poste_binary()
+    if not binary or vim.fn.filereadable(binary) ~= 1 then return false end
+    local probe = io.popen('echo \'{"connection":"' .. url .. '","commands":[["PING"]]}\' | "' .. binary .. '" redis-exec 2>/dev/null')
+    if not probe then return false end
+    local out = probe:read("*a")
+    probe:close()
+    return out ~= nil and out:find("PONG") ~= nil
+  end
+
+  local ok_avail = live_available()
+
+  after_each(function()
+    require("poste-redis.session_conn").stop_all()
+  end)
+
+  it("set_ttl persists an EXPIRE through the live session", function()
+    if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
+    local actions = require("poste-redis.browser.actions")
+    local tree = require("poste-redis.browser.tree")
+    local session_conn = require("poste-redis.session_conn")
+
+    -- stub the input dialog to answer 500
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb) cb("500") end
+
+    local node = tree.make_key_node("act:ttl", "e2e", 0, { type = "string" })
+    node.meta.url = url
+    local done = false
+    actions.set_ttl(node, {})
+    vim.wait(3000, function() return done end, 5)
+    -- verify via TTL query
+    local ttl = nil
+    session_conn.execute(url, { "TTL", "act:ttl" }, {
+      on_response = function(ev) ttl = ev.value and ev.value.value end,
+    })
+    vim.wait(3000, function() return ttl ~= nil end, 5)
+    assert.is_true(ttl ~= nil and ttl > 0 and ttl <= 500,
+      "expected TTL 1..500, got " .. tostring(ttl))
+    vim.ui.input = orig_input
+  end)
+
+  it("delete_key removes a key through the live session", function()
+    if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
+    local actions = require("poste-redis.browser.actions")
+    local tree = require("poste-redis.browser.tree")
+    local session_conn = require("poste-redis.session_conn")
+
+    -- seed the key
+    local seeded = false
+    session_conn.execute(url, { "SET", "act:del", "v" }, {
+      on_response = function() seeded = true end,
+    })
+    vim.wait(3000, function() return seeded end, 5)
+
+    local orig_confirm = vim.fn.confirm
+    vim.fn.confirm = function() return 1 end  -- Yes
+    local node = tree.make_key_node("act:del", "e2e", 0, { type = "string" })
+    node.meta.url = url
+    local done = false
+    actions.delete_key(node, { render = function() done = true end })
+    vim.wait(3000, function() return done end, 5)
+    vim.fn.confirm = orig_confirm
+
+    -- verify gone
+    local exists = nil
+    session_conn.execute(url, { "EXISTS", "act:del" }, {
+      on_response = function(ev) exists = ev.value and ev.value.value end,
+    })
+    vim.wait(3000, function() return exists ~= nil end, 5)
+    assert.equals(0, exists, "key act:del should be gone")
+  end)
+
+  it("rename_key renames with EXISTS check through the live session", function()
+    if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
+    local actions = require("poste-redis.browser.actions")
+    local tree = require("poste-redis.browser.tree")
+    local session_conn = require("poste-redis.session_conn")
+
+    -- idempotent seed: clear both names, then create act:ren
+    local seeded = false
+    session_conn.execute(url, { "DEL", "act:ren", "act:ren2" }, {
+      on_response = function()
+        session_conn.execute(url, { "SET", "act:ren", "v" }, {
+          on_response = function() seeded = true end,
+        })
+      end,
+    })
+    vim.wait(3000, function() return seeded end, 5)
+
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb) cb("act:ren2") end
+    local node = tree.make_key_node("act:ren", "e2e", 0, { type = "string" })
+    node.meta.url = url
+    local done = false
+    actions.rename_key(node, { render = function() done = true end })
+    vim.wait(3000, function() return done end, 5)
+    vim.ui.input = orig_input
+
+    -- verify new key exists, old gone
+    local old_v, new_v = nil, nil
+    session_conn.execute(url, { "EXISTS", "act:ren" }, {
+      on_response = function(ev) old_v = ev.value and ev.value.value end,
+    })
+    session_conn.execute(url, { "EXISTS", "act:ren2" }, {
+      on_response = function(ev) new_v = ev.value and ev.value.value end,
+    })
+    vim.wait(3000, function() return old_v ~= nil and new_v ~= nil end, 5)
+    assert.equals(0, old_v, "old key should be gone")
+    assert.equals(1, new_v, "new key should exist")
+
+    -- cleanup
+    local cleaned = false
+    session_conn.execute(url, { "DEL", "act:ren2" }, {
+      on_response = function() cleaned = true end,
+    })
+    vim.wait(3000, function() return cleaned end, 5)
   end)
 end)
