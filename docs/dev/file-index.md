@@ -35,6 +35,7 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 | `tree.lua` | Node model (connection → db → group → key), flatten + highlights, `get_node_at_line` |
 | `async.lua` | SCAN cursor batching (`config.scan_count`), MATCH filter, `:`-prefix grouping (tree view) / flat view, epoch stale guard; `load_connections`, `fetch_dbs` (DBSIZE probe) |
 | `value.lua` | TYPE-first value rendering into the result panel (string/hash/list/set/zset/stream, bounded samples) |
+| `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate |
 | `init.lua` | `poste://redis_browser` side split, keymaps, `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 
 ### Configuration & connections
@@ -69,7 +70,8 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 | `redis/format_spec.lua` | value rendering incl. binary / truncated / CJK |
 | `redis/exec_run_spec.lua` | transport contract (stubbed `poste.cli`), stale-guard, USE grouping |
 | `redis/session_conn_spec.lua` | M2 session pool (stubbed jobstart): start args, reuse, seq pairing, error routing, exit drops session, cleanup_buf, db auto-SELECT, chunk-split stdout |
-| `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/tree toggle, value fetch commands + live-redis e2e (SCAN groups, value render) |
+| `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/tree toggle, value fetch commands + live-redis e2e (SCAN groups, value render, TTL/DEL/RENAME) |
+| `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |
@@ -87,7 +89,6 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 
 | Area | Status |
 |------|--------|
-| browser polish: P1-2 cancel, tree-view nesting >1 level, P1-4 TTL/delete/rename | not started |
-| value viewer pagination (HSCAN/SCAN for 10k-field collections), large-string full load | not started |
+| value viewer pagination (HSCAN/SCAN for 10k-field collections), large-string full load (P1-3 full) | not started |
 | tree-sitter grammar | not started |
 | write ops / command palette / completion / export | not started |
