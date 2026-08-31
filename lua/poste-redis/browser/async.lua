@@ -144,23 +144,14 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
     session_conn.execute(conn_url, cmd, {
       on_response = function(ev)
         if node.epoch ~= epoch then return end
-        -- redis_value_to_json renders SCAN's [cursor, keys[]] reply as
-        -- {type:"list", value:[cursor, [keys...]]}
+        -- redis_value_to_json renders SCAN's [cursor, keys[]] reply with the
+        -- cursor surfaced in `value.cursor` and the keys in `value.value`
+        -- (redis_executor.rs SCAN-family branch).
         local v = ev.value
-        local arr = v and v.value
-        local new_cursor = "0"
-        local keys = {}
-        if type(arr) == "table" then
-          new_cursor = tostring(arr[1] or "0")
-          local klist = arr[2]
-          if type(klist) == "table" then
-            for _, k in ipairs(klist) do
-              if type(k) == "string" then keys[#keys + 1] = k end
-            end
-          end
-        end
+        local keys = v and v.value or {}
+        local new_cursor = (v and v.cursor) or "0"
         for _, k in ipairs(keys) do
-          all_keys[#all_keys + 1] = k
+          if type(k) == "string" then all_keys[#all_keys + 1] = k end
         end
         build_children(node, all_keys, conn_name, db)
         schedule_render()

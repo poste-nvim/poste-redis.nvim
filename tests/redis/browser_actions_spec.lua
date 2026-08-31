@@ -23,10 +23,10 @@ describe("poste-redis browser actions", function()
       -- auto-respond so chains make progress
       if cbs and cbs.on_response then
         vim.schedule(function()
-          -- SCAN estimate → keys array; DEL → count; TTL/EXISTS → value
+          -- SCAN estimate → keys array + cursor; DEL → count; TTL/EXISTS → value
           local name = (cmd[1] or ""):upper()
           if name == "SCAN" then
-            cbs.on_response({ value = { value = { "0", { "user:1", "user:2" } } } })
+            cbs.on_response({ value = { value = { "user:1", "user:2" }, cursor = "0" } })
           elseif name == "DEL" then
             cbs.on_response({ value = { value = #cmd - 1 } })
           elseif name == "TTL" then

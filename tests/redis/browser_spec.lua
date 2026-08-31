@@ -151,19 +151,21 @@ describe("poste-redis browser e2e (live redis)", function()
       "MSET", "user:1", "alice", "user:2", "bob", "cache:a", "1", "plain", "x",
     }, {
       on_response = function() seeded = true end,
-    })
+    }, nil, { db = 0 })
     vim.wait(3000, function() return seeded end, 5)
 
     async.tree_view = true
     local db = tree.make_db_node({ db = 0 }, "browser-e2e")
     local done = false
     async.scan_keys(db, url, "browser-e2e")
-    -- SCAN is async; poll for loading to finish
-    local wait_ok = vim.wait(8000, function()
-      return not db.loading and db.children ~= nil and #db.children > 0
-    end, 5)
-    assert.is_true(wait_ok)
-    assert.is_true(#db.children >= 2, "expected user:/cache: groups, got " .. #db.children)
+    -- SCAN is async; poll for loading to finish (generous window: session
+    -- start + first SCAN round-trip)
+    local wait_ok = vim.wait(10000, function()
+      return not db.loading
+    end, 10)
+    assert.is_true(wait_ok, "scan did not finish in 10s")
+    assert.is_true(db.children ~= nil and #db.children >= 2,
+      "expected user:/cache: groups, got " .. (db.children and #db.children or "nil"))
     local names = {}
     for _, ch in ipairs(db.children) do
       if ch.node_type == "group" then

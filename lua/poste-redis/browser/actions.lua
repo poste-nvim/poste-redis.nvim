@@ -100,34 +100,33 @@ function M.delete_prefix(node, ctx)
   -- Estimate matching keys with SCAN MATCH prefix:*
   session_conn.execute(url, { "SCAN", "0", "MATCH", prefix .. ":*", "COUNT", "1000" }, {
     on_response = function(ev)
-      local arr = ev.value and ev.value.value
-      local keys = {}
-      if type(arr) == "table" and type(arr[2]) == "table" then
-        for _, k in ipairs(arr[2]) do
-          if type(k) == "string" then keys[#keys + 1] = k end
-        end
+      -- SCAN reply: {type, value: keys[], cursor} (redis_executor SCAN branch)
+      local keys = ev.value and ev.value.value or {}
+      local key_list = {}
+      for _, k in ipairs(keys) do
+        if type(k) == "string" then key_list[#key_list + 1] = k end
       end
-      local question = ("Delete %d key(s) matching  %s:*  ?"):format(#keys, prefix)
+      local question = ("Delete %d key(s) matching  %s:*  ?"):format(#key_list, prefix)
       if not confirm(question) then
         notify("Deletion cancelled")
         return
       end
       -- delete one by one via DEL (no Lua scripting in M2 scope)
       local function del_next(i)
-        if i > #keys then
-          notify(("Deleted %d key(s) under %s:*"):format(#keys, prefix))
+        if i > #key_list then
+          notify(("Deleted %d key(s) under %s:*"):format(#key_list, prefix))
           reload(db_node, ctx.render)
           return
         end
-        session_conn.execute(url, { "DEL", keys[i] }, {
+        session_conn.execute(url, { "DEL", key_list[i] }, {
           on_response = function() del_next(i + 1) end,
           on_error = function(msg)
-            notify(("DEL %s failed: %s"):format(keys[i], tostring(msg)), vim.log.levels.ERROR)
+            notify(("DEL %s failed: %s"):format(key_list[i], tostring(msg)), vim.log.levels.ERROR)
             del_next(i + 1)
           end,
         }, nil, { db = db })
       end
-      if #keys > 0 then del_next(1) end
+      if #key_list > 0 then del_next(1) end
     end,
     on_error = function(msg)
       notify("SCAN estimate failed: " .. tostring(msg), vim.log.levels.ERROR)
