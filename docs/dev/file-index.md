@@ -22,11 +22,20 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 |------|------|
 | `parser.lua` | **The only parser (D1)**: `extract_entries` (continuations joined, quote-aware comments, `USE`), `cursor_entry`, `visual_entries`, `file_entries`, `entry_args` |
 | `exec_run.lua` | `run_async` (stdin JSON → `poste redis-exec` → NDJSON events), `run_file_async` (USE grouping, sequential batches), `run_sync`, `run_selection_async`, stale-guard + busy bookkeeping |
-| `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`list`; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests |
+| `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`list`; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests; `opts.db` auto-SELECTs on db change |
 | `runner.lua` | `<CR>` / `:PosteRedisRunFile` entry: connects exec_run → buffer → history, spinner indicators |
 | `format.lua` | `format_result` (nil/int/string/binary/list/hash/zset/stream/unknown), `format_error`, `preview_json`, `status_summary` |
 | `buffer.lua` | M1 result panel (D2): `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`, `K` raw JSON float, `q` close, `yy` yank |
 | `history.lua` | In-memory execution history + float list (j/k/CR/q) |
+
+### Key browser (`browser/`)
+
+| File | Role |
+|------|------|
+| `tree.lua` | Node model (connection → db → group → key), flatten + highlights, `get_node_at_line` |
+| `async.lua` | SCAN cursor batching (`config.scan_count`), MATCH filter, `:`-prefix grouping (tree view) / flat view, epoch stale guard; `load_connections`, `fetch_dbs` (DBSIZE probe) |
+| `value.lua` | TYPE-first value rendering into the result panel (string/hash/list/set/zset/stream, bounded samples) |
+| `init.lua` | `poste://redis_browser` side split, keymaps, `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 
 ### Configuration & connections
 
@@ -59,7 +68,8 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 | `redis/toml_spec.lua` | vendored parser (sections, escapes, errors) |
 | `redis/format_spec.lua` | value rendering incl. binary / truncated / CJK |
 | `redis/exec_run_spec.lua` | transport contract (stubbed `poste.cli`), stale-guard, USE grouping |
-| `redis/session_conn_spec.lua` | M2 session pool (stubbed jobstart): start args, reuse, seq pairing, error routing, exit drops session, cleanup_buf, chunk-split stdout |
+| `redis/session_conn_spec.lua` | M2 session pool (stubbed jobstart): start args, reuse, seq pairing, error routing, exit drops session, cleanup_buf, db auto-SELECT, chunk-split stdout |
+| `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/tree toggle, value fetch commands + live-redis e2e (SCAN groups, value render) |
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |
@@ -77,7 +87,7 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 
 | Area | Status |
 |------|--------|
-| `browser/` key browser | not started |
-| value viewer / large-key navigation | not started |
+| browser polish: P1-2 cancel, tree-view nesting >1 level, P1-4 TTL/delete/rename | not started |
+| value viewer pagination (HSCAN/SCAN for 10k-field collections), large-string full load | not started |
 | tree-sitter grammar | not started |
 | write ops / command palette / completion / export | not started |
