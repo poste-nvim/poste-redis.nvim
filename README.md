@@ -4,10 +4,10 @@ Redis for Neovim in the [Poste](https://github.com/beyondlex/poste.nvim) plugin 
 write Redis commands in a `.redis` buffer, hit `<CR>`, and read the results in a result
 panel. A key browser follows as the second milestone.
 
-**Status: work in progress (M1 — file execution loop).** See
+**Status: M1 complete (file execution loop).** See
 [requirements.md](requirements.md) and [EXECUTION-PLAN.md](EXECUTION-PLAN.md).
 
-## Install (once M1 lands)
+## Install
 
 With lazy.nvim:
 
@@ -27,7 +27,7 @@ dialect = "redis"
 url = "redis://:{{REDIS_PASS}}@127.0.0.1:6379/0"
 ```
 
-## Usage (planned M1)
+## Usage
 
 ```redis
 USE my-redis
@@ -37,6 +37,16 @@ GET session:abc
 
 `<CR>` executes the command under the cursor; results render in a result panel;
 `:PosteRedisHistory` shows past runs.
+
+## Next
+
+Planned follow-ups are the M2/P2 items from `requirements.md`:
+
+1. Redis key browser
+2. `redis-session` long-lived transport
+3. Value viewer and larger-key navigation
+4. Tree-sitter grammar and highlighting
+5. Write operations, command palette, completion, and export tooling
 
 ## License
 

@@ -3,6 +3,9 @@
 > 本文档是 **AI agent 可独立执行的工作单**，只覆盖 M1（文件执行闭环）。
 > 阅读顺序：`requirements.md`（为什么）→ 本文档（怎么干）→ 各仓库 AGENTS.md（仓库规矩）。
 > 与 requirements.md 冲突时以本文档为准（更具体、更新）。
+>
+> 现状：M1 已在本仓库实现并通过 `tests/run.sh`；本文保留为执行记录和 M2/P2
+> 后续 backlog 的来源。
 
 ---
 
@@ -221,6 +224,8 @@ db = 0                      # 可选，默认 0
 
 ## 7. M1 任务分解（顺序执行，每项完成即 commit）
 
+> 这一节是历史任务拆分记录。M1 已完成，后续按 `requirements.md` 的 P1/P2 推进。
+
 | # | 工作项 | 产出 | 验证 |
 |---|--------|------|------|
 | 1 | 仓库脚手架（§1 清单） | 全部模板文件 | `tests/run.sh` 空跑通过 |
@@ -260,3 +265,21 @@ db = 0                      # 可选，默认 0
 3. 不把密码写进任何持久化文件、日志、历史记录
 4. 主线程零阻塞：一切 IO 回调化；stale 一律 epoch/seq 丢弃；busy 状态每条 early-return 必清
 5. 危险命令（FLUSHALL/FLUSHDB/SHUTDOWN）M1 就在 parser 层标记（结果面板黄色提示），黑名单拦截在 P2 完整实现
+
+---
+
+## 10. 后续 TODO（整理版）
+
+### M2
+
+- `browser/` 键浏览器
+- `redis-session` 长驻传输
+- 值查看与大 key 导航
+- tree-sitter grammar / highlights / install.lua
+
+### P2
+
+- 值编辑与写操作确认
+- 命令面板与危险命令黑名单
+- completion（命令、连接名、key 前缀）
+- 导出 JSON / 回放脚本

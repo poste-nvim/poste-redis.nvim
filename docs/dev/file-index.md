@@ -1,7 +1,7 @@
 # poste-redis.nvim — File Index
 
-M1 file execution loop (exec-file transport). M2+ work (browser, session,
-value panel) is stubbed/absent — see `requirements.md`.
+M1 file execution loop is complete in this repo. M2+ work (browser, session,
+value panel) is not started yet — see `requirements.md`.
 
 ## Entry points
 
@@ -68,3 +68,13 @@ value panel) is stubbed/absent — see `requirements.md`.
 |------|------|
 | `crates/poste-exec/src/redis_executor.rs` | `execute_commands_with`, `redis_value_to_json` (len/truncated), `parse_shell_args` |
 | `crates/poste-cli/src/redis_exec.rs` | `poste redis-exec`: stdin `{connection, commands}` → NDJSON events |
+
+## Next TODO
+
+| Area | Status |
+|------|--------|
+| `browser/` key browser | not started |
+| `redis-session` transport | not started |
+| value viewer / large-key navigation | not started |
+| tree-sitter grammar | not started |
+| write ops / command palette / completion / export | not started |
