@@ -139,7 +139,9 @@ function M.render(results, opts)
   end
   last_value = tabs[active].meta.value
   if opts.render ~= false then
-    M.show_panel()
+    -- Execution results open the panel without stealing focus from the
+    -- request buffer; only explicit navigation (history replay) focuses it.
+    M.show_panel(false)
     render_active()
   end
 end
@@ -162,9 +164,12 @@ end
 -----------------------------------------------------------------------
 
 --- Open (or re-focus) the panel in a bottom horizontal split.
-function M.show_panel()
+--- @param enter boolean|nil  move focus to the panel (default true)
+function M.show_panel(enter)
   if M.is_open() then
-    pcall(vim.api.nvim_set_current_win, win)
+    if enter ~= false then
+      pcall(vim.api.nvim_set_current_win, win)
+    end
     return
   end
   buf = vim.api.nvim_create_buf(false, true)
@@ -179,7 +184,7 @@ function M.show_panel()
     constants.RESULT_MIN_HEIGHT,
     math.floor(vim.o.lines * constants.RESULT_HEIGHT_RATIO)
   )
-  win = vim.api.nvim_open_win(buf, true, {
+  win = vim.api.nvim_open_win(buf, enter ~= false, {
     split = "below",
     height = height,
   })

@@ -22,8 +22,16 @@ end
 --- Render a batch of results into the panel and push one history entry.
 --- @param results table[] result events
 --- @param summaries table[] summary events
---- @param opts table { connection = string }
+--- @param opts table { connection = string, src = number, line_0 = number }
 local function present(results, summaries, opts)
+  opts = opts or {}
+  -- Resolve the indicator target on the request buffer before the panel
+  -- steals focus; looking up the current buffer after render targets signs
+  -- at the result panel instead of the executed statement.
+  local src = opts.src or vim.api.nvim_get_current_buf()
+  local line_0 = opts.line_0
+  if line_0 == nil then line_0 = vim.fn.line(".") - 1 end
+
   buffer.render(results, { render = true })
   local first = results[1]
   local any_failed = false
@@ -40,14 +48,14 @@ local function present(results, summaries, opts)
     error = any_failed,
     lines = buffer_lines(),
   })
-  -- indicator: clear any running spinner (M1: no per-line spinner in panel)
-  local src = vim.api.nvim_get_current_buf()
+  -- indicator: replace the running spinner with the result icon on the
+  -- request line's sign column (never inside the result panel)
   local ok, indicators = pcall(require, "poste.indicators")
-  if ok then
+  if ok and src and line_0 then
     if any_failed then
-      indicators.set_indicator(src, vim.fn.line(".") - 1, "error")
+      indicators.set_indicator(src, line_0, "error")
     else
-      indicators.set_indicator(src, vim.fn.line(".") - 1, "success")
+      indicators.set_indicator(src, line_0, "success")
     end
   end
 end
@@ -56,6 +64,7 @@ end
 --- @param mode "cursor"|"visual"
 function M.run_selection(mode)
   local src = vim.api.nvim_get_current_buf()
+  local start_line = vim.fn.line(".") - 1
   local binary = state.find_poste_binary()
   if not binary then
     vim.notify("poste binary not found — build poste.nvim (cargo build --release)",
@@ -70,14 +79,14 @@ function M.run_selection(mode)
   exec_run.run_selection_async(src, mode, {}, {
     on_start = function(seq, _)
       local ok, indicators = pcall(require, "poste.indicators")
-      if ok then indicators.set_indicator(src, vim.fn.line(".") - 1, "running") end
+      if ok then indicators.set_indicator(src, start_line, "running") end
     end,
     on_error = function(msg, _stderr)
       vim.notify(msg, vim.log.levels.ERROR, { title = constants.TITLE })
     end,
     on_done = function(results, summaries)
       local conn = exec_run._connection_for(src)
-      present(results, summaries, { connection = conn })
+      present(results, summaries, { connection = conn, src = src, line_0 = start_line })
     end,
   })
 end
@@ -85,6 +94,7 @@ end
 --- Run the whole file, honoring USE, rendering all results.
 function M.run_file()
   local src = vim.api.nvim_get_current_buf()
+  local start_line = vim.fn.line(".") - 1
   local binary = state.find_poste_binary()
   if not binary then
     vim.notify("poste binary not found — build poste.nvim (cargo build --release)",
@@ -106,7 +116,7 @@ function M.run_file()
     end,
     on_done = function(results, summaries)
       local conn = exec_run._connection_for(src)
-      present(results, summaries, { connection = conn })
+      present(results, summaries, { connection = conn, src = src, line_0 = start_line })
     end,
   })
 end
