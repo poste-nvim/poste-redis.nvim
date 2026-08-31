@@ -353,6 +353,8 @@ end
 --- @return number|nil seq
 function M.run_selection_async(buf, mode, opts, callbacks)
   opts = opts or {}
+  callbacks = callbacks or {}
+  local my_seq = exec_seq
   local entries
   if mode == "visual" then
     entries = parser.visual_entries(buf)
@@ -361,16 +363,18 @@ function M.run_selection_async(buf, mode, opts, callbacks)
     entries = e and { e } or {}
   end
   if #entries == 0 then
-    guarded(exec_seq + 1, callbacks.on_error, "No command at cursor", "")()
+    guarded(my_seq, callbacks.on_error, "No command at cursor", "")()
     return nil
   end
-  local connection = opts.connection
-  if not connection then
+  if not opts.connection then
     -- fall back to the current context / the first USE in the file
-    connection = M._connection_for(buf)
+    local url, name = M._connection_for(buf)
+    if url then
+      opts = vim.tbl_extend("keep", opts, { connection = url, connection_name = name })
+    end
   end
-  if not connection then
-    guarded(exec_seq + 1, callbacks.on_error,
+  if not opts.connection then
+    guarded(my_seq, callbacks.on_error,
       "No connection resolved — run :PosteRedisConnection or add a USE line", "")()
     return nil
   end

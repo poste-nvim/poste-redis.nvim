@@ -264,6 +264,58 @@ describe("poste-redis exec_run", function()
     vim.api.nvim_buf_delete(src, { force = true })
   end)
 
+  it("run_selection_async resolves connection from USE when opts omit it", function()
+    stub_emit({})
+    local connections = require("poste-redis.connections")
+    local orig_resolve = connections.resolve_redis_url
+    connections.resolve_redis_url = function(name)
+      return "redis://" .. name .. ":6379/0", nil
+    end
+    local redis_state = require("poste-redis.state")
+    redis_state.current_url = nil
+
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE srv", "GET k" })
+    vim.api.nvim_set_current_buf(src)
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    local errs = {}
+    exec_run.run_selection_async(src, "cursor", {}, {
+      on_error = function(m) errs[#errs + 1] = m end,
+    })
+    assert.truthy(emitted)
+    local payload = vim.json.decode(emitted.stdin)
+    assert.equals("redis://srv:6379/0", payload.connection)
+    assert.same({ { "GET", "k" } }, payload.commands)
+    assert.equals(0, #errs)
+    connections.resolve_redis_url = orig_resolve
+    redis_state.current_url = nil
+    vim.api.nvim_buf_delete(src, { force = true })
+    exec_run.cancel()
+  end)
+
+  it("run_selection_async reports when no connection can be resolved", function()
+    stub_emit({})
+    local connections = require("poste-redis.connections")
+    local orig_resolve = connections.resolve_redis_url
+    connections.resolve_redis_url = function(_name) return nil, "boom" end
+    local redis_state = require("poste-redis.state")
+    redis_state.current_url = nil
+
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE srv", "GET k" })
+    vim.api.nvim_set_current_buf(src)
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    local errs = {}
+    exec_run.run_selection_async(src, "cursor", {}, {
+      on_error = function(m) errs[#errs + 1] = m end,
+    })
+    assert.equals(1, #errs)
+    assert.match("No connection", errs[1])
+    connections.resolve_redis_url = orig_resolve
+    redis_state.current_url = nil
+    vim.api.nvim_buf_delete(src, { force = true })
+  end)
+
   it("group_by_connection reports a bare USE", function()
     local entries = parser.extract_entries("USE\n")
     local groups = exec_run.group_by_connection(entries, function() return "redis://a:6379/0" end)
