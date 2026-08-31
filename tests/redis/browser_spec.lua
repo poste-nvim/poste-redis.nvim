@@ -201,6 +201,14 @@ describe("poste-redis browser e2e (live redis)", function()
     local tree = require("poste-redis.browser.tree")
     local value = require("poste-redis.browser.value")
     local buffer = require("poste-redis.buffer")
+    local session_conn = require("poste-redis.session_conn")
+
+    -- self-seed (the suite may run against a clean db)
+    local seeded = false
+    session_conn.execute(url, { "SET", "user:1", "alice", "EX", "300" }, {
+      on_response = function() seeded = true end,
+    }, nil, { db = 0 })
+    vim.wait(3000, function() return seeded end, 5)
 
     local node = tree.make_key_node("user:1", "browser-e2e", 0, { type = "string" })
     node.meta.url = url
@@ -220,6 +228,16 @@ describe("poste-redis browser e2e (live redis)", function()
     local tree = require("poste-redis.browser.tree")
     local value = require("poste-redis.browser.value")
     local buffer = require("poste-redis.buffer")
+    local session_conn = require("poste-redis.session_conn")
+
+    -- self-seed hash fixture
+    local seeded = false
+    session_conn.execute(url, {
+      "HSET", "user:3", "name", "carol", "age", "30",
+    }, {
+      on_response = function() seeded = true end,
+    }, nil, { db = 0 })
+    vim.wait(3000, function() return seeded end, 5)
 
     local node = tree.make_key_node("user:3", "browser-e2e", 0, { type = "hash" })
     node.meta.url = url
@@ -261,6 +279,13 @@ describe("poste-redis browser actions e2e (live redis)", function()
     local actions = require("poste-redis.browser.actions")
     local tree = require("poste-redis.browser.tree")
     local session_conn = require("poste-redis.session_conn")
+
+    -- self-seed the key (suite may run against a clean db)
+    local seeded = false
+    session_conn.execute(url, { "SET", "act:ttl", "v", "EX", "100" }, {
+      on_response = function() seeded = true end,
+    }, nil, { db = 0 })
+    vim.wait(3000, function() return seeded end, 5)
 
     -- stub the input dialog to answer 500
     local orig_input = vim.ui.input
