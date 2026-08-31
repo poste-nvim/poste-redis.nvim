@@ -34,7 +34,7 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 |------|------|
 | `tree.lua` | Node model (connection → db → group → key), flatten + highlights, `get_node_at_line` |
 | `async.lua` | SCAN cursor batching (`config.scan_count`), MATCH filter, `:`-prefix grouping (tree view) / flat view, epoch stale guard; `load_connections`, `fetch_dbs` (DBSIZE probe) |
-| `value.lua` | TYPE-first value rendering into the result panel (string/hash/list/set/zset/stream, bounded samples) |
+| `value.lua` | TYPE-first paginated value viewer: HSCAN/SSCAN/ZSCAN pages, LRANGE windows, XRANGE, string GET (truncated + `F` full load); page tabs + loaded/total footer |
 | `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate |
 | `init.lua` | `poste://redis_browser` side split, keymaps, `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 
@@ -54,9 +54,11 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 |------|------|
 | `buffer_setup.lua` | Source-buffer keymaps (run n+v, history, help float) |
 | `autocmds.lua` | `FileType poste_redis` wiring + `setup_existing_buffers` |
-| `commands.lua` | `:PosteRedisConnection` / `:PosteRedisRunFile` / `:PosteRedisHistory` / `:PosteRedisInfo` |
+| `commands.lua` | `:PosteRedisConnection` / `:PosteRedisRunFile` / `:PosteRedisHistory` / `:PosteRedisInfo` / `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 | `health.lua` | `:checkhealth poste-redis` |
 | `highlights.lua` | `PosteRedis*` groups (source + result panel + history) |
+| `treesitter.lua` | **M2 P1-6**: parser availability probe, enable/disable with regex fallback |
+| `install.lua` | **M2 P1-6**: compile tree-sitter-poste-redis/src/parser.c into `stdpath("data")/site/parser` (needs cc; silent no-op otherwise) |
 | `util.lua` | `redact_url`, `display_width`, `truncate_display`, `pad_*`, `escape_for_line`, `format_latency` |
 
 ## Tests (`tests/`)
@@ -70,7 +72,7 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 | `redis/format_spec.lua` | value rendering incl. binary / truncated / CJK |
 | `redis/exec_run_spec.lua` | transport contract (stubbed `poste.cli`), stale-guard, USE grouping |
 | `redis/session_conn_spec.lua` | M2 session pool (stubbed jobstart): start args, reuse, seq pairing, error routing, exit drops session, cleanup_buf, db auto-SELECT, chunk-split stdout |
-| `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/tree toggle, value fetch commands + live-redis e2e (SCAN groups, value render, TTL/DEL/RENAME) |
+| `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/tree toggle, value page commands + live-redis e2e (SCAN groups, string/hash value render, TTL/DEL/RENAME) |
 | `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
@@ -89,6 +91,5 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 
 | Area | Status |
 |------|--------|
-| value viewer pagination (HSCAN/SCAN for 10k-field collections), large-string full load (P1-3 full) | not started |
-| tree-sitter grammar | not started |
-| write ops / command palette / completion / export | not started |
+| M2 exit: 100k-key acceptance script (P1-1 first-screen < 300ms) | in progress |
+| write ops / command palette / completion / export (P2) | not started |
