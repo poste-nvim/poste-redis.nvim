@@ -1,0 +1,35 @@
+# ── rendering.redis ── 值渲染专项（五种形态 + 二进制 + 大值 + stream）──
+# 手动测试点：逐条 <CR> 看面板渲染；K 预览原始 JSON；yy 复制当前 tab
+# 提示：M1 每次执行独立进程，同一文件里的 SET/DEL 顺序执行，最后一行清理
+
+USE local
+
+# ── 二进制值：非 UTF-8 字节应渲染为 hex 摘要 + 字节数 ──
+# 直接写 "\xff" 会按字面发送（合法 UTF-8，不会触发 binary）；用 EVAL 构造真字节：
+EVAL "return string.char(255,254,0,72,105)" 0
+
+# ── 大 String：>64KB 应截断并显示 truncated ──
+# 下面这条一次性写入 70KB（手动把 a 的数量凑到 70000，或直接用 EVAL+SETRANGE）：
+# SETRANGE big-value 0 "aaaa....(70000 个)"
+SET big-value "small-for-now"
+GET big-value
+
+# ── 空集合渲染：应为 (empty list)/(empty hash) 等 ──
+LRANGE empty-list 0 -1
+SMEMBERS empty-set
+HGETALL empty-hash
+ZRANGE empty-zset 0 -1
+
+# ── stream：id + fields 渲染 ──
+XADD stream:events 1690000000000-0 to "a@b.c" tpl "welcome"
+XADD stream:events 1690000001000-0 to "d@e.f" tpl "reminder"
+XRANGE stream:events - +
+
+# ── 整数 / 状态 ──
+INCR visits
+SET counter 41
+INCR counter
+GET counter
+
+# ── 清理 ──
+DEL binary-key big-value empty-list empty-set empty-hash empty-zset stream:events visits counter

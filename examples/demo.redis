@@ -1,0 +1,43 @@
+# ── demo.redis ── 需求文档 §3.1 的完整示例 ──────────────────────────────
+# 手动测试：光标任一行 <CR> 执行；:PosteRedisRunFile 整文件跑（逐命令一个 tab）
+
+# ── 连接与库 ──────────────────────────────
+USE local              # 切换到 connections.toml 里的 local 连接
+SELECT 3               # 真·Redis 命令：切 db（M1 exec 模式，每次独立进程）
+
+# ── String ──
+SET session:abc "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0" EX 3600
+GET session:abc
+GET missing:key          # 应为 (nil)
+
+# ── Hash：长命令用 \ 续行 ──
+HSET user:42 name "Alice" \
+      email "alice@example.com" \
+      age 30
+HGETALL user:42          # 渲染为 field/value 表
+
+# ── List ──
+RPUSH queue:jobs "job-1" "job-2" "job-3"
+LRANGE queue:jobs 0 -1   # 编号列表
+
+# ── Set ──
+SADD tags:dev vim lua redis
+SMEMBERS tags:dev
+
+# ── ZSet ──
+ZADD board 99 alice 87 bob
+ZREVRANGE board 0 -1 WITHSCORES   # member/score 表
+
+# ── 整数 / 状态 ──
+INCR counter:hits
+EXISTS session:abc       # 1 / 0
+
+# ── 引号规则：双引号（JSON 兼容转义）、单引号、裸词；引号内 # 不算注释 ──
+LPUSH queue:email '{"to":"a@b.c","tpl":"welcome"}'   # 单引号字面量
+SET note "this # is inside quotes"
+SET plain bareword
+GET note
+GET plain
+
+# ── 清理：危险命令（M1 提示黄色警告，不拦截） ──
+DEL user:42 queue:jobs tags:dev board counter:hits note plain queue:email

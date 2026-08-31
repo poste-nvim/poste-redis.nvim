@@ -1,0 +1,25 @@
+# poste-redis 手动测试连接配置
+# 启动本地 redis：cd playground && docker compose up -d
+# 打开任意 examples/*.redis，光标命令行 <CR> 执行；:PosteRedisRunFile 整文件跑
+
+[local]
+dialect = "redis"
+url = "redis://127.0.0.1:16479/0"
+
+[local-db2]
+dialect = "redis"
+url = "redis://127.0.0.1:16479/1"
+
+# 分字段形式（url 缺省时拼接）—— 取消注释启用
+# [local-fields]
+# dialect = "redis"
+# host = "127.0.0.1"
+# port = 16479
+# db = 0
+
+# 带密码示例（{{REDIS_PASS}} 从 .env / 环境变量展开，密码不进日志）
+# [secure]
+# dialect = "redis"
+# host = "127.0.0.1"
+# port = 16379
+# password = "{{REDIS_PASS}}"
