@@ -1,0 +1,72 @@
+# poste-redis.nvim
+
+Independent Redis plugin for Poste. Depends on [poste.nvim](https://github.com/beyondlex/poste.nvim)
+for shared infra (`poste.state`, `poste.cli`, `poste.select`, `poste.indicators`) and the
+`poste redis-exec` Rust subcommand (M1 transport).
+
+## Key Facts
+
+- All Lua lives under `lua/poste-redis/`
+- Requires `poste.nvim` on rtp — `require("poste.state")` must succeed
+- Red line: NO `require("poste-db.*")` / `require("poste-http.*")` — every
+  "reuse" is a copied pattern, vendored, or a shared `poste.*` module
+- `poste-redis` / `poste_redis` = the plugin; `poste_redis` = ONLY the filetype
+  (mirrors poste-db's naming convention)
+- `plugin/poste-redis.lua` calls `require("poste-redis.init").setup()`
+- `ftdetect/poste_redis.vim` sets the `poste_redis` filetype for `*.redis`
+- M1 is exec-file only (D4): Lua parses `.redis` (D1), the Rust binary never
+  sees file text
+- `.opencode/skills/redis/SKILL.md` for agent context
+- Test harness: `tests/run.sh` (isolated XDG, plenary); live redis e2e gated on
+  `REDIS_TEST_URL` (CI runs a redis:7 service on 127.0.0.1:16479)
+
+## File Index
+
+See `docs/dev/file-index.md`.
+
+## Naming
+
+`poste-redis` = plugin/command namespace (`:PosteRedis*`).
+`poste_redis` = snake_case identifiers AND the filetype.
+Never write `poste_redis_*` as a command name; commands are `:PosteRedis*`.
+
+## Design Principles
+
+- Zero coupling to DB/HTTP satellites — no `require("poste-db...")` /
+  `require("poste.http.*")`; AI is M2+ and only `pcall(require, "poste-ai")`
+- Lua is the only parser (EXECUTION-PLAN D1); Rust receives token arrays
+- Everything Redis I/O is async via jobstart; callbacks pcall'd + stale-guarded
+- Secrets: passwords live only in the in-memory redis URL; logs redact
+  (`util.redact_url`); never write passwords to history/files
+
+## Lua Pitfalls
+
+### `guarded(seq, cb, ...)()` — not `guarded(...)(...)`
+
+`guarded` returns a zero-arg closure; call it with a trailing `()`:
+`guarded(my_seq, cb, arg1, arg2)()`. The pattern `guarded(...)(...)` is NOT
+valid Lua (ambiguous "function call x new statement").
+
+### No `vim.schedule` inside event callbacks
+
+`on_stdout`/`on_exit` already run on the main loop. Do not wrap them in
+`vim.schedule` — a schedule added mid-`vim.wait` is not pumped in headless
+plenary runs, so test callbacks never fire. Call user callbacks directly.
+
+### `assert.is_nil` vs `assert.is_false`
+
+`string.find` returns `nil` (not `false`) on no-match. Test with
+`assert.is_nil(r:find("x"))`, not `assert.is_false`.
+
+### Local function forward declaration
+
+A `local function B() end` is only visible after its definition. If an earlier
+function A calls B, forward-declare `local B` first (same rule as poste-db).
+
+## References
+
+| Want | Go to |
+|------|-------|
+| Shared infra (state, cli, select, indicators) | `../poste.nvim/lua/poste/` |
+| Rust `redis-exec` / `redis_executor` | `../poste.nvim/crates/poste-cli/src/redis_exec.rs`, `crates/poste-exec/src/redis_executor.rs` |
+| Requirements / execution plan | `requirements.md` / `EXECUTION-PLAN.md` |
