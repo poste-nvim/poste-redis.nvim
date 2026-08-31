@@ -18,6 +18,15 @@ function M.setup()
     require("poste-redis.history").toggle()
   end, { desc = "Toggle the request history float" })
 
+  vim.api.nvim_create_user_command("PosteRedisBrowser", function()
+    require("poste-redis.browser.init").open()
+  end, { desc = "Open the redis key browser" })
+
+  vim.api.nvim_create_user_command("PosteRedisBrowserView", function()
+    local browser = require("poste-redis.browser.init")
+    browser.toggle_view()
+  end, { desc = "Toggle browser tree/flat view" })
+
   vim.api.nvim_create_user_command("PosteRedisInfo", function()
     local state = require("poste.state")
     local redis_state = require("poste-redis.state")

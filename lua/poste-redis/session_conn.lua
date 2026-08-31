@@ -185,16 +185,31 @@ end
 --- @param command string[] pre-tokenized command, e.g. {"GET", "user:42"}
 --- @param callbacks table { on_response = fn(event), on_error = fn(msg, event?) }
 --- @param bufnr number|nil
---- @param opts table|nil { max_items, max_bytes }
+--- @param opts table|nil
+---   - max_items, max_bytes: process-level limits (start only)
+---   - db: number|nil — if set and the session is not already on that db, a
+---     SELECT is sent first so the command runs in the right database (the
+---     long-lived connection keeps SELECT state, P1-5)
 --- @return string "dispatched" | "start_failed" | "not_running"
 function M.execute(conn_url, command, callbacks, bufnr, opts)
   callbacks = callbacks or {}
+  opts = opts or {}
   local session = M.get(conn_url, bufnr, opts)
   if not session then
     return "start_failed"
   end
   if not session.alive then
     return "not_running"
+  end
+
+  -- Track + steer SELECT state on the shared connection. The first request
+  -- carries the db; later ones switch only when the db actually changes.
+  local db = opts.db
+  if db ~= nil and session.db ~= db then
+    session.db = db
+    -- Fire-and-forget SELECT; errors surface via the real command's error.
+    local sel_payload = vim.json.encode({ seq = 0, command = { "SELECT", tostring(db) } }) .. "\n"
+    pcall(vim.fn.chansend, session.job_id, sel_payload)
   end
 
   session.seq = session.seq + 1

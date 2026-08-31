@@ -126,8 +126,7 @@ describe("poste-redis session_conn", function()
   it("increments seq per request and pairs responses to their request", function()
     local session = session_conn.get(URL)
     local responses = {}
-    session_conn.execute(URL, { "GET", "a" }, {
-      on_response = function(ev) responses[#responses + 1] = ev end,
+    session_conn.execute(URL, { "GET", "a" }, {      on_response = function(ev) responses[#responses + 1] = ev end,
     })
     session_conn.execute(URL, { "GET", "b" }, {
       on_response = function(ev) responses[#responses + 1] = ev end,
@@ -148,6 +147,43 @@ describe("poste-redis session_conn", function()
     assert.equals(2, #responses)
     assert.equals("b", responses[1].value.value)
     assert.equals("a", responses[2].value.value)
+  end)
+
+  it("prepends a fire-and-forget SELECT when opts.db differs from the session db", function()
+    local session = session_conn.get(URL)
+    local responses = {}
+    session_conn.execute(URL, { "GET", "k" }, {
+      on_response = function(ev) responses[#responses + 1] = ev end,
+    }, nil, { db = 2 })
+    -- first chansend is the SELECT (seq 0), second is the real command (seq 1)
+    assert.equals(2, #fake_job.chansend)
+    local sel = vim.json.decode(fake_job.chansend[1])
+    assert.equals(0, sel.seq)
+    assert.same({ "SELECT", "2" }, sel.command)
+    local cmd = vim.json.decode(fake_job.chansend[2])
+    assert.equals(1, cmd.seq)
+    assert.same({ "GET", "k" }, cmd.command)
+
+    -- same db again: no SELECT, just the command
+    session_conn.execute(URL, { "GET", "k2" }, {
+      on_response = function() end,
+    }, nil, { db = 2 })
+    assert.equals(3, #fake_job.chansend)
+    assert.equals(2, vim.json.decode(fake_job.chansend[3]).seq)
+
+    -- db switch: SELECT again
+    session_conn.execute(URL, { "GET", "k3" }, {
+      on_response = function() end,
+    }, nil, { db = 5 })
+    assert.equals(5, #fake_job.chansend)
+    assert.same({ "SELECT", "5" }, vim.json.decode(fake_job.chansend[4]).command)
+
+    -- SELECT reply (seq 0) has no pending callback and is ignored safely
+    emit(session, { vim.json.encode({
+      type = "result", seq = 0, command = "SELECT 2", status = "OK", latency_ms = 1,
+      value = { type = "string", value = "OK" },
+    }) })
+    assert.equals(0, #responses)
   end)
 
   it("fails pending requests when the process exits and drops the session", function()
