@@ -12,9 +12,12 @@ function M.setup()
     group = group,
     pattern = "poste_redis",
     callback = function(args)
-      -- M2: try to register the tree-sitter grammar when present; regex
-      -- syntax/poste_redis.vim remains the M1 fallback and keeps working.
-      pcall(vim.treesitter.language.register, "poste_redis", "poste_redis")
+      -- M2 P1-6: enable tree-sitter highlighting when the compiled parser is
+      -- available; otherwise the M1 regex syntax stays active (fallback).
+      local treesitter = require("poste-redis.treesitter")
+      if treesitter.parser_available() then
+        treesitter.enable(args.buf)
+      end
       buffer_setup.setup_buffer_keymaps(args.buf)
     end,
   })

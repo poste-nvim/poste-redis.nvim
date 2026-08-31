@@ -14,6 +14,12 @@ function M.setup(opts)
   require("poste-redis.autocmds").setup()
   require("poste-redis.commands").setup()
   require("poste-redis.autocmds").setup_existing_buffers()
+
+  -- M2 P1-6: best-effort parser compile (silent without a C compiler; health
+  -- reports it). Deferred so plugin load never blocks on cc.
+  vim.schedule(function()
+    pcall(function() require("poste-redis.install").ensure_parsers() end)
+  end)
 end
 
 return M
