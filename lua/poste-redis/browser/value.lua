@@ -1,13 +1,15 @@
---- Redis key value viewer (M2, P1-3 baseline).
+--- Redis key value viewer (M2, P1-3 full).
 ---
---- TYPE-first rendering: query the key's type, then fetch a bounded sample
---- per type and render it through the existing result panel (format.lua +
---- buffer.lua). Large strings are truncated by redis-exec's --max-bytes;
---- pagination (HSCAN for 10k-field hashes) lands with the full P1-3.
+--- TYPE-first rendering with pagination for large collections:
+---   hash → HSCAN cursor pages, set → SSCAN, zset → ZSCAN
+---   list → LRANGE window pages, string → GET (truncated at preview_max_bytes)
+--- Each page renders as one tab in the result panel; <Tab>/<S-Tab> flip
+--- pages. The page footer shows "loaded N / total M" when the count is
+--- known. Truncated strings show the byte total and a load-full hint.
 ---
---- Runs on the persistent redis-session transport (session_conn) so the
---- SELECT db state is correct without touching the URL, and the connection
---- is reused across value views (P1-5). Async — the UI never blocks.
+--- Runs on the persistent redis-session transport (session_conn): SELECT db
+--- state is correct without touching the URL and the connection is reused
+--- (P1-5). Async — the UI never blocks.
 
 local session_conn = require("poste-redis.session_conn")
 local buffer = require("poste-redis.buffer")
@@ -17,92 +19,216 @@ local connections = require("poste-redis.connections")
 
 local M = {}
 
---- Sample size per collection type.
-local SAMPLE = 500
+--- Page size for SCAN-family / LRANGE pagination.
+local PAGE = 500
 
---- Build the fetch command for a key of the given type.
+--- View session state (one at a time; a new view replaces it).
+local view = nil
+
+--- Build the per-page fetch command for a key/type/cursor.
 --- @param key string
---- @param type string|nil  redis TYPE result (string|hash|list|set|zset|stream|unknown)
+--- @param type string
+--- @param cursor string|number|nil  SCAN cursor, or list start offset
 --- @return string[]|nil command tokens
-local function fetch_command(key, type)
+local function page_command(key, type, cursor)
+  cursor = cursor or 0
+  if type == "hash" then return { "HSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
+  if type == "set" then return { "SSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
+  if type == "zset" then return { "ZSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
+  if type == "list" then
+    local from = tonumber(cursor) or 0
+    return { "LRANGE", key, tostring(from), tostring(from + PAGE - 1) }
+  end
+  if type == "stream" then
+    local from = tostring(cursor)
+    return { "XRANGE", key, from, "+", "COUNT", tostring(PAGE) }
+  end
   if type == "string" then return { "GET", key } end
-  if type == "hash" then return { "HGETALL", key } end
-  if type == "list" then return { "LRANGE", key, "0", tostring(SAMPLE - 1) } end
-  if type == "set" then return { "SMEMBERS", key } end
-  if type == "zset" then return { "ZRANGE", key, "0", tostring(SAMPLE - 1), "WITHSCORES" } end
-  if type == "stream" then return { "XRANGE", key, "-", "+", "COUNT", tostring(SAMPLE) } end
   return { "GET", key }  -- unknown: try the raw string
 end
 
---- Render a result event into the panel.
-local function render(ev, key, type_name, conn_name, db)
-  if not ev then
-    vim.notify("Value fetch failed", vim.log.levels.ERROR, { title = redis_state.TITLE })
-    return
-  end
-  local out = format.format_result(ev)
-  out.meta.title = key .. "  [" .. tostring(type_name or "unknown") .. "]"
-  out.meta.key = key
-  out.meta.connection = conn_name
-  out.meta.db = db
-  buffer.render_snapshot(out.lines, out.meta)
-end
-
---- View a key's value in the result panel.
---- @param node table browser key node
---- @param root_nodes table[] unused (API parity with browser/init.lua)
---- @param render_hook fun()|nil called after the panel opens (no-op)
-function M.view(node, root_nodes, render_hook)
+--- Resolve (key, conn_name, url, db) from a browser node.
+--- @param node table
+--- @return string|nil key, string|nil url, string|nil err, number db
+local function resolve_node(node)
   local key = node.meta and node.meta.key
   local conn_name = node.meta and node.meta.connection
   if not key or not conn_name then
-    vim.notify("Cannot resolve key", vim.log.levels.ERROR, { title = redis_state.TITLE })
-    return
+    return nil, nil, "Cannot resolve key", 0
   end
-  -- node.meta.url wins (browser builds nodes with resolved URLs); fall back
-  -- to resolving the connection name from connections.toml.
   local url = node.meta and node.meta.url
   local err
   if not url then
     url, err = connections.resolve_redis_url(conn_name)
   end
   if not url then
-    vim.notify("Connection '" .. conn_name .. "' not found: " .. tostring(err),
-      vim.log.levels.ERROR, { title = redis_state.TITLE })
+    return nil, nil, "Connection '" .. conn_name .. "' not found: " .. tostring(err), 0
+  end
+  return key, url, nil, (node.meta and node.meta.db) or 0
+end
+
+--- Footer hint for the current page (loaded/total + full-load hint).
+--- Appended by the caller to the page lines before add_page.
+local function footer(loaded, total, opts)
+  opts = opts or {}
+  local parts = {}
+  if total and total > 0 then
+    parts[#parts + 1] = ("loaded %d / %d"):format(loaded, total)
+  else
+    parts[#parts + 1] = ("loaded %d"):format(loaded)
+  end
+  if opts.cursor and opts.cursor ~= "0" then
+    parts[#parts + 1] = "· <Tab> next page"
+  end
+  if opts.truncated then
+    parts[#parts + 1] = "· truncated — press K for raw JSON"
+  end
+  return "  (" .. table.concat(parts, "  ") .. ")"
+end
+
+--- Render one page event into the view's tab list and update the panel.
+--- @param ev table result event
+--- @param label string  tab title (page number / type)
+local function add_page(ev, label)
+  if not view then return end
+  local out = format.format_result(ev)
+  out.meta.title = label
+  out.meta.key = view.key
+  out.meta.connection = view.conn_name
+  out.meta.db = view.db
+  -- append the loaded/total footer to the page body
+  local f = footer(view.loaded, view.total, {
+    cursor = view.cursor,
+    truncated = (ev.value and ev.value.truncated) or false,
+  })
+  if f ~= "" then out.lines[#out.lines + 1] = f end
+  view.pages[#view.pages + 1] = out
+  -- Re-render all pages as tabs (render_tabs replaces the tab set)
+  buffer.render_tabs(view.pages, { render = true })
+  -- fire the one-shot first-render hook (tests / browser focus restore)
+  if view.first_hook then
+    local h = view.first_hook
+    view.first_hook = nil
+    pcall(h)
+  end
+end
+
+--- Fetch and append the next page for the current view.
+function M.next_page()
+  if not view then return end
+  local v = view
+  if v.done then return end
+
+  local cmd = page_command(v.key, v.type, v.cursor)
+  if not cmd then return end
+  v.busy = true
+
+  local function on_event(ev)
+    v.busy = false
+    if v.cursor == "0" then v.done = true end
+
+    if v.type == "hash" then
+      local entries = ev.value and ev.value.entries or {}
+      v.cursor = (ev.value and ev.value.cursor) or "0"
+      v.loaded = v.loaded + #entries
+      v.total = ev.value and ev.value.len or nil
+      add_page(ev, ("%s [hash · page %d]"):format(v.key, #v.pages + 1))
+      -- the footer lives in meta; append the loaded/total line to the page
+    elseif v.type == "set" or v.type == "zset" then
+      local items = ev.value and ev.value.value or {}
+      v.cursor = (ev.value and ev.value.cursor) or "0"
+      v.loaded = v.loaded + #items
+      v.total = ev.value and ev.value.len or nil
+      add_page(ev, ("%s [%s · page %d]"):format(v.key, v.type, #v.pages + 1))
+    elseif v.type == "list" then
+      local items = ev.value and ev.value.value or {}
+      v.cursor = tostring((tonumber(v.cursor) or 0) + #items)
+      v.loaded = v.loaded + #items
+      if #items < PAGE then v.done = true end
+      add_page(ev, ("%s [list · page %d]"):format(v.key, #v.pages + 1))
+    elseif v.type == "string" then
+      v.done = true
+      add_page(ev, ("%s [string]"):format(v.key))
+    else
+      v.done = true
+      add_page(ev, ("%s [%s]"):format(v.key, v.type))
+    end
+  end
+
+  session_conn.execute(v.url, cmd, {
+    on_response = on_event,
+    on_error = function(msg)
+      v.busy = false
+      vim.notify("Value fetch failed: " .. tostring(msg), vim.log.levels.ERROR,
+        { title = redis_state.TITLE })
+    end,
+  }, nil, { db = v.db })
+end
+
+--- Load the full value of a truncated string (bypasses preview_max_bytes via
+--- a large --max-bytes exec run, rendered as a fresh single tab).
+function M.load_full()
+  if not view or view.type ~= "string" then return end
+  local v = view
+  local entry = {
+    kind = "command",
+    tokens = { "GET", v.key },
+    raw = "GET " .. v.key,
+  }
+  -- exec path supports arbitrary --max-bytes; use a big cap for full load
+  local exec_run = require("poste-redis.exec_run")
+  local ev, err = exec_run.run_sync(entry, {
+    connection = v.url,
+    max_bytes = 1024 * 1024 * 64,  -- 64 MiB cap for "full"
+  })
+  if not ev then
+    vim.notify("Full load failed: " .. tostring(err), vim.log.levels.ERROR,
+      { title = redis_state.TITLE })
     return
   end
-  local db = node.meta and node.meta.db or 0
+  local out = format.format_result(ev)
+  out.meta.title = v.key .. " [string · full]"
+  out.meta.key = v.key
+  out.meta.connection = v.conn_name
+  out.meta.db = v.db
+  v.pages = { out }
+  buffer.render_tabs(v.pages, { render = true })
+end
 
+--- View a key's value in the result panel.
+--- @param node table browser key node
+--- @param root_nodes table[] unused (API parity with browser/init.lua)
+--- @param render_hook fun()|nil called after the first page lands
+function M.view(node, root_nodes, render_hook)
+  local key, url, err, db = resolve_node(node)
+  if not key or not url then
+    vim.notify(err or "Cannot resolve key", vim.log.levels.ERROR, { title = redis_state.TITLE })
+    return
+  end
+  local conn_name = node.meta and node.meta.connection
   local known_type = node.meta and node.meta.type
-  local function fetch_and_render(t)
-    local cmd = fetch_command(key, t)
-    if not cmd then
-      vim.notify("No renderer for type " .. tostring(t), vim.log.levels.WARN,
-        { title = redis_state.TITLE })
-      return
-    end
-    session_conn.execute(url, cmd, {
-      on_response = function(ev)
-        render(ev, key, t, conn_name, db)
-        if render_hook then render_hook() end
-      end,
-      on_error = function(msg)
-        vim.notify("Value fetch failed: " .. tostring(msg), vim.log.levels.ERROR,
-          { title = redis_state.TITLE })
-      end,
-    }, nil, { db = db })
+
+  local function start(t)
+    view = {
+      key = key, url = url, conn_name = conn_name, db = db,
+      type = t or "unknown", cursor = "0", done = false, busy = false,
+      loaded = 0, total = nil, pages = {},
+      first_hook = render_hook,
+    }
+    -- panel tabs show the first page immediately; next/prev flip pages
+    buffer.clear()
+    M.next_page()
   end
 
   if known_type then
-    fetch_and_render(known_type)
+    start(known_type)
     return
   end
 
   -- TYPE first, then fetch by type
   session_conn.execute(url, { "TYPE", key }, {
     on_response = function(ev)
-      local t = ev.value and ev.value.value
-      fetch_and_render(t)
+      start(ev.value and ev.value.value)
     end,
     on_error = function(msg)
       vim.notify("TYPE failed: " .. tostring(msg), vim.log.levels.ERROR,
@@ -112,8 +238,9 @@ function M.view(node, root_nodes, render_hook)
 end
 
 M._test = {
-  fetch_command = fetch_command,
-  SAMPLE = SAMPLE,
+  page_command = page_command,
+  footer = footer,
+  PAGE = PAGE,
 }
 
 return M

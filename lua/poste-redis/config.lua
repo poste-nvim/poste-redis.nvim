@@ -30,6 +30,7 @@ M.defaults = {
       prev_tab = "<S-Tab>",
       preview_raw = "K",
       yank = "yy",
+      load_full = "F",
     },
     -- Key browser (M2). Defaults land with that milestone; placeholders keep
     -- the section discoverable in :help and config docs.

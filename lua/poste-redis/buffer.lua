@@ -146,6 +146,34 @@ function M.render(results, opts)
   end
 end
 
+--- Render a pre-formatted tab list (browser value viewer pages). Each tab is
+--- a { lines, meta } pair already formatted — no re-formatting (the value
+--- viewer formats SCAN/HSCAN pages itself).
+--- @param tab_list table[] { lines = string[], meta = table }
+--- @param opts? table { render = boolean }
+function M.render_tabs(tab_list, opts)
+  opts = opts or {}
+  tabs = tab_list or {}
+  active = 1
+  last_value = tabs[active] and tabs[active].meta.value
+  if opts.render ~= false then
+    M.show_panel(false)
+    render_active()
+  end
+end
+
+--- Clear all tabs and close the panel content (keeps window if open).
+function M.clear()
+  tabs = {}
+  active = 1
+  last_value = nil
+  if buf and vim.api.nvim_buf_is_valid(buf) then
+    vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+    vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  end
+end
+
 --- Render a pre-formatted snapshot (history replay) as the single tab.
 --- Opens the panel if needed.
 --- @param lines string[]
@@ -200,6 +228,14 @@ function M.show_panel(enter)
   if k then vim.keymap.set("n", k, function() M.preview_raw() end, km) end
   k = config.get_keymap("redis_result", "yank", "yy")
   if k then vim.keymap.set("n", k, function() M.yank_current() end, km) end
+  -- F: full-load a truncated string value (browser value viewer)
+  k = config.get_keymap("redis_result", "load_full", "F")
+  if k then
+    vim.keymap.set("n", k, function()
+      local ok, value_mod = pcall(require, "poste-redis.browser.value")
+      if ok and value_mod.load_full then value_mod.load_full() end
+    end, km)
+  end
 end
 
 function M.next_tab()
