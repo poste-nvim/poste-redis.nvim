@@ -2,7 +2,7 @@
 
 Redis for Neovim in the [Poste](https://github.com/beyondlex/poste.nvim) plugin family —
 write Redis commands in a `.redis` buffer, hit `<CR>`, and read the results in a result
-panel. A key browser follows as the second milestone.
+panel. The key browser and value viewer are already included.
 
 **Status: M1 complete (file execution loop).** See
 [requirements.md](requirements.md) and [EXECUTION-PLAN.md](EXECUTION-PLAN.md).
@@ -40,13 +40,12 @@ GET session:abc
 
 ## Next
 
-Planned follow-ups are the M2/P2 items from `requirements.md`:
+Current follow-ups are the P2 items from `requirements.md`:
 
-1. Redis key browser
-2. `redis-session` long-lived transport
-3. Value viewer and larger-key navigation
-4. Tree-sitter grammar and highlighting
-5. Write operations, command palette, completion, and export tooling
+1. Write operations
+2. Command palette and dangerous-command guard
+3. Completion
+4. Export tooling
 
 ## License
 

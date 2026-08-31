@@ -50,16 +50,29 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "source_file",
-    "named": true,
-    "root": true,
-    "fields": {},
+    },
     "children": {
       "multiple": true,
       "required": false,
+      "types": [
+        {
+          "type": "comment_tail",
+          "named": true
+        },
+        {
+          "type": "line_continuation",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
       "types": [
         {
           "type": "command",
@@ -77,6 +90,22 @@
     }
   },
   {
+    "type": "source_file",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "line",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "string",
     "named": true,
     "fields": {}
@@ -86,9 +115,13 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "comment_tail",
+          "named": true
+        },
         {
           "type": "connection_name",
           "named": true
@@ -109,11 +142,19 @@
     "named": true
   },
   {
+    "type": "comment_tail",
+    "named": true
+  },
+  {
     "type": "connection_name",
     "named": true
   },
   {
     "type": "flag",
+    "named": true
+  },
+  {
+    "type": "line_continuation",
     "named": true
   },
   {

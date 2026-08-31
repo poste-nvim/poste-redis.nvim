@@ -257,8 +257,7 @@ end
 --- List redis connections: { { name, url, host, port, db }, ... } (async cb).
 --- @param callback function(list: table[])
 --- @param opts? table { search_dir = string|nil }
-function M.list_connections(callback, opts)
-  local search_dir = (opts and opts.search_dir) or get_search_dir()
+local function list_connections_sync(search_dir)
   local parsed, _ = read_config(search_dir)
   local list = {}
   if parsed then
@@ -290,6 +289,12 @@ function M.list_connections(callback, opts)
       ::continue::
     end
   end
+  return list
+end
+
+function M.list_connections(callback, opts)
+  local search_dir = (opts and opts.search_dir) or get_search_dir()
+  local list = list_connections_sync(search_dir)
   vim.schedule(function() callback(list) end)
 end
 
@@ -350,6 +355,7 @@ M._test = {
   parse_dotenv = parse_dotenv,
   apply_env = apply_env,
   percent_encode = percent_encode,
+  list_connections_sync = list_connections_sync,
   --- Drop every file/mtimes cache (specs use temp dirs).
   reset_caches = function()
     _config_search_cache = {}

@@ -12,4 +12,15 @@ describe("poste-redis scaffold", function()
     local syntax = vim.fn.glob("syntax/poste_redis.vim")
     assert.truthy(syntax ~= "")
   end)
+
+  it("overrides Neovim's builtin conf filetype for .redis files", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, "/tmp/poste-redis-sample.redis")
+    vim.api.nvim_set_current_buf(buf)
+
+    vim.cmd("filetype detect")
+
+    assert.equals("poste_redis", vim.bo[buf].filetype)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
 end)

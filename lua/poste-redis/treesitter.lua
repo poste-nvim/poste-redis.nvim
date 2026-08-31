@@ -40,7 +40,9 @@ function M.enable(buf)
     vim.notify("tree-sitter register failed: " .. tostring(err), vim.log.levels.WARN)
     return false
   end
-  vim.api.nvim_set_option_value("syntax", "", { buf = buf or 0 })
+  -- Keep the legacy syntax file active as a fallback. The grammar is only a
+  -- highlighter, and some example files use continuation/indent forms that the
+  -- tree-sitter query does not model yet.
   pcall(vim.treesitter.start, buf or 0, GRAMMAR_NAME)
   return true
 end

@@ -1,26 +1,33 @@
 ; poste-redis highlights (requirements §3.4)
-; comment → @comment, use → @keyword + connection @label,
-; command name → @keyword.command, args by type.
+; standard capture groups: comment, keyword, label, function, string, number.
 
-(comment) @PosteRedisComment
+(comment) @comment
+
+(line_continuation) @punctuation.special
 
 (use_directive
-  (connection_name) @PosteRedisLabel)
+  (connection_name) @label)
+
+(use_directive
+  (comment_tail) @comment)
 
 ; USE keyword itself
-(use_directive) @PosteRedisKeyword
+(use_directive) @keyword
 
 (command
-  (command_name) @PosteRedisCommand)
+  (command_name) @function)
 
 (command
-  (arg
-    (string) @PosteRedisString))
-
-(command
-  (arg
-    (number) @PosteRedisNumber))
+  (comment_tail) @comment)
 
 (command
   (arg
-    (flag) @PosteRedisFlag))
+    (string) @string))
+
+(command
+  (arg
+    (number) @number))
+
+(command
+  (arg
+    (flag) @keyword)

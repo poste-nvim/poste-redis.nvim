@@ -1,8 +1,9 @@
 # poste-redis.nvim — File Index
 
-M1 file execution loop is complete. M2 started: `redis-session` long-lived
-transport is in (Rust subcommand + `session_conn.lua`); browser / value
-viewer / tree-sitter are not started yet — see `requirements.md`.
+M1 file execution loop is complete. M2 is implemented: `redis-session`
+long-lived transport is in (Rust subcommand + `session_conn.lua`), browser /
+value viewer are in, and tree-sitter highlighting is implemented with regex
+fallback — see `requirements.md`.
 
 ## Entry points
 
@@ -11,7 +12,7 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 | `plugin/poste-redis.lua` | Loads `poste-redis.init.setup()` |
 | `ftdetect/poste_redis.vim` | `*.redis` → `poste_redis` filetype |
 | `ftplugin/poste_redis.vim` | commentstring `# %s`, indent settings |
-| `syntax/poste_redis.vim` | M1 regex syntax (command / string / comment / USE / continuation) |
+| `syntax/poste_redis.vim` | M1 regex syntax fallback (command / string / comment / USE / continuation / inline tails) |
 | `lua/poste-redis/init.lua` | `M.setup(opts)`: config → highlights → autocmds → commands → existing buffers |
 
 ## Core Lua (`lua/poste-redis/`)
@@ -57,8 +58,8 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 | `commands.lua` | `:PosteRedisConnection` / `:PosteRedisRunFile` / `:PosteRedisHistory` / `:PosteRedisInfo` / `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 | `health.lua` | `:checkhealth poste-redis` |
 | `highlights.lua` | `PosteRedis*` groups (source + result panel + history) |
-| `treesitter.lua` | **M2 P1-6**: parser availability probe, enable/disable with regex fallback |
-| `install.lua` | **M2 P1-6**: compile tree-sitter-poste-redis/src/parser.c into `stdpath("data")/site/parser` (needs cc; silent no-op otherwise) |
+| `treesitter.lua` | parser availability probe, enable tree-sitter highlighting, keep regex fallback |
+| `install.lua` | compile tree-sitter-poste-redis/src/parser.c into `stdpath("data")/site/parser` (needs cc; silent no-op otherwise) |
 | `util.lua` | `redact_url`, `display_width`, `truncate_display`, `pad_*`, `escape_for_line`, `format_latency` |
 
 ## Tests (`tests/`)
@@ -91,5 +92,5 @@ viewer / tree-sitter are not started yet — see `requirements.md`.
 
 | Area | Status |
 |------|--------|
-| M2 exit: 100k-key acceptance script (P1-1 first-screen < 300ms) | in progress |
+| M2 exit: 100k-key acceptance script (P1-1 first-screen < 300ms) | done |
 | write ops / command palette / completion / export (P2) | not started |

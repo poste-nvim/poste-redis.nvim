@@ -8,9 +8,12 @@ endif
 
 syn case ignore
 
-" ─── Comments (line-start only; inline # is quote-state aware in the parser) ──
+" ─── Comments (full-line or inline tail after USE / command) ────────────────
 syn match PosteRedisComment '^\s*#.*$'
 syn match PosteRedisComment '^\s*--.*$'
+" Inline comment tails after commands / USE.
+syn match PosteRedisComment '\s\+#.*$'
+syn match PosteRedisComment '\s\+--.*$'
 
 " ─── USE directive (plugin instruction, not a Redis command) ──
 syn match PosteRedisUse '^\s*use\>' nextgroup=PosteRedisUseName skipwhite

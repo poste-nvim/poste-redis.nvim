@@ -22,6 +22,15 @@ function M.setup()
   link_if_empty("PosteRedisNumber", "Number")
   link_if_empty("PosteRedisCommand", "Function")
 
+  -- Tree-sitter captures use standard highlight groups.
+  link_if_empty("@comment", "Comment")
+  link_if_empty("@label", "Identifier")
+  link_if_empty("@keyword", "Keyword")
+  link_if_empty("@function", "Function")
+  link_if_empty("@punctuation.special", "Special")
+  link_if_empty("@string", "String")
+  link_if_empty("@number", "Number")
+
   -- Result panel.
   link_if_empty("PosteRedisResultBorder", "FloatBorder")
   link_if_empty("PosteRedisResultSep", "NonText")
@@ -46,6 +55,8 @@ function M.setup()
     "PosteRedisComment", "PosteRedisUse", "PosteRedisUseName",
     "PosteRedisContinuation", "PosteRedisString", "PosteRedisNumber",
     "PosteRedisCommand",
+    "@comment", "@label", "@keyword", "@function", "@punctuation.special",
+    "@string", "@number",
     "PosteRedisResultBorder", "PosteRedisResultSep", "PosteRedisResultHeader",
     "PosteRedisResultMeta", "PosteRedisResultError", "PosteRedisResultWarning",
     "PosteRedisResultOk", "PosteRedisResultNull", "PosteRedisResultNumber",

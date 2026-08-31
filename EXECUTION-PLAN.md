@@ -102,7 +102,7 @@ cd ../poste.nvim && cargo build --release   # 产出 ../poste.nvim/target/releas
 - 协议判定：`connection` 以 `redis://` / `rediss://` 开头，否则 bail（对齐 exec_file.rs:71-86 的判定写法）
 - **测试**：cargo 单测（parse_shell_args、redis_value_to_json 各类型 + 新增 truncated）+ `#[ignore]` 集成测试（`REDIS_TEST_URL` 环境变量存在才跑，CI 里设）
 
-### 3.3 M2 预告（本文档不展开）
+### 3.3 M2 说明（实现已完成，本文档保留契约）
 
 `poste redis-session --connection <url>`：照 `session.rs` 的 stdin-lines 循环写 `session_redis`；请求 `{seq, command:[...]}`，响应 `{"type":"result","seq":..}`；推送事件 `{"type":"push","kind":"monitor"|"pubsub","payload":{...}}`；支持 `SELECT` 状态保持。
 
@@ -125,8 +125,8 @@ cd ../poste.nvim && cargo build --release   # 产出 ../poste.nvim/target/releas
 | `buffer.lua` | 结果面板：`M.render(results, opts)`（`poste://redis_result`，底部 split，每命令一个 tab：状态行 + 正文，tab 行显示命令与耗时）；`M.next_tab/prev_tab`；`M.preview_raw()`（`K` → float，来自 poste-ai float_window 模式）；`M.is_open/close` | poste-db buffer/init.lua 的最小子集 + poste-ai buffer/nav_preview.lua |
 | `history.lua` | `M.push(entry)`、`M.list()`、`M.toggle()`（win-relative float：j/k/CR/q）——M1 内存态，不落盘 | poste-db buffer/history.lua |
 | `indicators`/`statusline` | M1 直接用 `poste.indicators.set_indicator`；statusline M2 再做 | poste 共享 |
-| `highlights.lua` / `syntax.lua` | `PosteRedis*` 组；regex 高亮规则：命令名（内置 Redis 命令词表，取RESP 常用 ~190 条）、`USE` 行、字符串、数字、注释 | poste-db highlights + syntax/poste_sql.vim |
-| `autocmds.lua` / `buffer_setup.lua` / `commands.lua` / `health.lua` | FileType `poste_redis` 接线（keymap/treesitter 尝试注册/语法启用）；命令注册（§6）；health（nvim≥0.10、poste.state、二进制 + `--version`、redis 段连接、`redis-exec` 冒烟 `PING`） | poste-db 同名文件 |
+| `highlights.lua` / `syntax/poste_redis.vim` | `PosteRedis*` 组 + tree-sitter 标准 capture；regex 高亮规则：命令名（内置 Redis 命令词表，取RESP 常用 ~190 条）、`USE` 行、字符串、数字、注释、行内尾注 | poste-db highlights + syntax/poste_sql.vim |
+| `autocmds.lua` / `buffer_setup.lua` / `commands.lua` / `health.lua` | FileType `poste_redis` 接线（keymap/treesitter 注册 + 语法启用；regex fallback 保底）；命令注册（§6）；health（nvim≥0.10、poste.state、二进制 + `--version`、redis 段连接、`redis-exec` 冒烟 `PING`） | poste-db 同名文件 |
 | `init.lua` | `M.setup(opts)`：config.merge → highlights → autocmds → commands → setup_existing_buffers | poste-db init.lua |
 
 **M1 明确不建**：`browser/`、`value/`、`session_conn.lua`、`editor/`、`import/export`、AI 接入、statusline。
@@ -224,7 +224,7 @@ db = 0                      # 可选，默认 0
 
 ## 7. M1 任务分解（顺序执行，每项完成即 commit）
 
-> 这一节是历史任务拆分记录。M1 已完成，后续按 `requirements.md` 的 P1/P2 推进。
+> 这一节是历史任务拆分记录。M1 已完成，后续按 `requirements.md` 的 P2 推进。
 
 | # | 工作项 | 产出 | 验证 |
 |---|--------|------|------|
@@ -244,17 +244,17 @@ db = 0                      # 可选，默认 0
 
 ## 8. M1 验收清单（对应 requirements §5 P0）
 
-- [ ] `.redis` 文件：光标任意命令行 `<CR>` 执行（含续行拼接、引号内 `#` 不误切）
-- [ ] visual 选区多条命令顺序执行，逐条出结果 tab
-- [ ] 整文件执行：greedy——第 2 条失败不阻断第 3 条，summary 标注 failed
-- [ ] `USE my-redis` 后续命令打到该连接；连接缺失时明确报错并提示 `:PosteRedisConnection`
-- [ ] `connections.toml` 双形式解析 + `{{var}}` 展开 + `.env` 生效；密码不出现在任何日志/`messages`
-- [ ] 五种值形态渲染正确：`(nil)` / 整数 / 状态串 / 数组表 / map 表；二进制为 hex 摘要
-- [ ] 结果面板 `<Tab>`/`<S-Tab>` 切换、`K` 原始 JSON、`q` 关闭后重开内容不丢
-- [ ] 执行中 spinner 可见、可 `Esc` 取消且 busy 状态干净（连按两次 `<CR>` 第二次被拒并有提示）
-- [ ] 历史：命令、连接、状态、耗时可见
-- [ ] `:checkhealth poste-redis`：二进制缺失/版本过旧（无 redis-exec 子命令）时给出构建指引
-- [ ] 全部 plenary spec + cargo test 绿；CI（sibling poste.nvim + redis service）绿
+- [x] `.redis` 文件：光标任意命令行 `<CR>` 执行（含续行拼接、引号内 `#` 不误切）
+- [x] visual 选区多条命令顺序执行，逐条出结果 tab
+- [x] 整文件执行：greedy——第 2 条失败不阻断第 3 条，summary 标注 failed
+- [x] `USE my-redis` 后续命令打到该连接；连接缺失时明确报错并提示 `:PosteRedisConnection`
+- [x] `connections.toml` 双形式解析 + `{{var}}` 展开 + `.env` 生效；密码不出现在任何日志/`messages`
+- [x] 五种值形态渲染正确：`(nil)` / 整数 / 状态串 / 数组表 / map 表；二进制为 hex 摘要
+- [x] 结果面板 `<Tab>`/`<S-Tab>` 切换、`K` 原始 JSON、`q` 关闭后重开内容不丢
+- [x] 执行中 spinner 可见、可 `Esc` 取消且 busy 状态干净（连按两次 `<CR>` 第二次被拒并有提示）
+- [x] 历史：命令、连接、状态、耗时可见
+- [x] `:checkhealth poste-redis`：二进制缺失/版本过旧（无 redis-exec 子命令）时给出构建指引
+- [x] 全部 plenary spec + cargo test 绿；CI（sibling poste.nvim + redis service）绿
 
 ---
 

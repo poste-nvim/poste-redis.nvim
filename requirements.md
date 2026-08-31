@@ -91,7 +91,7 @@ poste.nvim（共享 infra + Rust CLI）        poste-ai.nvim（AI 助手，零�
 > 不搬运数据集的分页/编辑/筛选。"复用清单"逐项的落地位置见 EXECUTION-PLAN.md。
 | `indicators.lua` spinner、`select.lua`、`dialog.lua`、`float_window.lua` | poste 共享 / poste-db | UI 积木 |
 | context 注册契约 | poste-ai `context_api.lua` | AI 助手接入（§9） |
-| grammar.js + install.lua 编译发布 | poste-http | `.redis` 语法高亮（§4） |
+| grammar.js + install.lua 编译发布 | poste-http | `.redis` 语法高亮（§4，已实现并保留 regex fallback） |
 
 ---
 
@@ -148,7 +148,7 @@ DEL user:41 user:42 user:43
 
 ### 3.4 语法高亮方案
 
-**结论：Redis 没有任何现成 tree-sitter grammar**（GitHub 无 grammar 仓库、nvim-treesitter 不支持）。
+**结论：本仓库已自带 tree-sitter grammar**，并保留 regex fallback 作为兼容路径。
 方案按家族先例（poste-http 自带 grammar）分两步：
 
 | 阶段 | 方案 | 说明 |

@@ -40,4 +40,29 @@ describe("poste-redis treesitter", function()
       treesitter.ensure()
     end)
   end)
+
+  it("tree-sitter parses the example files cleanly", function()
+    local install = require("poste-redis.install")
+    install.ensure_parsers()
+
+    local so = install._test.parser_dir() .. "/poste_redis.so"
+    if vim.fn.filereadable(so) ~= 1 or vim.fn.executable("tree-sitter") ~= 1 then
+      pending("tree-sitter CLI or compiled parser unavailable")
+      return
+    end
+
+    for _, path in ipairs({ "examples/demo.redis", "examples/parser_edges.redis" }) do
+      local out = vim.fn.system({
+        "tree-sitter",
+        "parse",
+        "-l",
+        so,
+        "--lang-name",
+        "poste_redis",
+        "-q",
+        path,
+      })
+      assert.equals(0, vim.v.shell_error, out)
+    end
+  end)
 end)
