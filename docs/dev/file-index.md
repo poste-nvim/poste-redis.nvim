@@ -37,7 +37,7 @@ fallback — see `requirements.md`.
 | `async.lua` | SCAN cursor batching (`config.scan_count`), MATCH filter, `:`-prefix grouping (tree view) / flat view, epoch stale guard; `load_connections`, `fetch_dbs` (DBSIZE probe) |
 | `value.lua` | TYPE-first paginated value viewer: HSCAN/SSCAN/ZSCAN pages, LRANGE windows, XRANGE, string GET (truncated + `F` full load); page tabs + loaded/total footer |
 | `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate |
-| `init.lua` | `poste://redis_browser` side split, keymaps, `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
+| `init.lua` | `poste://redis_browser` right-hand split, keymaps, `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 
 ### Configuration & connections
 

@@ -124,6 +124,38 @@ describe("poste-redis browser async grouping", function()
   end)
 end)
 
+describe("poste-redis browser window", function()
+  it("opens in a right-hand split without replacing the source buffer", function()
+    local browser = require("poste-redis.browser.init")
+    local orig_load = async.load_connections
+    local orig_render_hook = async.render_hook
+    async.load_connections = function(cb) cb({}) end
+
+    local source = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(source, "browser-source.redis")
+    vim.api.nvim_set_current_buf(source)
+    local wins_before = #vim.api.nvim_list_wins()
+
+    local ok, err = pcall(function() browser.open() end)
+    assert.is_true(ok, tostring(err))
+    assert.equals(wins_before + 1, #vim.api.nvim_list_wins())
+    assert.is_true(vim.fn.bufwinid(source) ~= -1, "source buffer was replaced")
+
+    local browser_buf = browser.info().buffer
+    local source_win = vim.fn.bufwinid(source)
+    local browser_win = vim.fn.bufwinid(browser_buf)
+    assert.is_true(source_win ~= -1 and browser_win ~= -1)
+    local source_pos = vim.api.nvim_win_get_position(source_win)
+    local browser_pos = vim.api.nvim_win_get_position(browser_win)
+    assert.is_true(browser_pos[2] > source_pos[2], "browser should be to the right")
+
+    browser.close()
+    async.load_connections = orig_load
+    async.render_hook = orig_render_hook
+    pcall(vim.api.nvim_buf_delete, source, { force = true })
+  end)
+end)
+
 describe("poste-redis browser value page commands", function()
   it("maps each type to its first-page command", function()
     assert.same({ "GET", "k" }, value._test.page_command("k", "string"))

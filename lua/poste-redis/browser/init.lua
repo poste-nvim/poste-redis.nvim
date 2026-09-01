@@ -1,7 +1,7 @@
 --- Redis key browser window (M2, P1-1/P1-2).
 ---
 --- Rebuilt from the poste-db db_browser/init.lua pattern, stripped down:
---- connection → db → group → key tree in a side split named
+--- connection → db → group → key tree in a right-hand split named
 --- `poste://redis_browser`. Loading goes through browser/async.lua which
 --- talks to the persistent redis-session transport.
 
@@ -320,7 +320,17 @@ end
 -- Public API
 ----------------------------------------------------------------------
 
---- Open the browser in a side split (default left, 30 cols).
+--- Resolve the window command for opening the browser. Uses `vsplit` so
+--- the source buffer stays visible in its own window.
+--- @param split string|nil "left" or "right"
+--- @param width number
+--- @return string
+local function split_command(split, width)
+  local pos = split == "left" and "topleft" or "botright"
+  return pos .. " " .. tostring(width) .. "vsplit"
+end
+
+--- Open the browser in a side split (default right, 30 cols).
 --- @param opts? table { source_buf = number|nil, split = "left"|"right", width = number }
 function M.open(opts)
   opts = opts or {}
@@ -331,8 +341,8 @@ function M.open(opts)
   local win = vim.fn.bufwinnr(buf)
   if win == -1 then
     local width = opts.width or 30
-    local dir = opts.split or "left"
-    vim.cmd(dir .. " " .. tostring(width) .. "vnew")
+    local pos = opts.split or "right"
+    vim.cmd(split_command(pos, width))
     browser_win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(browser_win, buf)
     vim.api.nvim_set_option_value("winfixwidth", true, { win = browser_win })
@@ -412,6 +422,7 @@ M._test = {
   toggle_node = toggle_node,
   expand_node = expand_node,
   collapse_node = collapse_node,
+  split_command = split_command,
 }
 
 return M
