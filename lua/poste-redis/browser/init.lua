@@ -213,17 +213,10 @@ local function refresh_node()
   async.scan_keys(current_db_node, current_conn.url, current_conn.name)
 end
 
---- /: SCAN MATCH filter on the current db.
-local function search_filter()
-  if not current_db_node or not current_conn then return end
-  local pattern = vim.fn.input("SCAN MATCH pattern: ")
-  if pattern == "" then return end
-  async.scan_keys(current_db_node, current_conn.url, current_conn.name, pattern)
-end
-
---- <leader>/>: enter search state — focus the search bar on line 1, insert
---- mode. <CR> runs async.search on the current db and loses focus; empty +
---- <CR> clears the search; <Esc> cancels.
+--- / or <leader>/>: enter search state — focus the search bar on line 1,
+--- insert mode (typed text lands in the in-buffer [search: ] bar, NOT the
+--- command line). <CR> runs async.search on the current db and loses focus;
+--- empty + <CR> clears the search; <Esc> cancels.
 local search_commit  -- forward declarations (AGENTS.md: local fn hoisting)
 local search_cancel
 local function search_enter()
@@ -241,6 +234,12 @@ local function search_enter()
   vim.keymap.set("i", "<CR>", search_commit, { buffer = browser_buf, silent = true })
   vim.keymap.set("i", "<Esc>", search_cancel, { buffer = browser_buf, silent = true })
   vim.cmd.startinsert()
+end
+
+--- /: same as <leader>/> — both focus the in-buffer search bar (no command-line
+--- prompt). Kept as a separate name so users can remap them independently.
+local function search_filter()
+  search_enter()
 end
 
 --- Parse the query out of a "[search: <q>]" line (tolerant of missing brackets).
@@ -380,7 +379,7 @@ local function setup_browser_buffer()
         "  h     collapse / parent",
         "  l     expand / first child",
         "  r     reload db keys",
-        "  /     SCAN MATCH filter on the current db",
+        "  /     search by sub-path (cache matches cache:a)",
         "  <leader>/>  search by sub-path (bench:a:b:c)",
         "  <Esc>  clear search",
         "  <Space>  select database",
