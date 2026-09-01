@@ -195,6 +195,7 @@ host = "pg-host"
     assert.equals(true, vim.wait(500, function() return #list > 0 end, 5))
     assert.equals(1, #list)
     assert.equals("my-redis", list[1].name)
+    assert.equals("redis", list[1].dialect)
     assert.equals("redis://127.0.0.1:6379/0", list[1].url)
     assert.equals("127.0.0.1", list[1].host)
     assert.equals("0", list[1].db)

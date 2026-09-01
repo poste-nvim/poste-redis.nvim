@@ -104,6 +104,24 @@ describe("poste-redis browser async grouping", function()
     assert.equals(1, flat_count)
     assert.equals("nocolon", db.children[1].name)
   end)
+
+  it("load_connections keeps only redis-dialect entries", function()
+    local connections = require("poste-redis.connections")
+    local orig = connections.list_connections
+    connections.list_connections = function(cb)
+      cb({
+        { name = "local",  dialect = "redis",    url = "redis://127.0.0.1:16479/0" },
+        { name = "mypg",   dialect = "postgres", url = "postgres://h:5432/db" },
+      })
+    end
+    local nodes
+    async.load_connections(function(n) nodes = n end)
+    connections.list_connections = orig
+    assert.equals(1, #nodes)
+    assert.equals("local", nodes[1].name)
+    assert.equals("connection", nodes[1].node_type)
+    assert.match("redis://127.0.0.1:16479", nodes[1].meta.url)
+  end)
 end)
 
 describe("poste-redis browser value page commands", function()

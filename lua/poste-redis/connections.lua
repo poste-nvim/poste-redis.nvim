@@ -281,6 +281,7 @@ local function list_connections_sync(search_dir)
       if not db and url then db = url:match("/(%d+)$") end
       table.insert(list, {
         name = name,
+        dialect = resolved.dialect,
         url = url,
         host = host,
         port = resolved.port,
