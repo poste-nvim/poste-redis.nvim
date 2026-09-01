@@ -30,4 +30,4 @@
 
 (command
   (arg
-    (flag) @keyword)
+    (flag) @keyword))
