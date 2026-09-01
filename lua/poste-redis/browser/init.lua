@@ -221,7 +221,7 @@ local search_commit  -- forward declarations (AGENTS.md: local fn hoisting)
 local search_cancel
 local function search_enter()
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
-  local win = vim.fn.bufwinnr(browser_buf)
+  local win = vim.fn.bufwinid(browser_buf)
   if win ~= -1 then vim.api.nvim_set_current_win(win) end
 
   search_active = true
@@ -253,7 +253,10 @@ local function parse_search_line(line)
 end
 
 --- <CR> in the search bar: read the query, run async.search, return to tree.
-local function search_commit()
+-- NOTE: assigned (not `local function`) so it fills the forward-declared
+-- local `search_commit` that search_enter captured — a second `local` here
+-- would shadow it with nil (AGENTS.md local-fn hoisting pitfall).
+function search_commit()
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
   local line = vim.api.nvim_buf_get_lines(browser_buf, 0, 1, false)[1] or ""
   local query = parse_search_line(line)
@@ -274,7 +277,8 @@ local function search_commit()
 end
 
 --- <Esc> in the search bar: cancel, clear any results, restore the tree.
-local function search_cancel()
+-- NOTE: assigned (not `local function`) — see search_commit.
+function search_cancel()
   if browser_buf and vim.api.nvim_buf_is_valid(browser_buf) then
     vim.cmd.stopinsert()
     vim.keymap.del("i", "<CR>", { buffer = browser_buf })
@@ -419,7 +423,10 @@ function M.open(opts)
 
   local buf = setup_browser_buffer()
 
-  local win = vim.fn.bufwinnr(buf)
+  -- bufwinid returns a window id (winid), which nvim_set_current_win /
+  -- nvim_win_is_valid / nvim_win_close all expect; bufwinnr returns only a
+  -- window number and must not be used here.
+  local win = vim.fn.bufwinid(buf)
   if win == -1 then
     local width = opts.width or 30
     local pos = opts.split or "right"
