@@ -201,6 +201,21 @@ describe("poste-redis completion orchestrator", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
+  it("command items insert a trailing space and a keyword kind", function()
+    -- Redis syntax is `GET key` — accepting a command must yield `GET `
+    -- (command + space), not `GET()` (Function-kind autoparens).
+    local buf = vim.api.nvim_create_buf(false, true)
+    local items = nil
+    completion._test.get_items(buf, "GE", function(i) items = i end)
+    assert.truthy(items)
+    assert.is_true(#items > 0)
+    for _, i in ipairs(items) do
+      assert.equals(14, i.kind, "command item kind must be Keyword, not Function")
+      assert.equals(i.label .. " ", i.insertText, "command insertText must carry a trailing space")
+    end
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
   it("returns no items at a comment", function()
     local buf = vim.api.nvim_create_buf(false, true)
     local items = nil

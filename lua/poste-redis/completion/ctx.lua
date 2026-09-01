@@ -44,14 +44,16 @@ end
 --- @param names string[]
 --- @param kind number LSP completion item kind
 --- @param doc_prefix string|nil
+--- @param insert_suffix string|nil text appended to insertText (e.g. " " for
+---   command names so accepting yields `GET key` syntax, never `GET()`)
 --- @return table[]
-function M.make_items(names, kind, doc_prefix)
+function M.make_items(names, kind, doc_prefix, insert_suffix)
   local items = {}
   for _, n in ipairs(names or {}) do
     table.insert(items, {
       label = n,
       kind = kind,
-      insertText = n,
+      insertText = n .. (insert_suffix or ""),
       documentation = doc_prefix and (doc_prefix .. n) or n,
     })
   end

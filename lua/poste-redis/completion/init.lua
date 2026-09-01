@@ -15,8 +15,10 @@ local exec_run = require("poste-redis.exec_run")
 
 local M = {}
 
---- Completion item kinds (LSP): 3=Function, 6=Class, 1=Text, 10=Variable.
-local KIND_COMMAND = 3
+--- Completion item kinds (LSP): 14=Keyword, 6=Class, 1=Text, 10=Variable.
+--- Commands use Keyword (not Function) so engines/autopairs don't append
+--- `()` on accept — Redis syntax is `GET <key>`, i.e. command + space.
+local KIND_COMMAND = 14
 local KIND_CONNECTION = 6
 local KIND_KEY = 1
 
@@ -24,9 +26,10 @@ local KIND_KEY = 1
 -- Item assembly
 ---------------------------------------------------------------------------
 
---- Command-name position → built-in command table.
+--- Command-name position → built-in command table. Trailing space in
+--- insertText gives `GET ` so the next arg follows on the same line.
 local function command_items(prefix)
-  return ctx.filter(ctx.make_items(data.COMMANDS, KIND_COMMAND, "command: "), prefix)
+  return ctx.filter(ctx.make_items(data.COMMANDS, KIND_COMMAND, "command: ", " "), prefix)
 end
 
 --- After `USE` → connection names from connections.toml.
