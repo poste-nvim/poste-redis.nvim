@@ -11,6 +11,7 @@ local M = {}
 
 local buf = nil
 local win = nil
+local panel_tabpage = nil
 local tabs = {}          -- { { lines = string[], meta = table }, ... }
 local active = 1         -- 1-based
 local last_value = nil   -- current tab's raw value for K preview
@@ -191,9 +192,21 @@ end
 -- Window management
 -----------------------------------------------------------------------
 
---- Open (or re-focus) the panel in a bottom horizontal split.
+--- Open (or re-focus) the panel in a full-width bottom horizontal split
+--- (spans the whole editor, not just the current window — poste-db dataset
+--- style).
 --- @param enter boolean|nil  move focus to the panel (default true)
 function M.show_panel(enter)
+  -- The panel must span the whole editor, not sit under whatever window is
+  -- current (e.g. the narrow browser split). `botright <height>split` opens a
+  -- full-width bottom split regardless of the current window — same as
+  -- poste-db's dataset.
+  if win and vim.api.nvim_win_is_valid(win)
+      and (not panel_tabpage or vim.api.nvim_win_get_tabpage(win) ~= panel_tabpage) then
+    pcall(vim.api.nvim_win_close, win, true)
+    win = nil
+    panel_tabpage = nil
+  end
   if M.is_open() then
     if enter ~= false then
       pcall(vim.api.nvim_set_current_win, win)
@@ -212,10 +225,18 @@ function M.show_panel(enter)
     constants.RESULT_MIN_HEIGHT,
     math.floor(vim.o.lines * constants.RESULT_HEIGHT_RATIO)
   )
-  win = vim.api.nvim_open_win(buf, enter ~= false, {
-    split = "below",
-    height = height,
-  })
+  local src_win = vim.api.nvim_get_current_win()
+  local src_view = vim.fn.winsaveview()
+  vim.cmd("botright " .. height .. "split")
+  win = vim.api.nvim_get_current_win()
+  panel_tabpage = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_buf(win, buf)
+  if enter ~= false then
+    vim.api.nvim_set_current_win(win)
+  else
+    vim.api.nvim_set_current_win(src_win)
+    vim.fn.winrestview(src_view)
+  end
 
   local km = { buffer = buf, noremap = true, silent = true }
   local k = config.get_keymap("redis_result", "close", "q")
@@ -259,6 +280,7 @@ function M.close()
     pcall(vim.api.nvim_win_close, win, true)
   end
   win = nil
+  panel_tabpage = nil
   if buf and vim.api.nvim_buf_is_valid(buf) then
     pcall(vim.api.nvim_buf_delete, buf, { force = true })
   end
