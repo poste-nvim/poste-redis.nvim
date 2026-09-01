@@ -1,0 +1,234 @@
+--- completion spec — context detection + item assembly (P2-4).
+--- The completion pipeline is transport-stubbed: session_conn.execute is
+--- replaced so key-prefix candidates never touch a real redis.
+local ctx = require("poste-redis.completion.ctx")
+local data = require("poste-redis.completion.data")
+local completion = require("poste-redis.completion.init")
+local session_conn = require("poste-redis.session_conn")
+local exec_run = require("poste-redis.exec_run")
+
+describe("poste-redis completion ctx", function()
+  it("detects a command position with a single token", function()
+    local d = ctx.detect("GET")
+    assert.equals("command", d.kind)
+    assert.equals("GET", d.prefix)
+  end)
+
+  it("detects a command position with a partial command", function()
+    local d = ctx.detect("ZAD")
+    assert.equals("command", d.kind)
+    assert.equals("ZAD", d.prefix)
+  end)
+
+  it("detects a command position case-insensitively", function()
+    local d = ctx.detect("get")
+    assert.equals("command", d.kind)
+    assert.equals("get", d.prefix)
+  end)
+
+  it("detects a key argument position with a prefix", function()
+    local d = ctx.detect("GET user:")
+    assert.equals("key", d.kind)
+    assert.equals("user:", d.prefix)
+    assert.equals("GET", d.command)
+  end)
+
+  it("detects a key argument after leading whitespace", function()
+    local d = ctx.detect("  GET user:")
+    assert.equals("key", d.kind)
+    assert.equals("user:", d.prefix)
+  end)
+
+  it("detects a connection position after USE", function()
+    local d = ctx.detect("USE my-red")
+    assert.equals("connection", d.kind)
+    assert.equals("my-red", d.prefix)
+    assert.equals("USE", d.command)
+  end)
+
+  it("detects a connection position for a bare USE", function()
+    local d = ctx.detect("USE ")
+    assert.equals("connection", d.kind)
+    assert.equals("", d.prefix)
+  end)
+
+  it("returns none for a comment line", function()
+    assert.equals("none", ctx.detect("# a comment").kind)
+    assert.equals("none", ctx.detect("-- a comment").kind)
+  end)
+
+  it("returns none for blank input", function()
+    assert.equals("none", ctx.detect("").kind)
+    assert.equals("none", ctx.detect("   ").kind)
+  end)
+
+  it("returns none inside a quoted string", function()
+    assert.equals("none", ctx.detect('SET k "fo').kind)
+  end)
+
+  it("fuzzy-matches subsequence patterns", function()
+    assert.is_true(ctx.fuzzy_match("GETSET", "gts"))
+    assert.is_true(ctx.fuzzy_match("GETSET", ""))
+    assert.is_false(ctx.fuzzy_match("GETSET", "xyz"))
+  end)
+
+  it("filters items by fuzzy prefix", function()
+    local items = ctx.make_items({ "GET", "GETSET", "SET" }, 3, "command: ")
+    local filtered = ctx.filter(items, "get")
+    assert.equals(2, #filtered)
+    local labels = {}
+    for _, i in ipairs(filtered) do labels[#labels + 1] = i.label end
+    assert.same({ "GET", "GETSET" }, labels)
+  end)
+end)
+
+describe("poste-redis completion data", function()
+  it("exposes the command table", function()
+    assert.truthy(#data.COMMANDS >= 150)
+    assert.truthy(vim.tbl_contains(data.COMMANDS, "GET"))
+    assert.truthy(vim.tbl_contains(data.COMMANDS, "ZADD"))
+    assert.truthy(vim.tbl_contains(data.COMMANDS, "XADD"))
+    assert.truthy(vim.tbl_contains(data.COMMANDS, "FLUSHALL"))
+  end)
+
+  it("loads connection names from connections.toml (redis only)", function()
+    local tmpdir = vim.fn.tempname()
+    vim.fn.mkdir(tmpdir, "p")
+    vim.fn.writefile({
+      "[my-redis]",
+      'dialect = "redis"',
+      'url = "redis://127.0.0.1:6379/0"',
+      "",
+      "[my-pg]",
+      'dialect = "postgres"',
+      'host = "pg"',
+    }, tmpdir .. "/connections.toml")
+    local conns = require("poste-redis.connections")
+    conns._test.reset_caches()
+    vim.api.nvim_set_current_dir(tmpdir)
+
+    data.clear_conn_names()
+    local names = nil
+    data.ensure_conn_names(function(n) names = n end)
+    assert.equals(true, vim.wait(500, function() return names ~= nil end, 5))
+    assert.same({ "my-redis" }, names)
+
+    conns._test.reset_caches()
+    data.clear_conn_names()
+    pcall(vim.fn.delete, tmpdir, "rf")
+  end)
+
+  it("returns no key candidates for an empty prefix", function()
+    local results = nil
+    data.ensure_key_candidates("redis://h:6379/0", "", 0, function(r) results = r end)
+    assert.same({}, results)
+  end)
+
+  it("returns no key candidates without a connection", function()
+    local results = nil
+    data.ensure_key_candidates(nil, "user:", 0, function(r) results = r end)
+    assert.same({}, results)
+  end)
+
+  it("fetches key candidates via SCAN MATCH and caches per prefix", function()
+    local orig_execute = session_conn.execute
+    local calls = {}
+    data.clear_key_cache()
+    session_conn.execute = function(_url, cmd, callbacks)
+      table.insert(calls, cmd)
+      assert.same("SCAN", cmd[1])
+      assert.same("user:*", cmd[4])
+      -- fake SCAN reply: keys live in ev.value.value (redis_executor shape)
+      vim.schedule(function()
+        callbacks.on_response({
+          value = { value = { "user:1", "user:2", "other:9" } },
+        })
+      end)
+    end
+
+    local first, second = nil, nil
+    data.ensure_key_candidates("redis://h:6379/0", "user:", 0, function(r) first = r end)
+    assert.equals(true, vim.wait(500, function() return first ~= nil end, 5))
+    -- second call hits the cache: no new SCAN
+    data.ensure_key_candidates("redis://h:6379/0", "user:", 0, function(r) second = r end)
+    assert.same({ "user:1", "user:2" }, first)
+    assert.same(first, second)
+    assert.equals(1, #calls)
+
+    data.clear_key_cache()
+    session_conn.execute = orig_execute
+  end)
+
+  it("handles a SCAN error by returning no candidates", function()
+    local orig_execute = session_conn.execute
+    data.clear_key_cache()
+    session_conn.execute = function(_url, _cmd, callbacks)
+      vim.schedule(function() callbacks.on_error("connection refused") end)
+    end
+    local results = nil
+    data.ensure_key_candidates("redis://h:6379/0", "user:", 0, function(r) results = r end)
+    assert.equals(true, vim.wait(500, function() return results ~= nil end, 5))
+    assert.same({}, results)
+    session_conn.execute = orig_execute
+  end)
+end)
+
+describe("poste-redis completion orchestrator", function()
+  local orig_exec_run_connection_for
+  local orig_ensure_keys
+
+  before_each(function()
+    orig_exec_run_connection_for = exec_run._connection_for
+    orig_ensure_keys = data.ensure_key_candidates
+    data.clear_key_cache()
+    data.clear_conn_names()
+  end)
+
+  after_each(function()
+    exec_run._connection_for = orig_exec_run_connection_for
+    data.ensure_key_candidates = orig_ensure_keys
+    data.clear_key_cache()
+  end)
+
+  it("returns command items at the command position", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local items = nil
+    completion._test.get_items(buf, "GETS", function(i) items = i end)
+    assert.truthy(items)
+    local labels = {}
+    for _, i in ipairs(items) do labels[#labels + 1] = i.label end
+    assert.same({ "GETSET" }, labels)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("returns no items at a comment", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local items = nil
+    completion._test.get_items(buf, "# note", function(i) items = i end)
+    assert.same({}, items)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("returns key items for an argument position when a connection exists", function()
+    exec_run._connection_for = function(_buf) return "redis://h:6379/0", "srv" end
+    data.ensure_key_candidates = function(_url, prefix, _db, cb)
+      cb({ "user:1", "user:2", "other:9" })
+    end
+    local buf = vim.api.nvim_create_buf(false, true)
+    local items = nil
+    completion._test.get_items(buf, "GET user:", function(i) items = i end)
+    local labels = {}
+    for _, i in ipairs(items or {}) do labels[#labels + 1] = i.label end
+    assert.same({ "user:1", "user:2" }, labels)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("returns no key items without a connection", function()
+    exec_run._connection_for = function(_buf) return nil end
+    local buf = vim.api.nvim_create_buf(false, true)
+    local items = nil
+    completion._test.get_items(buf, "GET user:", function(i) items = i end)
+    assert.same({}, items)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)

@@ -73,6 +73,29 @@ function M.check()
   else
     warn("tree-sitter poste_redis grammar not installed — regex syntax fallback active (M1)")
   end
+
+  -- completion engine (P2-4)
+  local blink_ok = pcall(require, "blink.cmp")
+  if blink_ok then
+    ok("blink.cmp loaded")
+    local has_provider = false
+    local cfg_ok, cfg = pcall(require, "blink.cmp.config")
+    if cfg_ok and cfg.sources and cfg.sources.providers then
+      has_provider = cfg.sources.providers["poste_redis"] ~= nil
+    end
+    if has_provider then
+      ok("  poste_redis provider registered")
+    else
+      warn("  poste_redis provider not registered — completion may not work")
+    end
+  else
+    local cmp_ok = pcall(require, "cmp")
+    if cmp_ok then
+      ok("nvim-cmp loaded")
+    else
+      warn("no completion engine (blink.cmp or nvim-cmp) — install blink.cmp for completion")
+    end
+  end
 end
 
 return M

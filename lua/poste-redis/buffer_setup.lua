@@ -11,6 +11,7 @@ local function show_help(buf)
     "poste-redis source keymaps:",
     "  " .. config.format_keymap("redis_source", "run") .. "   run command under cursor / selection",
     "  " .. config.format_keymap("redis_source", "history") .. "   open request history",
+    "  " .. config.format_keymap("redis_source", "trigger_completion") .. "   trigger completion",
     "  " .. config.format_keymap("redis_source", "help") .. "   this help",
     "",
     "poste-redis result panel keymaps:",
@@ -60,6 +61,12 @@ function M.setup_buffer_keymaps(buf)
   k = config.get_keymap("redis_source", "help", "g?")
   if k then
     vim.keymap.set("n", k, function() show_help(buf) end, km)
+  end
+  k = config.get_keymap("redis_source", "trigger_completion", "<C-Space>")
+  if k then
+    vim.keymap.set("i", k, function()
+      pcall(function() require("poste-redis.completion.adapter").show() end)
+    end, { buffer = buf, noremap = true, silent = true, desc = "Trigger redis completion" })
   end
 end
 

@@ -298,6 +298,19 @@ function M.list_connections(callback, opts)
   vim.schedule(function() callback(list) end)
 end
 
+--- Sorted redis connection names (completion / picker hints). Sync.
+--- @param search_dir string|nil
+--- @return string[]
+function M.redis_connection_names(search_dir)
+  local list = list_connections_sync(search_dir or get_search_dir())
+  local names = {}
+  for _, c in ipairs(list) do
+    names[#names + 1] = c.name
+  end
+  table.sort(names)
+  return names
+end
+
 --- Set the current connection context (from USE directive or selector).
 --- @param name string
 --- @param url string

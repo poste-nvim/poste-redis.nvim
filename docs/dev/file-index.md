@@ -62,6 +62,16 @@ fallback — see `requirements.md`.
 | `install.lua` | compile tree-sitter-poste-redis/src/parser.c into `stdpath("data")/site/parser` (needs cc; silent no-op otherwise) |
 | `util.lua` | `redact_url`, `display_width`, `truncate_display`, `pad_*`, `escape_for_line`, `format_latency` |
 
+### Completion (`completion/`, P2-4)
+
+| File | Role |
+|------|------|
+| `ctx.lua` | context detection (`command` / `USE` connection / `key` arg position) + item helpers (`fuzzy_match`, `make_items`, `filter`) |
+| `data.lua` | `COMMANDS` table (~190), `ensure_conn_names` (connections.toml), `ensure_key_candidates` (SCAN MATCH prefix* via session_conn, cached per url+prefix) |
+| `init.lua` | orchestrator `get_items` dispatch + blink.cmp source (`M.new`/`get_completions`) + nvim-cmp `M.source` |
+| `adapter.lua` | blink.cmp adapter wrapper (`register_source`, `register_filetype`, `show`) |
+| `register.lua` | register the `poste_redis` blink source for the filetype |
+
 ## Tests (`tests/`)
 
 | File | Covers |
@@ -77,6 +87,7 @@ fallback — see `requirements.md`.
 | `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
+| `redis/completion_spec.lua` | P2-4: ctx detection, command table, conn names, SCAN key-prefix fetch+cache (stubbed session), orchestrator dispatch |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |
 | `scaffold_spec.lua` | harness smoke |
 
@@ -93,4 +104,5 @@ fallback — see `requirements.md`.
 | Area | Status |
 |------|--------|
 | M2 exit: 100k-key acceptance script (P1-1 first-screen < 300ms) | done |
-| write ops / command palette / completion / export (P2) | not started |
+| completion (P2-4): command table + USE connection names + key-prefix SCAN hints | done |
+| write ops / command palette / export (P2) | not started |

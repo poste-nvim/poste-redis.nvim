@@ -23,6 +23,7 @@ M.defaults = {
       run = "<CR>",
       history = "<leader>rh",
       help = "g?",
+      trigger_completion = "<C-Space>",
     },
     redis_result = {
       close = "q",
