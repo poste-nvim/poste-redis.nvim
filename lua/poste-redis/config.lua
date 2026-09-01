@@ -10,6 +10,11 @@ M.defaults = {
   preview_max_bytes = 65536,
   -- SCAN batch size used by the key browser (M2) and cursor-key completion.
   scan_count = 500,
+  -- SCAN COUNT for db-level group-header discovery: finding distinct `:`
+  -- prefixes requires walking the whole keyspace, so use a large page to cut
+  -- round-trips (10k keys ≈ 11 pages vs 200 at 500). Key lists under a group
+  -- still page at scan_count.
+  header_scan_count = 5000,
   -- Result panel split: share of the editor height.
   result_height_ratio = 0.4,
   -- Execute confirm heuristic: write commands always require a confirm

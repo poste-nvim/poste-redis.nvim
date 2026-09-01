@@ -29,6 +29,17 @@ end
 
 async.render_hook = render_tree
 
+--- Incremental append: insert newly-arrived nodes under `node` without a
+--- full re-render. Falls back to render_tree if the node isn't rendered yet.
+async.append_hook = function(node, new_nodes)
+  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return false end
+  local ok = tree.append_children(browser_buf, line_to_node, node, new_nodes)
+  if not ok then
+    render_tree()
+  end
+  return true
+end
+
 local function get_connection_url(conn_name)
   return require("poste-redis.connections").resolve_redis_url(conn_name)
 end
@@ -66,7 +77,12 @@ local function expand_node(node, conn_url)
       return
     end
   elseif node.node_type == "group" then
-    -- keys already loaded under the group; just expand
+    if not node.children then
+      -- lazy load: SCAN MATCH <prefix>:* appends keys incrementally
+      async.scan_group(node, conn_url, node.meta.connection)
+      node.expanded = true
+      return
+    end
   end
   node.expanded = true
   render_tree()

@@ -5,9 +5,12 @@
 --- is kept server-side and the connection is reused (P1-5).
 ---
 --- Loading is cursor-driven: SCAN cursor MATCH pattern COUNT scan_count loops
---- until cursor == "0", appending key nodes in batches. Each batch re-renders
---- so the UI never freezes and the first screen appears before the full scan
---- finishes (P1-1: first screen < 300ms, UI never blocks on 100k-key dbs).
+--- until cursor == "0", appending key nodes in batches. Renders are paced —
+--- page 1 (first screen), then every RENDER_EVERY_PAGES-th page, then the
+--- final page — so the UI never freezes and the first screen appears before
+--- the full scan finishes (P1-1: first screen < 300ms). Rebuilding the whole
+--- subtree + rewriting the buffer on EVERY page was O(n²) overall and made
+--- keys look like they trickle in one by one.
 ---
 --- Epoch guard: each fetch bumps node.epoch; callbacks from a superseded
 --- fetch (user pressed r or navigated away) are dropped — red line #4.
@@ -22,6 +25,13 @@ local M = {}
 --- Render hook set by browser/init.lua; called after every batch lands.
 M.render_hook = nil
 
+--- Incremental append hook set by browser/init.lua: append newly arrived
+--- nodes under an already-rendered node without a full re-render.
+--- @param node table
+--- @param new_nodes table[]
+--- @return boolean handled
+M.append_hook = nil
+
 --- Tree view: group keys by the first `:`-segment. Flat view: keys hang
 --- directly under the db node.
 M.tree_view = true
@@ -34,8 +44,84 @@ local function schedule_render()
   if M.render_hook then M.render_hook() end
 end
 
---- Build (or update) the child list of a db node from a flat key list,
---- grouping by `:` prefix when tree view is on.
+--- Session opts for browser scans: the redis-session process defaults to
+--- --max-items 1000, which would truncate a SCAN COUNT 5000 reply to 1000
+--- keys and silently drop the rest (cursor keeps advancing). Bump it so a
+--- full SCAN page is never cut — this is why header discovery had to page at
+--- 500. @param db number
+--- @return table
+local function scan_session_opts(db)
+  local max_items = math.max(config.config.header_scan_count or 5000, config.config.scan_count or 500) + 1000
+  return { db = db, max_items = max_items }
+end
+
+--- Render a batch delta: append under `node` incrementally when possible,
+--- otherwise fall back to a full render.
+local function schedule_append(node, new_nodes)
+  if not new_nodes or #new_nodes == 0 then return end
+  if M.append_hook and M.append_hook(node, new_nodes) then return end
+  schedule_render()
+end
+
+--- Reorder a node's children: flat keys first (arrival order), then group
+--- nodes sorted by name — the stable layout for a db node.
+local function sort_children(node)
+  local flat, groups = {}, {}
+  for _, ch in ipairs(node.children or {}) do
+    if ch.node_type == "group" then groups[#groups + 1] = ch
+    else flat[#flat + 1] = ch end
+  end
+  table.sort(groups, function(a, b) return a.name < b.name end)
+  node.children = {}
+  for _, f in ipairs(flat) do node.children[#node.children + 1] = f end
+  for _, g in ipairs(groups) do node.children[#node.children + 1] = g end
+end
+
+--- Build (or extend) a db node's child list from a stream of SCAN keys,
+--- lazily: one group header per distinct first `:`-segment + flat keys.
+--- Groups are NOT loaded here — each loads on expand via scan_group
+--- (SCAN MATCH <prefix>:*), so a 100k-key prefix costs nothing at db-expand.
+--- Incremental: only keys from index `from` are new (idempotent groups).
+--- @param node table db node
+--- @param keys string[] all keys accumulated so far
+--- @param conn_name string
+--- @param db number
+--- @param from number 1-based index of the first unseen key
+--- @return table[] new_nodes created for this delta
+local function build_group_headers(node, keys, conn_name, db, from)
+  local new_nodes = {}
+  if not M.tree_view then
+    -- flat view: every key hangs directly under the db node
+    for i = from, #keys do
+      local kn = tree.make_key_node(keys[i], conn_name, db)
+      table.insert(node.children, kn)
+      table.insert(new_nodes, kn)
+    end
+    return new_nodes
+  end
+  node._segs = node._segs or {}
+  for i = from, #keys do
+    local k = keys[i]
+    local seg = k:match("^([^:]+):")
+    if not seg then
+      local kn = tree.make_key_node(k, conn_name, db)
+      table.insert(node.children, kn)
+      table.insert(new_nodes, kn)
+    else
+      local g = node._segs[seg]
+      if not g then
+        g = tree.make_group_node(seg, conn_name, db)
+        node._segs[seg] = g
+        table.insert(node.children, g)
+        table.insert(new_nodes, g)
+      end
+    end
+  end
+  return new_nodes
+end
+
+--- Full eager build of a db node's children from a flat key list, grouping by
+--- `:` prefix when tree view is on. Used by toggle_view (rebuild) and tests.
 --- @param node table db node
 --- @param keys string[]
 --- @param conn_name string
@@ -48,77 +134,38 @@ local function build_children(node, keys, conn_name, db)
     end
     return
   end
-
-  -- Tree view: bucket by first `:` segment.
-  local buckets = {}  -- segment -> { keys = {} }
-  local order = {}
+  local buckets, order = {}, {}
   for _, k in ipairs(keys) do
     local seg = k:match("^([^:]+):") or ""
     if seg == "" then
-      -- key without a `:` stays flat under the db node
       table.insert(node.children, tree.make_key_node(k, conn_name, db))
     else
       local b = buckets[seg]
-      if not b then
-        b = { keys = {} }
-        buckets[seg] = b
-        order[#order + 1] = seg
-      end
+      if not b then b = { keys = {} }; buckets[seg] = b; order[#order + 1] = seg end
       table.insert(b.keys, k)
     end
   end
   table.sort(order)
   for _, seg in ipairs(order) do
-    local b = buckets[seg]
     local group = tree.make_group_node(seg, conn_name, db)
     group.children = {}
-    for _, k in ipairs(b.keys) do
+    for _, k in ipairs(buckets[seg].keys) do
       table.insert(group.children, tree.make_key_node(k, conn_name, db))
     end
     table.insert(node.children, group)
   end
 end
 
---- Fetch the TYPE + size for a key (best-effort; failures degrade to
---- type=unknown silently — the browser must never block on metadata).
---- @param conn_url string
---- @param db number
---- @param key string
---- @param cb fun(type: string|nil, size: string|nil)
-local function fetch_key_meta(conn_url, db, key, cb)
-  local done = false
-  local function finish(t, s)
-    if not done then done = true; cb(t, s) end
-  end
-  session_conn.execute(conn_url, { "TYPE", key }, {
-    on_response = function(ev)
-      local t = ev.value and ev.value.value or nil
-      local size_cmd
-      if t == "string" then size_cmd = "STRLEN"
-      elseif t == "hash" then size_cmd = "HLEN"
-      elseif t == "list" then size_cmd = "LLEN"
-      elseif t == "set" then size_cmd = "SCARD"
-      elseif t == "zset" then size_cmd = "ZCARD"
-      elseif t == "stream" then size_cmd = "XLEN"
-      end
-      if size_cmd then
-        session_conn.execute(conn_url, { size_cmd, key }, {
-          on_response = function(ev2)
-            local n = ev2.value and ev2.value.value
-            finish(t, n ~= nil and tostring(n) or nil)
-          end,
-          on_error = function() finish(t, nil) end,
-        })
-      else
-        finish(t, nil)
-      end
-    end,
-    on_error = function() finish(nil, nil) end,
-  }, nil, { db = db })
-end
-
---- SCAN-load a db node's keys in batches. Batches are appended to
---- node.children via build_children so the tree stays stable across scans.
+--- SCAN-load a db node's group headers in batches (LAZY: groups are created
+--- but not populated; each loads on expand via scan_group). This keeps db
+--- expand O(distinct prefixes) instead of O(all keys) — a 100k-key db shows
+--- its groups instantly. Batches append incrementally via append_hook.
+---
+--- Uses a LARGE COUNT (header_scan_count): finding distinct `:` prefixes
+--- requires walking the whole keyspace, so paging at scan_count costs 200
+--- round-trips on a 100k-key db; at 5000 it is ~21. Every page appends any
+--- newly discovered prefixes immediately, and in tree view the loading
+--- marker clears after the first page so the db node shows its groups fast.
 --- @param node table db node
 --- @param conn_url string
 --- @param conn_name string
@@ -129,13 +176,17 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
   local epoch = node.epoch
   node.loading = true
   node.children = {}
+  node._segs = {}
+  node.expanded = true
   schedule_render()
 
-  local scan_count = config.config.scan_count or 500
+  local scan_count = config.config.header_scan_count or 5000
   local all_keys = {}
+  local built = 0  -- keys already materialized into nodes
+  local page = 0
 
   local function next_page(cursor)
-    if node.epoch ~= epoch then return end  -- superseded fetch
+    if node.epoch ~= epoch then return end
     local cmd = { "SCAN", cursor, "COUNT", tostring(scan_count) }
     if pattern and pattern ~= "" then
       cmd[#cmd + 1] = "MATCH"
@@ -150,12 +201,91 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
         local v = ev.value
         local keys = v and v.value or {}
         local new_cursor = (v and v.cursor) or "0"
+        page = page + 1
         for _, k in ipairs(keys) do
           if type(k) == "string" then all_keys[#all_keys + 1] = k end
         end
-        build_children(node, all_keys, conn_name, db)
+        local final_page = new_cursor == "0"
+        -- Every page may surface new prefixes: append them immediately.
+        local new_nodes = build_group_headers(node, all_keys, conn_name, db, built + 1)
+        built = #all_keys
+        schedule_append(node, new_nodes)
+        if not final_page then
+          next_page(new_cursor)
+        else
+          sort_children(node)
+          node.loading = false
+          schedule_render()
+        end
+      end,
+      on_error = function(msg)
+        if node.epoch ~= epoch then return end
+        node.loading = false
+        node.error = msg
         schedule_render()
-        if new_cursor ~= "0" then
+      end,
+    }, nil, scan_session_opts(db))
+  end
+
+  next_page("0")
+end
+
+--- SCAN-load a group node's keys in batches (lazy, SCAN MATCH <prefix>:*).
+--- Appends key nodes incrementally. `subpattern` narrows the match — this is
+--- the same primitive a future search-by-subpath (e.g. bench:a:b:c) needs:
+--- call scan_group(node, url, name, "a:b:c") → MATCH bench:a:b:c*.
+--- @param node table group node
+--- @param conn_url string
+--- @param conn_name string
+--- @param subpattern string|nil  extra path after the group prefix (search)
+function M.scan_group(node, conn_url, conn_name, subpattern)
+  local db = node.meta.db
+  node.epoch = (node.epoch or 0) + 1
+  local epoch = node.epoch
+  node.loading = true
+  node.children = {}
+  node.expanded = true
+  node.loaded = true
+  schedule_render()
+
+  local scan_count = config.config.scan_count or 500
+  local all_keys = {}
+  local built = 0
+  local RENDER_EVERY_PAGES = 8
+  local page = 0
+
+  local prefix = node.meta.prefix or ""
+  local match = prefix .. ":"
+  if subpattern and subpattern ~= "" then
+    match = match .. subpattern .. "*"
+  else
+    match = match .. "*"
+  end
+
+  local function next_page(cursor)
+    if node.epoch ~= epoch then return end
+    local cmd = { "SCAN", cursor, "COUNT", tostring(scan_count), "MATCH", match }
+    session_conn.execute(conn_url, cmd, {
+      on_response = function(ev)
+        if node.epoch ~= epoch then return end
+        local v = ev.value
+        local keys = v and v.value or {}
+        local new_cursor = (v and v.cursor) or "0"
+        page = page + 1
+        for _, k in ipairs(keys) do
+          if type(k) == "string" then all_keys[#all_keys + 1] = k end
+        end
+        local final_page = new_cursor == "0"
+        if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
+          local new_nodes = {}
+          for i = built + 1, #all_keys do
+            table.insert(new_nodes, tree.make_key_node(all_keys[i], conn_name, db))
+          end
+          built = #all_keys
+          for _, n in ipairs(new_nodes) do table.insert(node.children, n) end
+          schedule_append(node, new_nodes)
+        end
+        if not final_page then
           next_page(new_cursor)
         else
           node.loading = false
@@ -168,7 +298,7 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
         node.error = msg
         schedule_render()
       end,
-    }, nil, { db = db })
+    }, nil, scan_session_opts(db))
   end
 
   next_page("0")
@@ -224,12 +354,13 @@ function M.fetch_dbs(node, conn_url, cb)
         pending = pending - 1
         if pending <= 0 then done() end
       end,
-    }, nil, { db = db })
+    }, nil, scan_session_opts(db))
   end
 end
 
 M._test = {
   build_children = build_children,
+  build_group_headers = build_group_headers,
   SPLIT_NEST = SPLIT_NEST,
 }
 

@@ -20,6 +20,13 @@ local redis_state = require("poste-redis.state")
 
 local M = {}
 
+-- The redis-session process caps array/map replies at --max-items (its own
+-- default is 1000). SCAN COUNT 5000 would then have every page silently
+-- truncated to 1000 keys while the cursor keeps advancing — keys lost. This
+-- transport is redis-only and pagination is driven by Lua (SCAN cursor,
+-- value view paging), so cap high; per-call opts.max_items still overrides.
+local DEFAULT_MAX_ITEMS = 100000
+
 -- pool[connection_url] = {
 --   job_id      = number,
 --   conn_url    = string,
@@ -130,8 +137,9 @@ local function start(conn_url, opts)
   }
 
   local cmd = { binary, "redis-session", "--connection", conn_url }
-  if opts.max_items then
-    table.insert(cmd, "--max-items"); table.insert(cmd, tostring(opts.max_items))
+  local max_items = opts.max_items or DEFAULT_MAX_ITEMS
+  if max_items then
+    table.insert(cmd, "--max-items"); table.insert(cmd, tostring(max_items))
   end
   if opts.max_bytes then
     table.insert(cmd, "--max-bytes"); table.insert(cmd, tostring(opts.max_bytes))

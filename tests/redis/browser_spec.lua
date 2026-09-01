@@ -205,7 +205,7 @@ describe("poste-redis browser e2e (live redis)", function()
     require("poste-redis.session_conn").stop_all()
   end)
 
-  it("scan_keys loads keys into groups via the live session", function()
+  it("scan_keys builds lazy group headers; scan_group loads keys", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
     local tree = require("poste-redis.browser.tree")
     local async = require("poste-redis.browser.async")
@@ -222,10 +222,8 @@ describe("poste-redis browser e2e (live redis)", function()
 
     async.tree_view = true
     local db = tree.make_db_node({ db = 0 }, "browser-e2e")
-    local done = false
     async.scan_keys(db, url, "browser-e2e")
-    -- SCAN is async; poll for loading to finish (generous window: session
-    -- start + first SCAN round-trip)
+    -- SCAN is async; poll for loading to finish
     local wait_ok = vim.wait(10000, function()
       return not db.loading
     end, 10)
@@ -236,14 +234,27 @@ describe("poste-redis browser e2e (live redis)", function()
     for _, ch in ipairs(db.children) do
       if ch.node_type == "group" then
         table.insert(names, ch.name)
-        assert.is_true(#ch.children >= 1)
-        local k = ch.children[1]
-        assert.equals("key", k.node_type)
-        assert.equals(0, k.meta.db)
+        -- lazy: headers are created but keys load only on scan_group
+        assert.is_nil(ch.children, "group should be lazily unloaded after scan_keys")
       end
     end
     assert.is_true(vim.tbl_contains(names, "user"))
     assert.is_true(vim.tbl_contains(names, "cache"))
+
+    -- expand the user group: scan_group loads its keys
+    local user
+    for _, ch in ipairs(db.children) do
+      if ch.node_type == "group" and ch.name == "user" then user = ch end
+    end
+    assert.is_truthy(user, "user group missing")
+    async.scan_group(user, url, "browser-e2e")
+    local gwait = vim.wait(10000, function()
+      return user.children ~= nil and #user.children >= 2
+    end, 10)
+    assert.is_true(gwait, "scan_group did not load user keys")
+    local k = user.children[1]
+    assert.equals("key", k.node_type)
+    assert.equals(0, k.meta.db)
   end)
 
   it("value.view renders a string key through the live session", function()
