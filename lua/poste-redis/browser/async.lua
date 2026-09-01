@@ -94,6 +94,7 @@ local function build_group_headers(node, keys, conn_name, db, from)
     -- flat view: every key hangs directly under the db node
     for i = from, #keys do
       local kn = tree.make_key_node(keys[i], conn_name, db)
+      kn.parent = node
       table.insert(node.children, kn)
       table.insert(new_nodes, kn)
     end
@@ -105,12 +106,14 @@ local function build_group_headers(node, keys, conn_name, db, from)
     local seg = k:match("^([^:]+):")
     if not seg then
       local kn = tree.make_key_node(k, conn_name, db)
+      kn.parent = node
       table.insert(node.children, kn)
       table.insert(new_nodes, kn)
     else
       local g = node._segs[seg]
       if not g then
         g = tree.make_group_node(seg, conn_name, db)
+        g.parent = node
         node._segs[seg] = g
         table.insert(node.children, g)
         table.insert(new_nodes, g)
@@ -279,7 +282,9 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
           local new_nodes = {}
           for i = built + 1, #all_keys do
-            table.insert(new_nodes, tree.make_key_node(all_keys[i], conn_name, db))
+            local kn = tree.make_key_node(all_keys[i], conn_name, db)
+            kn.parent = node
+            table.insert(new_nodes, kn)
           end
           built = #all_keys
           for _, n in ipairs(new_nodes) do table.insert(node.children, n) end
@@ -302,6 +307,108 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
   end
 
   next_page("0")
+end
+
+--- Search-by-subpath: SCAN MATCH <subpath>* and render matching keys under a
+--- dedicated ` <subpath>` result node attached to the db node. This is the
+--- same cursor/pacing/append machinery as scan_group; the search bar in
+--- browser/init.lua drives it on <leader>/> + <CR>.
+---
+--- Reuses (or re-seeds) db_node._search_results so re-searching replaces the
+--- previous results. Epoch is bumped on the db node so a stale search (or a
+--- stale group scan on the same db) is dropped.
+--- @param db_node table db node
+--- @param conn_url string
+--- @param conn_name string
+--- @param subpath string e.g. "bench:a:b:c" (empty → clear)
+function M.search(db_node, conn_url, conn_name, subpath)
+  if subpath == nil or subpath == "" then
+    M.search_clear(db_node)
+    return
+  end
+  local db = db_node.meta.db
+  db_node.epoch = (db_node.epoch or 0) + 1
+  local epoch = db_node.epoch
+
+  -- Result node: one per db, replaced on re-search.
+  local results = db_node._search_results
+  if not results then
+    results = tree.make_group_node(" " .. subpath, conn_name, db)
+    results.is_search = true
+    results.parent = db_node
+    db_node._search_results = results
+    db_node.children = db_node.children or {}
+    table.insert(db_node.children, results)
+  else
+    results.name = " " .. subpath
+  end
+  results.children = {}
+  results.expanded = true
+  results.loading = true
+  db_node.expanded = true
+  schedule_render()
+
+  local scan_count = config.config.scan_count or 500
+  local all_keys = {}
+  local built = 0
+  local RENDER_EVERY_PAGES = 8
+  local page = 0
+  local match = subpath .. "*"
+
+  local function next_page(cursor)
+    if db_node.epoch ~= epoch then return end
+    local cmd = { "SCAN", cursor, "COUNT", tostring(scan_count), "MATCH", match }
+    session_conn.execute(conn_url, cmd, {
+      on_response = function(ev)
+        if db_node.epoch ~= epoch then return end
+        local v = ev.value
+        local keys = v and v.value or {}
+        local new_cursor = (v and v.cursor) or "0"
+        page = page + 1
+        for _, k in ipairs(keys) do
+          if type(k) == "string" then all_keys[#all_keys + 1] = k end
+        end
+        local final_page = new_cursor == "0"
+        if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
+          local new_nodes = {}
+          for i = built + 1, #all_keys do
+            table.insert(new_nodes, tree.make_key_node(all_keys[i], conn_name, db))
+          end
+          built = #all_keys
+          for _, n in ipairs(new_nodes) do table.insert(results.children, n) end
+          schedule_append(results, new_nodes)
+        end
+        if not final_page then
+          next_page(new_cursor)
+        else
+          results.loading = false
+          schedule_render()
+        end
+      end,
+      on_error = function(msg)
+        if db_node.epoch ~= epoch then return end
+        results.loading = false
+        db_node.error = msg
+        schedule_render()
+      end,
+    }, nil, scan_session_opts(db))
+  end
+
+  next_page("0")
+end
+
+--- Remove the search results node from a db node and re-render.
+--- @param db_node table
+function M.search_clear(db_node)
+  if not db_node or not db_node._search_results then return end
+  db_node.epoch = (db_node.epoch or 0) + 1
+  db_node._search_results = nil
+  local kept = {}
+  for _, ch in ipairs(db_node.children or {}) do
+    if not ch.is_search then kept[#kept + 1] = ch end
+  end
+  db_node.children = kept
+  schedule_render()
 end
 
 --- Load the connection list from connections.toml (redis dialect only).

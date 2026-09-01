@@ -19,8 +19,10 @@ describe("poste-redis browser tree", function()
     assert.match("user:2", lines[3])
     assert.match("hash", lines[3])
     assert.equals(3, #node_map)
-    -- flat keys are leaves: no marker
-    assert.is_nil(lines[2]:match("^%s*[▸▾]"))
+    -- flat keys nested under a db are leaves: no marker (nerd-font glyphs;
+    -- match full multibyte glyphs, not a byte class — all share byte 0xEF)
+    assert.is_nil(lines[2]:match("^%s*"))
+    assert.is_nil(lines[2]:match("^%s*"))
   end)
 
   it("renders collapsed/expanded markers on non-leaf nodes", function()
@@ -28,15 +30,15 @@ describe("poste-redis browser tree", function()
     local db = tree.make_db_node({ db = 0 }, "c")
     conn.children = { db }
     local lines = tree.flatten_tree({ conn })
-    assert.match("▸", lines[1])
+    assert.match("", lines[1])          -- collapsed marker
     conn.expanded = true
     db.expanded = true
     lines = tree.flatten_tree({ conn })
-    assert.match("▾", lines[1])
-    assert.match("▾", lines[2])
+    assert.match("", lines[1])          -- expanded marker
+    assert.match("", lines[2])
   end)
 
-  it("maps buffer lines to nodes via get_node_at_line", function()
+  it("maps buffer lines to nodes via get_node_at_line (2 header lines offset)", function()
     local conn = tree.make_connection_node({ name = "c", url = "u", dialect = "redis" })
     local db = tree.make_db_node({ db = 1 }, "c")
     local key = tree.make_key_node("k", "c", 1)
@@ -45,10 +47,13 @@ describe("poste-redis browser tree", function()
     conn.expanded = true
     db.expanded = true
     local _, node_map = tree.flatten_tree({ conn })
-    assert.equals(conn, tree.get_node_at_line(node_map, 1))
-    assert.equals(db, tree.get_node_at_line(node_map, 2))
-    assert.equals(key, tree.get_node_at_line(node_map, 3))
-    assert.is_nil(tree.get_node_at_line(node_map, 4))
+    -- HEADER_LINES = 2: search bar (1) + db select (2), nodes start at line 3
+    assert.is_nil(tree.get_node_at_line(node_map, 1))
+    assert.is_nil(tree.get_node_at_line(node_map, 2))
+    assert.equals(conn, tree.get_node_at_line(node_map, 3))
+    assert.equals(db, tree.get_node_at_line(node_map, 4))
+    assert.equals(key, tree.get_node_at_line(node_map, 5))
+    assert.is_nil(tree.get_node_at_line(node_map, 6))
   end)
 end)
 
@@ -255,6 +260,48 @@ describe("poste-redis browser e2e (live redis)", function()
     local k = user.children[1]
     assert.equals("key", k.node_type)
     assert.equals(0, k.meta.db)
+  end)
+
+  it("search renders sub-path matches and search_clear removes them", function()
+    if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
+    local tree = require("poste-redis.browser.tree")
+    local async = require("poste-redis.browser.async")
+    local session_conn = require("poste-redis.session_conn")
+
+    -- seed nested sub-path keys
+    local seeded = false
+    session_conn.execute(url, {
+      "MSET",
+      "bench:a:x", "1", "bench:a:b:y", "2", "bench:c:z", "3", "other:1", "4",
+    }, {
+      on_response = function() seeded = true end,
+    }, nil, { db = 0 })
+    vim.wait(3000, function() return seeded end, 5)
+
+    local db = tree.make_db_node({ db = 0 }, "search-e2e")
+    db.children = {}
+    async.search(db, url, "search-e2e", "bench:a")
+    local wait_ok = vim.wait(10000, function()
+      return not (db._search_results and db._search_results.loading)
+    end, 10)
+    assert.is_true(wait_ok, "search did not finish in 10s")
+    assert.is_truthy(db._search_results, "search results node missing")
+    local results = db._search_results
+    assert.match("", results.name)      -- nerd-font search glyph, no emoji
+    local names = {}
+    for _, k in ipairs(results.children or {}) do
+      names[#names + 1] = k.name
+    end
+    assert.is_true(vim.tbl_contains(names, "bench:a:x"), "missing bench:a:x")
+    assert.is_true(vim.tbl_contains(names, "bench:a:b:y"), "missing bench:a:b:y")
+    assert.is_false(vim.tbl_contains(names, "bench:c:z"), "non-matching key leaked")
+
+    -- clearing removes the results node from db children
+    async.search_clear(db)
+    assert.is_nil(db._search_results)
+    for _, ch in ipairs(db.children) do
+      assert.is_false(ch.is_search, "search node not removed")
+    end
   end)
 
   it("value.view renders a string key through the live session", function()

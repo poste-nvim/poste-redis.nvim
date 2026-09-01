@@ -13,22 +13,35 @@
 
 local M = {}
 
-local MARKER_COLLAPSED = "▸ "
-local MARKER_EXPANDED = "▾ "
-local MARKER_LOADING = "⋯ "
+-- Nerd-font glyphs (no emoji): marker + icons per node type.
+local MARKER_COLLAPSED = " "
+local MARKER_EXPANDED = " "
+local MARKER_LOADING = "… "
 
 local ICON = {
-  connection = "🔌",
-  db = "🅳",
-  group = "📁",
-  key = "🔑",
+  connection = "",
+  db = "",
+  group = "",
+  key = "",
 }
 
 local hl_ns = vim.api.nvim_create_namespace("poste_redis_browser")
 
-local HEADER_LINES = 0 -- no header: the browser buffer is pure tree lines
+-- Two header lines above the tree: line 1 = search bar, line 2 = db select.
+-- Every node line sits below them; line math (append_children,
+-- apply_highlights, get_node_at_line) offsets by this constant.
+local HEADER_LINES = 2
 
 M.HEADER_LINES = HEADER_LINES
+
+--- Header lines rendered above the tree. Set by browser/init.lua:
+---   [1] search bar, [2] db select. Empty strings hide that line.
+M.header_lines = { "", "" }
+
+--- When set, this node is the hidden display root: its own line is not
+--- rendered; its children become the top level (depth 0). Used by the new
+--- layout where the selected db lives in a header select bar, not the tree.
+M.display_root = nil
 
 function M.make_connection_node(conn_info)
   return {
@@ -101,49 +114,64 @@ function M.flatten_tree(nodes, depth, multi_select)
   local marker_cols = {}
 
   for _, node in ipairs(nodes) do
-    local indent = string.rep("  ", depth)
-    local icon = ICON[node.node_type] or "  "
-
-    local marker
-    if node.loading then
-      marker = MARKER_LOADING
-    elseif node.expanded then
-      marker = MARKER_EXPANDED
-    elseif node.node_type == "connection" or node.node_type == "db"
-        or node.node_type == "group" then
-      marker = MARKER_COLLAPSED
+    -- Hidden display root: emit no line, render its children at depth 0 so
+    -- the tree top level is the selected db's groups/keys directly.
+    if node == M.display_root then
+      node._depth = -1
+      if node.expanded and node.children then
+        local child_lines, child_map, child_cols = M.flatten_tree(node.children, 0)
+        node._desc_lines = #child_lines
+        for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
+        for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
+        for _, cc in ipairs(child_cols) do table.insert(marker_cols, cc) end
+      else
+        node._desc_lines = 0
+      end
     else
-      marker = "  "
-    end
+      local indent = string.rep("  ", depth)
+      local icon = ICON[node.node_type] or "  "
 
-    local suffix = ""
-    if node.node_type == "connection" then
-      suffix = ""
-    elseif node.node_type == "db" then
-      suffix = ""
-    elseif node.node_type == "key" and node.meta and node.meta.type then
-      suffix = "  " .. node.meta.type
-      if node.meta.size then suffix = suffix .. " (" .. node.meta.size .. ")" end
-    end
+      local marker
+      if node.loading then
+        marker = MARKER_LOADING
+      elseif node.expanded then
+        marker = MARKER_EXPANDED
+      elseif node.node_type == "connection" or node.node_type == "db"
+          or node.node_type == "group" or depth == 0 then
+        marker = MARKER_COLLAPSED
+      else
+        marker = "  "
+      end
 
-    local line = indent .. marker .. icon .. " " .. node.name .. suffix
-    table.insert(lines, line)
-    table.insert(node_map, node)
-    -- First non-space byte = after the indent (marker glyph) or after a
-    -- two-space leaf marker — mirrors the old apply_highlights scan.
-    local marker_col = #indent
-    if marker == "  " then marker_col = marker_col + 2 end
-    table.insert(marker_cols, marker_col)
+      local suffix = ""
+      if node.node_type == "connection" then
+        suffix = ""
+      elseif node.node_type == "db" then
+        suffix = ""
+      elseif node.node_type == "key" and node.meta and node.meta.type then
+        suffix = "  " .. node.meta.type
+        if node.meta.size then suffix = suffix .. " (" .. node.meta.size .. ")" end
+      end
 
-    node._depth = depth
-    if node.expanded and node.children then
-      local child_lines, child_map, child_cols = M.flatten_tree(node.children, depth + 1)
-      node._desc_lines = #child_lines
-      for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
-      for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
-      for _, cc in ipairs(child_cols) do table.insert(marker_cols, cc) end
-    else
-      node._desc_lines = 0
+      local line = indent .. marker .. icon .. " " .. node.name .. suffix
+      table.insert(lines, line)
+      table.insert(node_map, node)
+      -- First non-space byte = after the indent (marker glyph) or after a
+      -- two-space leaf marker — mirrors the old apply_highlights scan.
+      local marker_col = #indent
+      if marker == "  " then marker_col = marker_col + 2 end
+      table.insert(marker_cols, marker_col)
+
+      node._depth = depth
+      if node.expanded and node.children then
+        local child_lines, child_map, child_cols = M.flatten_tree(node.children, depth + 1)
+        node._desc_lines = #child_lines
+        for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
+        for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
+        for _, cc in ipairs(child_cols) do table.insert(marker_cols, cc) end
+      else
+        node._desc_lines = 0
+      end
     end
   end
 
@@ -180,11 +208,12 @@ end
 function M.apply_highlights(buf, line_to_node, marker_cols)
   vim.api.nvim_buf_clear_namespace(buf, hl_ns, 0, -1)
   for i, node in ipairs(line_to_node) do
-    highlight_line(buf, i - 1, node, (marker_cols and marker_cols[i]) or 0)
+    highlight_line(buf, i - 1 + HEADER_LINES, node, (marker_cols and marker_cols[i]) or 0)
   end
 end
 
---- Write the flattened tree into the browser buffer.
+--- Write the flattened tree into the browser buffer, prepending the two
+--- header lines (search bar + db select) from M.header_lines.
 --- @param browser_buf number
 --- @param line_to_node table[]  (in/out: replaced)
 --- @param root_nodes table[]
@@ -193,11 +222,29 @@ function M.render_tree(browser_buf, line_to_node, root_nodes)
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return line_to_node end
 
   local lines, node_map, marker_cols = M.flatten_tree(root_nodes)
+  for i = #M.header_lines, 1, -1 do
+    if M.header_lines[i] and M.header_lines[i] ~= "" then
+      table.insert(lines, 1, M.header_lines[i])
+    end
+  end
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
   vim.api.nvim_buf_set_lines(browser_buf, 0, -1, false, lines)
   vim.api.nvim_set_option_value("modifiable", false, { buf = browser_buf })
   M.apply_highlights(browser_buf, node_map, marker_cols)
   return node_map
+end
+
+--- Replace only one header line without re-rendering the tree. Used while
+--- typing in the search input or refreshing the db select.
+--- @param buf number
+--- @param text string
+--- @param line number 1-based header line (1 = search, 2 = db select)
+function M.set_header_line(buf, text, line)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  local idx = (line or 1) - 1
+  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  vim.api.nvim_buf_set_lines(buf, idx, idx + 1, false, { text })
+  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 end
 
 --- Incrementally append newly-loaded child nodes under a rendered node
@@ -217,8 +264,12 @@ end
 function M.append_children(buf, line_to_node, node, new_nodes)
   if not new_nodes or #new_nodes == 0 then return true end
   local node_idx
-  for i, n in ipairs(line_to_node) do
-    if n == node then node_idx = i; break end
+  if node == M.display_root then
+    node_idx = 0  -- hidden root: children occupy the whole tree below headers
+  else
+    for i, n in ipairs(line_to_node) do
+      if n == node then node_idx = i; break end
+    end
   end
   if not node_idx then return false end  -- node not rendered → full render
 
@@ -226,7 +277,8 @@ function M.append_children(buf, line_to_node, node, new_nodes)
   local lines, node_map, marker_cols = M.flatten_tree(new_nodes, child_depth)
 
   -- Buffer insert point (0-based): right after the node's rendered subtree.
-  local insert_0 = node_idx + (node._desc_lines or 0)
+  -- node_idx is a 1-based slot in line_to_node → buffer line node_idx+HEADER.
+  local insert_0 = node_idx + HEADER_LINES + (node._desc_lines or 0)
   vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
   vim.api.nvim_buf_set_lines(buf, insert_0, insert_0, false, lines)
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
