@@ -223,10 +223,10 @@ function M.render_tree(browser_buf, line_to_node, root_nodes)
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return line_to_node end
 
   local lines, node_map, marker_cols = M.flatten_tree(root_nodes)
+  -- The search bar header line can legitimately be empty (query ""), so every
+  -- header line is always written — skipping empties would drop the bar.
   for i = #M.header_lines, 1, -1 do
-    if M.header_lines[i] and M.header_lines[i] ~= "" then
-      table.insert(lines, 1, M.header_lines[i])
-    end
+    table.insert(lines, 1, M.header_lines[i] or "")
   end
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
   vim.api.nvim_buf_set_lines(browser_buf, 0, -1, false, lines)
@@ -249,45 +249,55 @@ function M.set_header_line(buf, text, line)
 end
 
 ----------------------------------------------------------------------
--- Search bar (header line 1): icon prefix + query text. The prefix is
--- fixed buffer text; everything after it IS the query — nothing else on
--- the line can leak into a search.
+-- Search bar (header line 1): the icon is extmark virtual text, never
+-- buffer text. The buffer line holds ONLY the query, so nothing typed
+-- (or deleted) can ever merge the icon into a search. The icon is drawn
+-- only in the idle/committed state — while editing it is removed so the
+-- caret can never sit on or before it.
 ----------------------------------------------------------------------
 
 local search_ns = vim.api.nvim_create_namespace("poste_redis_browser_search")
 
---- Fixed prefix of the search bar: U+F002 (magnifying glass) + space. Typed
---- query text always starts after these bytes; parse takes only the tail.
+--- Fixed icon of the search bar: U+F002 (magnifying glass) + space. Rendered
+--- as inline virt text ahead of the committed query (idle state only), so it
+--- is never part of the input.
 M.SEARCH_ICON = "\239\128\130"
 M.SEARCH_PREFIX = M.SEARCH_ICON .. " "
 
---- Draw the search bar in its idle state: prefix + committed query. With no
---- query, an inline virt-text hint follows the icon — extmark virtual text,
---- never buffer text, so it can never be parsed (or edited) as a query.
+--- Draw the search bar: the query as buffer text (the editable input). With
+--- no query, a "filter by key" ghost hint follows the icon — all virt text,
+--- so it can never be parsed (or edited) as a query.
 --- @param buf number
 --- @param query string committed search text ("" → show the hint)
 function M.render_search_line(buf, query)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
-  M.set_header_line(buf, M.SEARCH_PREFIX .. query, 1)
-  M.decorate_search_line(buf, query)
+  M.set_header_line(buf, query or "", 1)
+  M.decorate_search_line(buf, query or "", false)
 end
 
---- Highlight the search bar: icon in PosteRedisBrowserSearchHint; a
---- committed query in PosteRedisBrowserSearchText; with no query, the
---- "filter by key" ghost hint after the icon.
+--- Highlight the search bar. Idle state: the icon (+ optional ghost hint) as
+--- inline virt text before the query, the query buffer text in
+--- PosteRedisBrowserSearchText. While `editing` NOTHING is drawn — the icon
+--- must not sit at the caret column, or the caret renders before it instead
+--- of after the typed text.
 --- @param buf number
 --- @param query string
-function M.decorate_search_line(buf, query)
+--- @param editing boolean true while the user is typing on the line
+function M.decorate_search_line(buf, query, editing)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
   vim.api.nvim_buf_clear_namespace(buf, search_ns, 0, -1)
-  vim.api.nvim_buf_add_highlight(buf, search_ns, "PosteRedisBrowserSearchHint", 0, 0, #M.SEARCH_PREFIX)
+  if editing then return end
+  local virt = { { M.SEARCH_PREFIX, "PosteRedisBrowserSearchHint" } }
   if query == "" then
-    vim.api.nvim_buf_set_extmark(buf, search_ns, 0, #M.SEARCH_PREFIX, {
-      virt_text = { { "filter by key", "PosteRedisBrowserSearchHint" } },
-      virt_text_pos = "inline",
-    })
-  else
-    vim.api.nvim_buf_add_highlight(buf, search_ns, "PosteRedisBrowserSearchText", 0, #M.SEARCH_PREFIX, -1)
+    virt[2] = { "filter by key", "PosteRedisBrowserSearchHint" }
+  end
+  vim.api.nvim_buf_set_extmark(buf, search_ns, 0, 0, {
+    virt_text = virt,
+    virt_text_pos = "inline",
+    hl_mode = "combine",
+  })
+  if query ~= "" then
+    vim.api.nvim_buf_add_highlight(buf, search_ns, "PosteRedisBrowserSearchText", 0, 0, -1)
   end
 end
 

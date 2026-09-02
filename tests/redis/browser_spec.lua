@@ -210,17 +210,30 @@ describe("poste-redis browser search bar", function()
     assert.equals("que", browser._test.parse_search_line(prefix .. prefix .. "que"))
   end)
 
-  it("search line is icon + query; hint is virt text, never buffer text", function()
+  it("search line holds only the query; the icon + hint are virt text", function()
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "", "" })
+    local icon = "\239\128\130"
 
     tree.render_search_line(buf, "")
-    assert.equals(prefix, vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
-      "empty state: the 'filter by key' hint must not be buffer text")
+    assert.equals("", vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
+      "empty state: neither the icon nor the hint may be buffer text")
+    assert.is_nil(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]:find(icon, 1, true),
+      "the icon must never live in the buffer (it is virt text)")
 
     tree.render_search_line(buf, "cache")
-    assert.equals(prefix .. "cache", vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
+    assert.equals("cache", vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
       "committed query stays on the search line")
+
+    -- editing state drops the icon virt text: the caret must never sit on or
+    -- before a virt glyph at the same column.
+    tree.decorate_search_line(buf, "cache", true)
+    local nsid = vim.api.nvim_get_namespaces()["poste_redis_browser_search"]
+    local em = nsid and vim.api.nvim_buf_get_extmarks(buf, nsid, 0, -1, {}) or {}
+    assert.equals(0, #em, "no icon virt text while editing")
+    tree.decorate_search_line(buf, "", false)
+    local em2 = nsid and vim.api.nvim_buf_get_extmarks(buf, nsid, 0, -1, {}) or {}
+    assert.equals(1, #em2, "idle state restores the icon virt text")
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
@@ -303,7 +316,6 @@ describe("poste-redis browser window", function()
   it("<leader>/ search replaces the tree; committed query stays on the bar", function()
     local browser = require("poste-redis.browser.init")
     local session_conn = require("poste-redis.session_conn")
-    local prefix = tree.SEARCH_PREFIX
 
     local orig_load = async.load_connections
     local orig_execute = session_conn.execute
@@ -333,17 +345,17 @@ describe("poste-redis browser window", function()
       return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
     end, 5), "db scan did not render")
 
-    -- idle state: icon-only search bar (hint is virt text), db select, rule
+    -- idle state: the icon is virt text, so line 1 holds no icon/query
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    assert.equals(prefix, lines[1])
+    assert.equals("", lines[1])
     assert.match("db 0%]", lines[2])  -- glyph-agnostic: icon sits before "db"
     assert.match("^%-+$", lines[3])
     local joined = table.concat(lines, "\n")
     assert.is_true(joined:find("plain", 1, true) ~= nil, "unfiltered tree missing")
 
-    -- type into the bar: prefix + query only, then commit
+    -- type into the bar: query only, then commit
     browser._test.search_enter()
-    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { prefix .. "user" })
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "user" })
     browser._test.search_commit()
 
     -- matched keys REPLACE the tree — no unfiltered rows survive
@@ -352,7 +364,7 @@ describe("poste-redis browser window", function()
     assert.is_true(joined:find("user:1", 1, true) ~= nil, "match missing")
     assert.is_true(joined:find("user:2", 1, true) ~= nil, "match missing")
     assert.is_nil(joined:find("plain", 1, true), "search appended instead of replacing")
-    assert.equals(prefix .. "user", lines[1], "committed query must stay on the bar")
+    assert.equals("user", lines[1], "committed query must stay on the bar")
 
     -- clear restores the unfiltered tree
     browser.search_clear()
@@ -365,10 +377,9 @@ describe("poste-redis browser window", function()
     session_conn.execute = orig_execute
   end)
 
-  it("search commits a query typed at the line end with a single icon prefix", function()
+  it("search commits a query typed at the line end; the icon stays virt text", function()
     local browser = require("poste-redis.browser.init")
     local session_conn = require("poste-redis.session_conn")
-    local prefix = tree.SEARCH_PREFIX
 
     local orig_load = async.load_connections
     local orig_execute = session_conn.execute
@@ -395,36 +406,81 @@ describe("poste-redis browser window", function()
       return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
     end, 5), "db scan did not render")
 
-    -- enter the search bar: the caret must land ON THE LAST BYTE of the
-    -- search line — where real insert typing appends after the prefix.
-    -- nvim_win_set_cursor cannot express that column (clamps len -> len-1),
-    -- so this pins the append motion that reaches the true EOL; a caret
-    -- dropped on the prefix's trailing space would put typed text BEFORE
-    -- the space and merge the icon into the query ("  que").
+    -- enter the search bar: the caret must land ON THE TRUE END of the
+    -- search line — the bar holds ONLY the query, so real insert typing
+    -- appends cleanly. The icon is idle-only virt text: it is dropped while
+    -- editing so the caret can never sit on or before it.
     browser._test.search_enter()
     local line1 = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
-    assert.equals(prefix, line1, "search bar must start as icon + space")
+    assert.equals("", line1, "search bar must start with no icon in the buffer")
+    local nsid = vim.api.nvim_get_namespaces()["poste_redis_browser_search"]
+    local em = nsid and vim.api.nvim_buf_get_extmarks(buf, nsid, 0, -1, {}) or {}
+    assert.equals(0, #em,
+      "editing state must drop the icon virt text (caret sits right of nothing)")
     local cursor = vim.api.nvim_win_get_cursor(0)
     assert.equals(1, cursor[1], "search_enter must leave the caret on the search line")
-    assert.equals(#line1 - 1, cursor[2],
-      "caret must sit on the last byte (true EOL), not inside the prefix")
+    assert.equals(0, cursor[2],
+      "caret must sit on the true EOL (col 0 on an empty bar), not inside any prefix")
 
     -- type as the fixed caret does: append at the true end of the line
     vim.api.nvim_buf_set_text(buf, 0, #line1, 0, #line1, { "que" })
-    assert.equals(prefix .. "que", vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
-      "typed query must FOLLOW the single icon prefix")
+    assert.equals("que", vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
+      "typed query must be the only buffer text")
 
     browser._test.search_commit()
     local committed = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
-    assert.equals(prefix .. "que", committed,
-      "committed bar must be 'icon que', not a doubled 'icon icon que' (" .. committed .. ")")
-    local prefixes = select(2, committed:gsub(prefix, ""))
-    assert.equals(1, prefixes, "exactly one icon prefix on the search bar")
+    assert.equals("que", committed,
+      "committed bar must be the bare query, no icon in the buffer (" .. committed .. ")")
     assert.equals("que", browser._test.parse_search_line(committed),
       "the icon must never leak into the committed query")
     local joined = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
     assert.is_true(joined:find("user:1", 1, true) ~= nil, "search with 'que' missing matches")
     assert.is_nil(joined:find("plain", 1, true), "unfiltered rows survived the search")
+
+    browser.close()
+    async.load_connections = orig_load
+    session_conn.execute = orig_execute
+  end)
+
+  it("<leader>/ from a tree row jumps the caret to the search bar, not the row", function()
+    local browser = require("poste-redis.browser.init")
+    local session_conn = require("poste-redis.session_conn")
+
+    local orig_load = async.load_connections
+    local orig_execute = session_conn.execute
+    async.load_connections = function(cb)
+      cb({ tree.make_connection_node({
+        name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis",
+      }) })
+    end
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        local keys = vim.tbl_contains(cmd, "MATCH") and { "user:1", "user:2" }
+          or { "user:1", "user:2", "plain" }
+        cbs.on_response({ value = { value = keys, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    async.tree_view = true
+    local ok, err = pcall(function() browser.open() end)
+    assert.is_true(ok, tostring(err))
+    local buf = browser.info().buffer
+    browser._test.select_db(0)
+    assert.is_true(vim.wait(2000, function()
+      return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
+    end, 5), "db scan did not render")
+
+    -- park the caret on a tree row (below the 3 header lines), then search
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    local row_line = vim.api.nvim_buf_get_lines(buf, 3, 4, false)[1]
+    assert.truthy(row_line and row_line ~= "", "row under the caret must be a tree row")
+
+    browser._test.search_enter()
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    assert.equals(1, cursor[1],
+      "search_enter from a tree row must move the caret to the search bar, not insert on the row")
+    assert.equals(0, cursor[2], "caret sits at the true EOL of the (empty) search bar")
 
     browser.close()
     async.load_connections = orig_load

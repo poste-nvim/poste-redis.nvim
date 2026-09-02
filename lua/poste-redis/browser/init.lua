@@ -50,11 +50,12 @@ local function db_select_text()
   return "[\239\135\128 db " .. tostring(current_db) .. "]"
 end
 
---- Header text for line 1 (search bar): fixed icon prefix + committed query.
---- While the user is editing the line the buffer text is whatever they typed;
+--- Header text for line 1 (search bar): the committed query only — the icon
+--- is virt text added by tree.decorate_search_line, never buffer text. While
+--- the user is editing the line the buffer text is whatever they typed;
 --- render_tree keeps it when a render fires mid-edit.
 local function search_bar_text()
-  return tree.SEARCH_PREFIX .. search_query
+  return search_query
 end
 
 --- Header text for line 3 (separator rule): dashes spanning the browser
@@ -277,26 +278,28 @@ local function search_enter()
   if win ~= -1 then vim.api.nvim_set_current_win(win) end
 
   search_active = true
-  local search_text = tree.SEARCH_PREFIX .. search_query
-  tree.set_header_line(browser_buf, search_text, 1)
-  tree.clear_search_decoration(browser_buf)
+  tree.set_header_line(browser_buf, search_query, 1)
+  -- The icon is idle-only virt text. While editing it is dropped so the
+  -- caret (at the true EOL) can never sit on or before it — the bar is
+  -- just the query, and insert mode is entered automatically.
+  tree.decorate_search_line(browser_buf, search_query, true)
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
-  -- Land on line 1, then append: the caret must sit at the TRUE end of the
-  -- search line so typed text comes after the fixed icon prefix.
-  -- nvim_win_set_cursor cannot express the phantom EOL column — it clamps
-  -- len -> len-1, i.e. ON the prefix's trailing space — and startinsert at
-  -- that caret inserts BEFORE the space, capturing the icon into the query
-  -- ("  que"). normal! A reaches the real last byte and enters insert.
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
   vim.keymap.set("i", "<CR>", search_commit, { buffer = browser_buf, silent = true })
   vim.keymap.set("i", "<Esc>", search_cancel, { buffer = browser_buf, silent = true })
-  vim.cmd("normal! A")
+  -- Land on the search line FIRST: :startinsert! works like "A" (append at the
+  -- EOL of the line the caret is on), so without this it would put the tree
+  -- row under the cursor into insert mode instead. From (1,0) it reaches the
+  -- search line's TRUE EOL and Insert mode starts after this function returns
+  -- (no i/A needed). normal! A must not be used — insert mode entered via
+  -- :normal does not survive a mapping callback (:help :startinsert).
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd("startinsert!")
 end
 
---- Parse the query out of the search bar line: everything after the fixed
---- icon prefix, trimmed. The prompt text can never leak into a query — the
---- old "[search: ...]" line made the prompt itself editable, so deleting
---- into it searched for the prompt remnant.
+--- Parse the query out of the search bar line: trim whitespace. The icon is
+--- virt text, never in the buffer, but a stray icon (pasted, or a stale
+--- pre-virt bar) is still stripped defensively — the icon must never leak
+--- into a query.
 --- @param line string
 --- @return string
 local function parse_search_line(line)
