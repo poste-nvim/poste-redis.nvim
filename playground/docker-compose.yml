@@ -1,5 +1,27 @@
+# poste-redis playground — local redis for manual testing.
+#
+#   cd playground && docker compose up -d
+#
+# On startup the container seeds demo data for every value type (string /
+# list / set / hash / zset / stream), with the collection types sized to
+# trigger the result-panel grid pagination (150 / 120 items → 3 pages at
+# page_size 50). See init/seed.sh for the keys.
+#
+# Connect from poste-redis with connections.toml `[local]` →
+# redis://127.0.0.1:16479/0 (examples/connections.toml).
 services:
   redis:
     image: redis:7-alpine
     ports:
       - "16479:6379"
+    volumes:
+      # The redis image has no initdb hook, so the seed runs via the command
+      # override below; also usable by hand: `sh init/seed.sh`
+      - ./init:/poste-init:ro
+    command: >
+      sh -c 'redis-server --daemonize yes --save "" 2>/dev/null &&
+      until redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null; do sleep 0.2; done &&
+      redis-cli -h 127.0.0.1 -p 6379 flushall &&
+      REDIS_HOST=127.0.0.1 REDIS_PORT=6379 sh /poste-init/seed.sh &&
+      redis-cli -h 127.0.0.1 -p 6379 save &&
+      redis-cli -h 127.0.0.1 -p 6379 shutdown nosave && exec redis-server'
