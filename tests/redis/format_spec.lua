@@ -2,6 +2,7 @@
 --- Covers the acceptance matrix in EXECUTION-PLAN §8: (nil) / integer /
 --- status string / array table / map table, plus binary hex digest.
 local format = require("poste-redis.format")
+local icons = require("poste-redis.icons")
 
 describe("poste-redis format", function()
   local function lines_for(value)
@@ -25,36 +26,41 @@ describe("poste-redis format", function()
     assert.equals("42", out.lines[1])
   end)
 
-  it("renders a status string with a byte note", function()
-    local out = lines_for({ type = "string", value = "PONG" })
-    assert.equals('"PONG"', out.lines[1])
+  it("renders a string reply through the type-labeled grid", function()
+    local out = lines_for({ type = "string", value = "hello world" })
+    assert.equals("table", out.kind)
+    assert.same({ icons.type_label("string"), "value" }, out.grid.columns)
+    assert.same({ 1, "hello world" }, out.grid.rows[1])
+    assert.equals("PosteRedisBrowserString", out.grid.type_hl)
   end)
 
-  it("renders a truncated string with a byte note", function()
+  it("renders a truncated string as a grid with the truncation flag", function()
     local out = lines_for({
       type = "string",
       value = "x",
       len = 2048,
       truncated = true,
     })
-    assert.equals('"x"', out.lines[1])
-    assert.truthy(out.lines[2]:find("2048"))
+    assert.equals("table", out.kind)
+    assert.same({ 1, "x" }, out.grid.rows[1])
+    assert.is_true(out.grid.truncated)
   end)
 
-  it("renders a string that is also JSON (parsed stays raw on screen)", function()
+  it("renders a JSON string raw in the grid cell (parsed stays out)", function()
     local out = lines_for({
       type = "string",
       value = '{"a": 1}',
       len = 8,
       parsed = { a = 1 },
     })
-    assert.equals('"{"a": 1}"', out.lines[1])
+    assert.equals("table", out.kind)
+    assert.same({ 1, '{"a": 1}' }, out.grid.rows[1])
   end)
 
   it("renders a list as a table grid with an index column", function()
     local out = lines_for({ type = "list", value = { "a", "b", "c" }, len = 3 })
     assert.equals("table", out.kind)
-    assert.same({ "#", "value" }, out.grid.columns)
+    assert.same({ icons.type_label("list"), "value" }, out.grid.columns)
     assert.same({ 1, "a" }, out.grid.rows[1])
     assert.same({ 3, "c" }, out.grid.rows[3])
     assert.equals(3, out.grid.total)
@@ -81,7 +87,7 @@ describe("poste-redis format", function()
       len = 2,
     })
     assert.equals("table", out.kind)
-    assert.same({ "#", "field", "value" }, out.grid.columns)
+    assert.same({ icons.type_label("hash"), "field", "value" }, out.grid.columns)
     assert.same({ 1, "name", "Alice" }, out.grid.rows[1])
     assert.same({ 2, "age", "30" }, out.grid.rows[2])
   end)
@@ -99,7 +105,7 @@ describe("poste-redis format", function()
       len = 2,
     })
     assert.equals("table", out.kind)
-    assert.same({ "#", "member", "score" }, out.grid.columns)
+    assert.same({ icons.type_label("zset"), "member", "score" }, out.grid.columns)
     assert.same({ 1, "alice", 99 }, out.grid.rows[1])
     assert.same({ 2, "bob", 87 }, out.grid.rows[2])
     -- score column is right-aligned
@@ -209,6 +215,7 @@ describe("poste-redis format", function()
 
   it("handles CJK content without mangling display", function()
     local out = lines_for({ type = "string", value = "日本語" })
-    assert.equals('"日本語"', out.lines[1])
+    assert.equals("table", out.kind)
+    assert.same({ 1, "日本語" }, out.grid.rows[1])
   end)
 end)

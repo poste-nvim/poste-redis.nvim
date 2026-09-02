@@ -41,7 +41,7 @@ end
 
 --- Compute column display widths + right-aligned columns for a grid.
 --- @param grid table  { columns, rows, total, truncated, right_align, to_display }
---- @param max_col_width number|nil  cap for content columns (`#` stays narrow)
+--- @param max_col_width number|nil  cap for content columns (the index/type column stays narrow)
 --- @return table layout { columns, widths, right, col_count, total, truncated }
 function M.build_layout(grid, max_col_width)
   max_col_width = max_col_width or M.DEFAULT_MAX_COL_WIDTH
@@ -57,14 +57,15 @@ function M.build_layout(grid, max_col_width)
       end
     end
   end
-  -- the `#` column fits the largest row index (from total), kept narrow
+  -- the index column fits its header (icon + type, e.g. " string") and the
+  -- largest row index (from total), kept narrow
   local total = grid.total or #grid.rows
   widths[1] = math.max(widths[1], #tostring(total))
-  widths[1] = math.min(widths[1], 8)
+  widths[1] = math.min(widths[1], 12)
   for i = 2, #widths do
     widths[i] = math.min(widths[i], max_col_width)
   end
-  local right = { 1 }
+  local right = {}
   for _, c in ipairs(grid.right_align or {}) do
     if c >= 2 and c <= #widths then right[#right + 1] = c end
   end
@@ -82,7 +83,7 @@ end
 -- Lines
 ------------------------------------------------------------------------
 
---- Build the header line: `  │ # │ value     │`.
+--- Build the header line: `  │  string │ value     │`.
 --- @param layout table
 --- @return string
 function M.header_line(layout)
@@ -203,7 +204,7 @@ end
 -- Search
 ------------------------------------------------------------------------
 
---- Find every cell (excluding the `#` index column) whose display text
+--- Find every cell (excluding the index/type column) whose display text
 --- contains `text` (case-insensitive).
 --- @param grid table
 --- @param text string

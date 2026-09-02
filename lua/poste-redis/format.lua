@@ -5,6 +5,7 @@
 --- fixed, body scrollable, page navigation (poste-db dataset style).
 local util = require("poste-redis.util")
 local constants = require("poste-redis.constants")
+local icons = require("poste-redis.icons")
 
 local M = {}
 
@@ -75,28 +76,32 @@ end
 
 --- Build a grid model for a collection reply.
 --- rows[i] holds RAW values with the row index at [1]; rendering/search use
---- grid.to_display, yank/preview use grid.to_copy — the `#` index column is
---- display-only, never part of a copied value.
---- @param columns string[] header cells (includes the "#" column)
+--- grid.to_display, yank/preview use grid.to_copy — the index column is
+--- display-only, never part of a copied value. Its header shows the key's
+--- icon + type (e.g. " string"), colored like the browser tree icon.
+--- @param columns string[] header cells (includes the type label column)
 --- @param rows table[][] raw cell values, rows[i][1] = row index
 --- @param total number  element count reported by the binary
 --- @param truncated boolean
---- @param right_align number[]  extra right-aligned columns (1-based, beyond "#")
+--- @param right_align number[]  extra right-aligned columns (1-based, beyond the index)
+--- @param type_name string  redis type for the header label + color
 --- @return table grid
-local function new_grid(columns, rows, total, truncated, right_align)
+local function new_grid(columns, rows, total, truncated, right_align, type_name)
   return {
     columns = columns,
     rows = rows,
     total = total,
     truncated = truncated,
     right_align = right_align or {},
+    type_name = type_name,
+    type_hl = icons.type_hl(type_name),
     to_display = cell,
     to_copy = util.to_clipboard,
   }
 end
 
---- Single-column collections (list / set): `# | value`.
-local function build_list_grid(v)
+--- Single-column collections (list / set): `type | value`.
+local function build_list_grid(v, type_name)
   local items = v.value or {}
   local total = v.len or #items
   local shown = math.min(#items, GRID_MAX_ROWS)
@@ -104,11 +109,12 @@ local function build_list_grid(v)
   for i = 1, shown do
     rows[i] = { i, items[i] }
   end
-  return new_grid({ "#", "value" }, rows, total, v.truncated or shown < total)
+  return new_grid({ icons.type_label(type_name), "value" }, rows, total,
+    v.truncated or shown < total, nil, type_name)
 end
 
---- Key/value collections (hash / map): `# | field | value`.
-local function build_hash_grid(v)
+--- Key/value collections (hash / map): `type | field | value`.
+local function build_hash_grid(v, type_name)
   local entries = v.entries or {}
   local total = v.len or #entries
   local shown = math.min(#entries, GRID_MAX_ROWS)
@@ -117,11 +123,12 @@ local function build_hash_grid(v)
     local e = entries[i]
     rows[i] = { i, e[1], e[2] }
   end
-  return new_grid({ "#", "field", "value" }, rows, total, v.truncated or shown < total)
+  return new_grid({ icons.type_label(type_name), "field", "value" }, rows, total,
+    v.truncated or shown < total, nil, type_name)
 end
 
---- Sorted-set: `# | member | score` with the score column right-aligned.
-local function build_zset_grid(v)
+--- Sorted-set: `type | member | score` with the score column right-aligned.
+local function build_zset_grid(v, type_name)
   local items = v.value or {}
   local total = v.len or #items
   local shown = math.min(#items, GRID_MAX_ROWS)
@@ -130,7 +137,17 @@ local function build_zset_grid(v)
     local it = items[i]
     rows[i] = { i, it.member or "", it.score }
   end
-  return new_grid({ "#", "member", "score" }, rows, total, v.truncated or shown < total, { 3 })
+  return new_grid({ icons.type_label(type_name), "member", "score" }, rows, total,
+    v.truncated or shown < total, { 3 }, type_name)
+end
+
+--- Strings render through the same grid so every type is edited/navigated
+--- the same way: `type | value` with a single row.
+local function build_string_grid(v)
+  local s = v.value
+  if type(s) ~= "string" then s = cell(s) end
+  return new_grid({ icons.type_label("string"), "value" }, { { 1, s } },
+    1, v.truncated, nil, "string")
 end
 
 local GRID_BUILDERS = {
@@ -139,6 +156,7 @@ local GRID_BUILDERS = {
   hash = build_hash_grid,
   map = build_hash_grid,
   zset = build_zset_grid,
+  string = build_string_grid,
 }
 
 local function render_stream(v)
@@ -201,7 +219,7 @@ function M.format_result(event)
   if type(value) == "table" and value.type then
     local build = GRID_BUILDERS[value.type]
     if build then
-      local ok, grid = pcall(build, value)
+      local ok, grid = pcall(build, value, value.type)
       if ok then
         return { kind = "table", grid = grid, meta = meta }
       end

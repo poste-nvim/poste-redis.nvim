@@ -15,54 +15,19 @@ local M = {}
 
 local config = require("poste-redis.config")
 
--- Nerd-font glyphs (no emoji): marker + icons per node type.
+-- Nerd-font glyphs (no emoji): marker + icons per node type. Glyphs and the
+-- per-type color map live in poste-redis.icons (shared with the result grid).
 local MARKER_COLLAPSED = " "
 local MARKER_EXPANDED = " "
 local MARKER_LOADING = "… "
 
--- Structural nodes: connection/db keep the database glyph; the group node is
--- the tree's folder in the v3 layout.
-local ICON = {
-  connection = "",
-  db = "",
-  group = "",
-  key = "",
-}
-
--- Redis key type → glyph. TYPE only reports string/zset/hash/... so the
--- subtype glyphs (bitmap/bitfield/hyperloglog/geo) are wired for a future
--- probe; today they fall back to string/zset from TYPE.
-local KEY_ICON = {
-  string = "",
-  zset = "",
-  hash = "󰘦",
-  list = "",
-  set = "󰸳",
-  stream = "",
-  bitmap = "󱗼",
-  bitfield = "󱗼",
-  bitfields = "󱗼",
-  hyperloglog = "󱗼",
-  hyperlonglong = "󱗼",
-  geo = "",
-}
+local icons = require("poste-redis.icons")
+local ICON = icons.ICON
+local KEY_ICON = icons.KEY_ICON
+local KEY_HL = icons.KEY_HL
 
 -- Highlight group per key type: collections orange, string green, everything
--- else (stream/bitmap/geo/unknown) purple.
-local KEY_HL = {
-  string = "PosteRedisBrowserString",
-  zset = "PosteRedisBrowserCollection",
-  hash = "PosteRedisBrowserCollection",
-  list = "PosteRedisBrowserCollection",
-  set = "PosteRedisBrowserCollection",
-  stream = "PosteRedisBrowserOther",
-  bitmap = "PosteRedisBrowserOther",
-  bitfield = "PosteRedisBrowserOther",
-  bitfields = "PosteRedisBrowserOther",
-  hyperloglog = "PosteRedisBrowserOther",
-  hyperlonglong = "PosteRedisBrowserOther",
-  geo = "PosteRedisBrowserOther",
-}
+-- else (stream/bitmap/geo/unknown) purple. (map lives in poste-redis.icons)
 
 local hl_ns = vim.api.nvim_create_namespace("poste_redis_browser")
 
