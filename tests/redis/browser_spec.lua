@@ -204,6 +204,10 @@ describe("poste-redis browser search bar", function()
     -- prompt remnants can never become the query — only the tail counts
     assert.equals("", browser._test.parse_search_line(""))
     assert.equals("sear", browser._test.parse_search_line("sear"))
+    -- the icon must NEVER survive into a query: deleting the separator
+    -- space (or an already-doubled bar) still parses to the bare query
+    assert.equals("que", browser._test.parse_search_line(tree.SEARCH_ICON .. "que"))
+    assert.equals("que", browser._test.parse_search_line(prefix .. prefix .. "que"))
   end)
 
   it("search line is icon + query; hint is virt text, never buffer text", function()
@@ -355,6 +359,72 @@ describe("poste-redis browser window", function()
     joined = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
     assert.is_true(joined:find("plain", 1, true) ~= nil, "clear did not restore the tree")
     assert.is_nil(joined:find("user:1", 1, true), "stale search rows after clear")
+
+    browser.close()
+    async.load_connections = orig_load
+    session_conn.execute = orig_execute
+  end)
+
+  it("search commits a query typed at the line end with a single icon prefix", function()
+    local browser = require("poste-redis.browser.init")
+    local session_conn = require("poste-redis.session_conn")
+    local prefix = tree.SEARCH_PREFIX
+
+    local orig_load = async.load_connections
+    local orig_execute = session_conn.execute
+    async.load_connections = function(cb)
+      cb({ tree.make_connection_node({
+        name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis",
+      }) })
+    end
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        local keys = vim.tbl_contains(cmd, "MATCH") and { "user:1", "user:2" }
+          or { "user:1", "user:2", "plain" }
+        cbs.on_response({ value = { value = keys, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    async.tree_view = true
+    local ok, err = pcall(function() browser.open() end)
+    assert.is_true(ok, tostring(err))
+    local buf = browser.info().buffer
+    browser._test.select_db(0)  -- clear state left by earlier window tests
+    assert.is_true(vim.wait(2000, function()
+      return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
+    end, 5), "db scan did not render")
+
+    -- enter the search bar: the caret must land ON THE LAST BYTE of the
+    -- search line — where real insert typing appends after the prefix.
+    -- nvim_win_set_cursor cannot express that column (clamps len -> len-1),
+    -- so this pins the append motion that reaches the true EOL; a caret
+    -- dropped on the prefix's trailing space would put typed text BEFORE
+    -- the space and merge the icon into the query ("  que").
+    browser._test.search_enter()
+    local line1 = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+    assert.equals(prefix, line1, "search bar must start as icon + space")
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    assert.equals(1, cursor[1], "search_enter must leave the caret on the search line")
+    assert.equals(#line1 - 1, cursor[2],
+      "caret must sit on the last byte (true EOL), not inside the prefix")
+
+    -- type as the fixed caret does: append at the true end of the line
+    vim.api.nvim_buf_set_text(buf, 0, #line1, 0, #line1, { "que" })
+    assert.equals(prefix .. "que", vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
+      "typed query must FOLLOW the single icon prefix")
+
+    browser._test.search_commit()
+    local committed = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+    assert.equals(prefix .. "que", committed,
+      "committed bar must be 'icon que', not a doubled 'icon icon que' (" .. committed .. ")")
+    local prefixes = select(2, committed:gsub(prefix, ""))
+    assert.equals(1, prefixes, "exactly one icon prefix on the search bar")
+    assert.equals("que", browser._test.parse_search_line(committed),
+      "the icon must never leak into the committed query")
+    local joined = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+    assert.is_true(joined:find("user:1", 1, true) ~= nil, "search with 'que' missing matches")
+    assert.is_nil(joined:find("plain", 1, true), "unfiltered rows survived the search")
 
     browser.close()
     async.load_connections = orig_load

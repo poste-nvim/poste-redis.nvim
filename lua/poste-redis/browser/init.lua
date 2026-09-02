@@ -277,15 +277,20 @@ local function search_enter()
   if win ~= -1 then vim.api.nvim_set_current_win(win) end
 
   search_active = true
-  tree.set_header_line(browser_buf, tree.SEARCH_PREFIX .. search_query, 1)
+  local search_text = tree.SEARCH_PREFIX .. search_query
+  tree.set_header_line(browser_buf, search_text, 1)
   tree.clear_search_decoration(browser_buf)
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
-  -- place the cursor right after the prefix (+ committed query) so typing
-  -- edits the query only — the prefix icon stays intact
-  vim.api.nvim_win_set_cursor(0, { 1, #tree.SEARCH_PREFIX + #search_query })
+  -- Land on line 1, then append: the caret must sit at the TRUE end of the
+  -- search line so typed text comes after the fixed icon prefix.
+  -- nvim_win_set_cursor cannot express the phantom EOL column — it clamps
+  -- len -> len-1, i.e. ON the prefix's trailing space — and startinsert at
+  -- that caret inserts BEFORE the space, capturing the icon into the query
+  -- ("  que"). normal! A reaches the real last byte and enters insert.
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
   vim.keymap.set("i", "<CR>", search_commit, { buffer = browser_buf, silent = true })
   vim.keymap.set("i", "<Esc>", search_cancel, { buffer = browser_buf, silent = true })
-  vim.cmd.startinsert()
+  vim.cmd("normal! A")
 end
 
 --- Parse the query out of the search bar line: everything after the fixed
@@ -296,8 +301,14 @@ end
 --- @return string
 local function parse_search_line(line)
   line = line or ""
-  if line:sub(1, #tree.SEARCH_PREFIX) == tree.SEARCH_PREFIX then
+  -- strip the fixed icon prefix repeatedly (an already-doubled bar repairs
+  -- itself), plus a bare icon alone from a deleted separator space — the
+  -- icon must never survive into the committed query
+  while line:sub(1, #tree.SEARCH_PREFIX) == tree.SEARCH_PREFIX do
     line = line:sub(#tree.SEARCH_PREFIX + 1)
+  end
+  if line:sub(1, #tree.SEARCH_ICON) == tree.SEARCH_ICON then
+    line = line:sub(#tree.SEARCH_ICON + 1)
   end
   line = line:gsub("^%s+", "")
   return (line:gsub("%s+$", ""))

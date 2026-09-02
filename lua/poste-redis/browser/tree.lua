@@ -258,7 +258,8 @@ local search_ns = vim.api.nvim_create_namespace("poste_redis_browser_search")
 
 --- Fixed prefix of the search bar: U+F002 (magnifying glass) + space. Typed
 --- query text always starts after these bytes; parse takes only the tail.
-M.SEARCH_PREFIX = "\239\128\130 "
+M.SEARCH_ICON = "\239\128\130"
+M.SEARCH_PREFIX = M.SEARCH_ICON .. " "
 
 --- Draw the search bar in its idle state: prefix + committed query. With no
 --- query, an inline virt-text hint follows the icon — extmark virtual text,
