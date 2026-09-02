@@ -229,6 +229,40 @@ describe("poste-redis browser search bar", function()
     assert.match("^%-+$", vim.api.nvim_buf_get_lines(buf, 2, 3, false)[1])
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  it("separator tracks a narrowed window and stays on one line", function()
+    local browser = require("poste-redis.browser.init")
+    local orig_load = async.load_connections
+    async.load_connections = function(cb) cb({}) end
+
+    local ok, err = pcall(function() browser.open() end)
+    assert.is_true(ok, tostring(err))
+    local buf = browser.info().buffer
+    local win = browser.info().window
+    assert.is_true(win ~= nil and vim.api.nvim_win_is_valid(win))
+
+    -- default split: the dash run spans the window, always narrower than it
+    local w = vim.api.nvim_win_get_width(win)
+    local sep = vim.api.nvim_buf_get_lines(buf, 2, 3, false)[1]
+    assert.match("^%-+$", sep)
+    assert.is_true(#sep <= w - 1,
+      "separator must fit one line (got " .. #sep .. " dashes in " .. w .. " cols)")
+
+    -- narrow the split; the WinResized refresh must recompute the rule to
+    -- the new width instead of leaving a wrapping wide dash run
+    pcall(vim.api.nvim_win_set_width, win, 12)
+    vim.api.nvim_exec_autocmds("WinResized", {})
+    local w2 = vim.api.nvim_win_get_width(win)
+    sep = vim.api.nvim_buf_get_lines(buf, 2, 3, false)[1]
+    assert.match("^%-+$", sep)
+    assert.equals(math.max(w2 - 6, math.min(8, w2 - 1)), #sep,
+      "separator length must match the narrowed width")
+    assert.is_true(#sep <= w2 - 1,
+      "separator must not wrap in a narrow split (got " .. #sep .. " in " .. w2 .. " cols)")
+
+    browser.close()
+    async.load_connections = orig_load
+  end)
 end)
 
 describe("poste-redis browser window", function()
@@ -321,6 +355,72 @@ describe("poste-redis browser window", function()
     joined = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
     assert.is_true(joined:find("plain", 1, true) ~= nil, "clear did not restore the tree")
     assert.is_nil(joined:find("user:1", 1, true), "stale search rows after clear")
+
+    browser.close()
+    async.load_connections = orig_load
+    session_conn.execute = orig_execute
+  end)
+
+  it("h after l keeps the cursor on the collapsed group line", function()
+    local browser = require("poste-redis.browser.init")
+    local session_conn = require("poste-redis.session_conn")
+
+    local orig_load = async.load_connections
+    local orig_execute = session_conn.execute
+    async.load_connections = function(cb)
+      cb({ tree.make_connection_node({
+        name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis",
+      }) })
+    end
+    -- db scan (no MATCH) yields group seeds; group scan (MATCH queue:*) its keys
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        local keys
+        if vim.tbl_contains(cmd, "MATCH") then
+          keys = { "queue:item:1", "queue:item:2" }
+        else
+          keys = { "big-value", "board", "plain", "queue:item:1" }
+        end
+        cbs.on_response({ value = { value = keys, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    async.tree_view = true  -- earlier blocks may leave flat view
+    local ok, err = pcall(function() browser.open() end)
+    assert.is_true(ok, tostring(err))
+    local buf = browser.info().buffer
+    -- earlier window tests leave the browser scoped to their stub db; a
+    -- fresh select_db re-scans the current connection with THIS stub
+    browser._test.select_db(0)
+    assert.is_true(vim.wait(2000, function()
+      return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
+    end, 5), "db scan did not render")
+
+    -- the queue group sits below the flat keys (big-value/board/plain)
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local group_line
+    for n, line in ipairs(lines) do
+      if line:find("queue", 1, true) and line:find("\239\132\133", 1, true) then
+        group_line = n
+        break
+      end
+    end
+    assert.is_truthy(group_line, "collapsed queue group row not found")
+    vim.api.nvim_win_set_cursor(0, { group_line, 0 })
+
+    -- expand (lazy group scan) then collapse: cursor must stay on queue
+    browser._test.expand_or_child()
+    assert.is_true(vim.wait(2000, function()
+      return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > #lines
+    end, 5), "group did not expand")
+    browser._test.collapse_or_parent()
+
+    local after = vim.api.nvim_win_get_cursor(0)[1]
+    assert.equals(group_line, after,
+      "collapse jumped the cursor from line " .. group_line .. " to " .. after)
+    assert.equals(#lines, #vim.api.nvim_buf_get_lines(buf, 0, -1, false),
+      "collapse should restore the collapsed row count")
 
     browser.close()
     async.load_connections = orig_load

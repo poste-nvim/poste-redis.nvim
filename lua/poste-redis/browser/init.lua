@@ -58,13 +58,24 @@ local function search_bar_text()
 end
 
 --- Header text for line 3 (separator rule): dashes spanning the browser
---- window so the key rows below read as a separate area.
+--- window so the key rows below read as a separate area. The dash count is
+--- width-derived, and the run is clamped so it always fits ONE screen line —
+--- a run reaching the window's last column wraps onto a second line, which
+--- is what made the rule look doubled in narrow splits. browser_win can be a
+--- stale handle after :q / split churn, so re-resolve from the buffer.
+--- @return string
 local function separator_text()
-  local width = 28
-  if browser_win and vim.api.nvim_win_is_valid(browser_win) then
-    width = vim.api.nvim_win_get_width(browser_win) - 2
+  local win = browser_win
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    win = browser_buf and vim.api.nvim_buf_is_valid(browser_buf) and vim.fn.bufwinid(browser_buf) or nil
   end
-  return string.rep("-", math.max(width, 8))
+  if not win or win == -1 then return string.rep("-", 20) end
+
+  -- width - 6 spans the split with a margin; the floor of 8 applies only
+  -- when the window is wide enough — never let the run reach width (wrap).
+  local width = vim.api.nvim_win_get_width(win)
+  local dashes = math.max(width - 6, math.min(8, width - 1))
+  return string.rep("-", math.max(dashes, 1))
 end
 
 --- The node rendered as the tree top level. While a search is active the
@@ -205,7 +216,10 @@ local function collapse_or_parent()
     render_tree()
     for i, n in ipairs(line_to_node) do
       if n == node then
-        vim.api.nvim_win_set_cursor(0, { i, 0 })
+        -- i is a slot in line_to_node; the buffer line is offset by the
+        -- header lines (parity with get_node_at_line). Without the offset
+        -- the cursor landed HEADER_LINES rows above the collapsed node.
+        vim.api.nvim_win_set_cursor(0, { i + tree.HEADER_LINES, 0 })
         return
       end
     end
@@ -341,6 +355,23 @@ local function setup_browser_buffer()
   vim.api.nvim_set_option_value("swapfile", false, { buf = browser_buf })
   vim.api.nvim_set_option_value("modifiable", false, { buf = browser_buf })
   vim.api.nvim_buf_set_name(browser_buf, "poste://redis_browser")
+
+  --- The separator dash count derives from the window width, so a split
+  --- resize must refresh line 3 — otherwise a rule written for a wider
+  --- split wraps onto two lines once the browser narrows. Refresh only the
+  --- separator (cheap), never the whole tree. Skipped while the search bar
+  --- is being edited: modifiable flips mid-insert would break typing; the
+  --- commit re-renders with the fresh width anyway.
+  local resize_group = vim.api.nvim_create_augroup("PosteRedisBrowserResize", { clear = true })
+  vim.api.nvim_create_autocmd("WinResized", {
+    group = resize_group,
+    callback = function()
+      if search_active then return end
+      if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
+      if vim.fn.bufwinid(browser_buf) == -1 then return end
+      tree.set_header_line(browser_buf, separator_text(), 3)
+    end,
+  })
 
   local opts = { buffer = browser_buf, noremap = true, silent = true }
   local k
@@ -554,6 +585,8 @@ M._test = {
   toggle_node = toggle_node,
   expand_node = expand_node,
   collapse_node = collapse_node,
+  expand_or_child = expand_or_child,
+  collapse_or_parent = collapse_or_parent,
   split_command = split_command,
   search_enter = search_enter,
   search_commit = search_commit,
