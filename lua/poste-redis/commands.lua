@@ -6,6 +6,10 @@ function M.setup()
     require("poste-redis.connections").select_connection()
   end, { desc = "Select a redis connection from connections.toml" })
 
+  vim.api.nvim_create_user_command("PosteRedisChat", function()
+    require("poste-redis.ai").open_chat()
+  end, { desc = "Open the AI chat with the PosteRedis context (requires poste-ai.nvim)" })
+
   vim.api.nvim_create_user_command("PosteRedisContext", function()
     require("poste-redis.connections").select_context()
   end, { desc = "Select the redis connection used as the current context" })

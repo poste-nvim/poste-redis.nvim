@@ -19,6 +19,10 @@ function M.setup(opts)
   if opts.statusline ~= false then
     require("poste-redis.statusline").setup()
   end
+
+  -- Optional AI chat integration (poste-ai.nvim). Silent when absent; the
+  -- registration is retried on :PosteRedisChat in case poste-ai loads later.
+  pcall(function() require("poste-redis.ai").register() end)
   require("poste-redis.autocmds").setup_existing_buffers()
 
   -- P2-4: completion source (blink.cmp). Register when blink is present;
