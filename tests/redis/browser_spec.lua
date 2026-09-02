@@ -1089,3 +1089,39 @@ describe("poste-redis browser per-node render cap", function()
     assert.equals(500, skipped)  -- 500 bench keys hidden by the per-node cap
   end)
 end)
+
+
+describe("poste-redis browser gray text (types / hint / separator)", function()
+  it("highlights the type suffix after a key node in gray", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = { tree.make_key_node("k", "c", 0, { type = "string" }) }
+    db.expanded = true
+    local lines, node_map = tree.flatten_tree({ db })
+    local node = node_map[2]  -- [1] is the db wrapper, [2] the key node
+    assert.is_truthy(node._suffix_s)
+    assert.is_true(node._suffix_e > node._suffix_s)
+    -- suffix text really is the type suffix (key renders on line 2)
+    assert.equals("  string", lines[2]:sub(node._suffix_s + 1, node._suffix_e))
+    -- the suffix carries PosteRedisBrowserType when applied to a buffer
+    local buf = vim.api.nvim_create_buf(false, true)
+    -- apply_highlights offsets by the 3 header lines; mirror a real render
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "", "", lines[1], lines[2] })
+    tree.apply_highlights(buf, node_map, { 0, 0 })
+    local ns = vim.api.nvim_create_namespace("poste_redis_browser")
+    local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+    local groups = {}
+    for _, m in ipairs(marks) do groups[m[4].hl_group] = true end
+    assert.is_truthy(groups["PosteRedisBrowserType"])
+  end)
+
+  it("decorates the db separator line in gray", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "", "----------" })
+    tree.decorate_separator(buf, "----------")
+    local ns = vim.api.nvim_create_namespace("poste_redis_browser_header")
+    local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+    assert.equals(1, #marks)
+    assert.equals("PosteRedisBrowserMarker", marks[1][4].hl_group)
+    assert.equals(2, marks[1][2])  -- line 3 (0-based 2)
+  end)
+end)

@@ -102,6 +102,7 @@ local function render_tree()
   if not search_active then
     tree.decorate_search_line(browser_buf, search_query)
   end
+  tree.decorate_separator(browser_buf, tree.header_lines[3])
 end
 
 async.render_hook = render_tree

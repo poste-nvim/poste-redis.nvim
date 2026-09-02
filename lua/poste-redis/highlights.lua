@@ -65,11 +65,11 @@ function M.setup()
   link_if_empty("PosteRedisHistorySuccess", "DiagnosticOk")
   link_if_empty("PosteRedisHistoryError", "DiagnosticError")
 
-  -- Key browser search bar: the "filter by key" ghost hint and a committed
-  -- query both render as hint-colored text. @comment.hint when the
-  -- colorscheme defines it, Comment otherwise.
+  -- Key browser search bar: the "filter by key" ghost hint stays gray; a
+  -- committed query gets the @comment.hint treatment when the colorscheme
+  -- defines it, Comment otherwise.
   local hint_target = vim.fn.hlexists("@comment.hint") == 1 and "@comment.hint" or "Comment"
-  link_if_empty("PosteRedisBrowserSearchHint", hint_target)
+  define_if_empty("PosteRedisBrowserSearchHint", "#808080")
   link_if_empty("PosteRedisBrowserSearchText", hint_target)
 
   -- Key browser tree icons: gray expand/collapse markers, blue folder,
@@ -84,6 +84,7 @@ function M.setup()
   define_if_empty("PosteRedisBrowserCollection", "#D19A66")
   define_if_empty("PosteRedisBrowserOther", "#C678DD")
   define_if_empty("PosteRedisBrowserError", "#E06C75")
+  define_if_empty("PosteRedisBrowserType", "#808080")
 
   state.apply_highlight_overrides({
     "PosteRedisComment", "PosteRedisUse", "PosteRedisUseName",
@@ -102,7 +103,7 @@ function M.setup()
     "PosteRedisBrowserMarker", "PosteRedisBrowserConn", "PosteRedisBrowserDb",
     "PosteRedisBrowserGroup", "PosteRedisBrowserString",
     "PosteRedisBrowserCollection", "PosteRedisBrowserOther",
-    "PosteRedisBrowserError",
+    "PosteRedisBrowserError", "PosteRedisBrowserType",
   })
 end
 

@@ -235,6 +235,8 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
         end
 
         local suffix = ""
+        node._suffix_s = nil
+        node._suffix_e = nil
         if node.node_type == "connection" then
           suffix = ""
         elseif node.node_type == "db" then
@@ -242,6 +244,9 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
         elseif node.node_type == "key" and node.meta and type(node.meta.type) == "string" then
           suffix = "  " .. node.meta.type
           if node.meta.size then suffix = suffix .. " (" .. node.meta.size .. ")" end
+          -- gray type suffix after the node name (highlight_line reads these)
+          node._suffix_s = #indent + #marker + #icon + 1 + #node.name
+          node._suffix_e = node._suffix_s + #suffix
         end
 
         local line = indent .. marker .. icon .. " " .. node.name .. suffix
@@ -320,6 +325,11 @@ local function highlight_line(buf, line, node, icon_col)
     hl = (t and KEY_HL[t]) or "PosteRedisBrowserOther"
   end
   vim.api.nvim_buf_add_highlight(buf, hl_ns, hl, line, start, start + len)
+
+  if node._suffix_s and node._suffix_e and node._suffix_e > node._suffix_s then
+    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserType",
+      line, node._suffix_s, node._suffix_e)
+  end
 
   if node._err_s and node._err_e and node._err_e > node._err_s then
     vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserError",
@@ -400,6 +410,7 @@ end
 ----------------------------------------------------------------------
 
 local search_ns = vim.api.nvim_create_namespace("poste_redis_browser_search")
+local header_ns = vim.api.nvim_create_namespace("poste_redis_browser_header")
 
 --- Fixed icon of the search bar: U+F002 (magnifying glass) + space. Rendered
 --- as inline virt text ahead of the committed query (idle state only), so it
@@ -450,6 +461,20 @@ end
 function M.clear_search_decoration(buf)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
   vim.api.nvim_buf_clear_namespace(buf, search_ns, 0, -1)
+end
+
+--- Gray the header separator line (line 3) so the db select reads as chrome.
+--- @param buf number
+--- @param text string  the separator text currently on line 3
+function M.decorate_separator(buf, text)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.api.nvim_buf_clear_namespace(buf, header_ns, 2, 3)
+  if not text or text == "" then return end
+  vim.api.nvim_buf_set_extmark(buf, header_ns, 2, 0, {
+    end_row = 2,
+    end_col = #text,
+    hl_group = "PosteRedisBrowserMarker",
+  })
 end
 
 --- Incrementally append newly-loaded child nodes under a rendered node
