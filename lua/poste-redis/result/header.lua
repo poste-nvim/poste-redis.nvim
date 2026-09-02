@@ -9,6 +9,9 @@ local float_win = nil
 local cache_leftcol = nil
 local cache_width = nil
 local cache_header = nil
+local cache_type_hl = nil
+local type_ns = vim.api.nvim_create_namespace("poste_redis_grid_header_type")
+local SEP = "│"
 
 --- Per-char display index of a line: byte range + display range per char.
 --- CJK/emoji never split; `│` separators are just 1-width chars here.
@@ -74,13 +77,34 @@ function M.close()
   cache_leftcol = nil
   cache_width = nil
   cache_header = nil
+  cache_type_hl = nil
+end
+
+--- Highlight the type cell (first column, e.g. " string") within a sliced
+--- header line: the byte range between the first two `│` separators. Only
+--- meaningful when the viewport starts at column 0 (leftcol == 0); clamped
+--- to the line so a partial slice never errors.
+local function apply_type_hl(bf, text, type_hl)
+  if not type_hl or not bf or not vim.api.nvim_buf_is_valid(bf) then return end
+  local p1 = text:find(SEP, 1, true)
+  if not p1 then return end
+  local p2 = text:find(SEP, p1 + #SEP, true)
+  if not p2 or p2 <= p1 + #SEP then return end
+  vim.api.nvim_buf_clear_namespace(bf, type_ns, 0, -1)
+  vim.api.nvim_buf_set_extmark(bf, type_ns, 0, p1 + #SEP - 1, {
+    end_row = 0,
+    end_col = math.max(p1 + #SEP - 1, p2 - 2),
+    hl_group = type_hl,
+    priority = 100,
+  })
 end
 
 --- Re-render the header float for the current viewport of `win`.
 --- @param win number  the result window the float is anchored to
 --- @param padded_header string  full padded header line (with left padding)
 --- @param index table[]|nil  cached per-char index (built when nil)
-function M.update(win, padded_header, index)
+--- @param type_hl string|nil  highlight for the type cell (first column)
+function M.update(win, padded_header, index, type_hl)
   if not win or not vim.api.nvim_win_is_valid(win) then M.close(); return end
   if not padded_header then M.close(); return end
   index = index or build_index(padded_header)
@@ -97,9 +121,10 @@ function M.update(win, padded_header, index)
   end
 
   if leftcol == cache_leftcol and win_width == cache_width
-      and padded_header == cache_header then
+      and padded_header == cache_header and type_hl == cache_type_hl then
     return
   end
+  cache_type_hl = type_hl
   cache_leftcol = leftcol
   cache_width = win_width
   cache_header = padded_header
@@ -110,6 +135,7 @@ function M.update(win, padded_header, index)
     vim.api.nvim_set_option_value("modifiable", true, { buf = float_buf })
     vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
     vim.api.nvim_set_option_value("modifiable", false, { buf = float_buf })
+    if leftcol == 0 then apply_type_hl(float_buf, text, type_hl) end
     if float_win and vim.api.nvim_win_is_valid(float_win)
         and vim.api.nvim_win_get_width(float_win) ~= win_width then
       vim.api.nvim_win_set_config(float_win, { width = win_width })
@@ -122,6 +148,7 @@ function M.update(win, padded_header, index)
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = float_buf })
   vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
   vim.api.nvim_set_option_value("modifiable", false, { buf = float_buf })
+  if leftcol == 0 then apply_type_hl(float_buf, text, type_hl) end
   float_win = vim.api.nvim_open_win(float_buf, false, {
     relative = "win",
     win = win,

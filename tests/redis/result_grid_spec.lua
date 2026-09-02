@@ -2,6 +2,7 @@
 --- layout widths, pagination, cell navigation, search, yank, preview.
 local format = require("poste-redis.format")
 local grid = require("poste-redis.result.grid")
+local icons = require("poste-redis.icons")
 local header = require("poste-redis.result.header")
 local buffer = require("poste-redis.buffer")
 
@@ -17,21 +18,21 @@ describe("poste-redis result grid", function()
   end)
 
   describe("build_layout", function()
-    it("computes widths from header + cells, keeps # narrow", function()
+    it("computes widths from header + cells, keeps the index column narrow", function()
       local out = grid_for({ type = "hash", entries = { { "name", "Alice" }, { "email", "bob@example.com" } }, len = 2 })
       local layout = grid.build_layout(out.grid)
       assert.equals(3, layout.col_count)
-      -- # col fits the total row count, value col fits the longest value
+      -- index col fits its icon+type header, value col fits the longest value
       assert.truthy(layout.widths[1] >= 1)
       assert.truthy(layout.widths[3] >= #"bob@example.com")
-      -- # is right-aligned by default
-      assert.same({ 1 }, layout.right)
+      -- the index column is left-aligned (only extra right_align columns differ)
+      assert.same({}, layout.right)
     end)
 
     it("right-aligns the zset score column", function()
       local out = grid_for({ type = "zset", value = { { member = "a", score = 99 } }, len = 1 })
       local layout = grid.build_layout(out.grid)
-      assert.same({ 1, 3 }, layout.right)
+      assert.same({ 3 }, layout.right)
     end)
 
     it("caps content columns at the max width", function()
@@ -53,9 +54,11 @@ describe("poste-redis result grid", function()
       local out = grid_for({ type = "list", value = { "job-1", "job-2" }, len = 2 })
       local layout = grid.build_layout(out.grid)
       local lines, meta = grid.render_page(out.grid, layout, 1, 50)
-      assert.equals("  │ # │ value │", lines[1])
-      assert.equals("  │ 1 │ job-1 │", lines[2])
-      assert.equals("  │ 2 │ job-2 │", lines[3])
+      local label = icons.type_label("list")
+      assert.equals("  │ " .. label .. " │ value │", lines[1])
+      local pad = string.rep(" ", vim.fn.strdisplaywidth(label) - 1)
+      assert.equals("  │ 1" .. pad .. " │ job-1 │", lines[2])
+      assert.equals("  │ 2" .. pad .. " │ job-2 │", lines[3])
       assert.equals(1, meta.header_line)
       assert.equals(2, meta.data_start_line)
       assert.equals(2, meta.row_count)
@@ -100,6 +103,22 @@ describe("poste-redis result grid", function()
         value = { type = "hash", entries = entries, len = #entries },
       } }, { render = true })
     end
+
+    it("colors cells: index gray, numbers Number, text String", function()
+      open_grid({ { "name", "Alice" }, { "age", "30" } })
+      local b = buffer.buf()
+      local ns = vim.api.nvim_create_namespace("poste_redis_value")
+      local marks = vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, { details = true })
+      assert.equals(6, #marks)  -- 2 rows x (index + field + value)
+      local by_hl = {}
+      for _, m in ipairs(marks) do
+        by_hl[m[4].hl_group] = (by_hl[m[4].hl_group] or 0) + 1
+      end
+      -- index column gray; "30" numeric -> Number; "Alice"/"name"/"age" -> String
+      assert.equals(2, by_hl["PosteRedisResultRowNum"])
+      assert.equals(1, by_hl["PosteRedisResultNumber"])
+      assert.equals(3, by_hl["PosteRedisResultString"])
+    end)
 
     it("renders a grid tab into the panel buffer (header floats, blank line 1)", function()
       open_grid({ { "a", "1" }, { "b", "2" } })

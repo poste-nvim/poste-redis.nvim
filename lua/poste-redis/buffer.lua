@@ -24,8 +24,9 @@ local last_value = nil   -- current tab's raw value for K preview
 --- Grid pagination: rows per page.
 local PAGE_SIZE = 50
 
---- Extmark namespaces (cell highlight + search matches).
+--- Extmark namespaces (cell highlight + value colors + search matches).
 local cell_ns = vim.api.nvim_create_namespace("poste_redis_cell")
+local value_ns = vim.api.nvim_create_namespace("poste_redis_value")
 local search_ns = vim.api.nvim_create_namespace("poste_redis_search")
 
 local scroll_autocmd_id = nil
@@ -248,7 +249,7 @@ local function update_header()
   local tab = tabs[active]
   if tab and tab.kind == "table" and tab.header_padded and win
       and vim.api.nvim_win_is_valid(win) then
-    header.update(win, tab.header_padded)
+    header.update(win, tab.header_padded, nil, tab.grid and tab.grid.type_hl or nil)
   else
     header.close()
   end
@@ -468,6 +469,50 @@ end
 -- Render
 ------------------------------------------------------------------------
 
+--- Is a raw grid cell value numeric (Number highlight) vs everything else
+--- (String highlight)? Redis returns scalars as strings, so numeric-looking
+--- strings ("30", "99.5") count as numbers too.
+local function is_number_value(v)
+  if type(v) == "number" then return true end
+  if type(v) ~= "string" or v == "" then return false end
+  return v:match("^%-?%d+%.?%d*$") ~= nil
+end
+
+--- Color the grid body: the index/type column gray (LineNr), numeric cells
+--- Number, everything else String. Applied as extmarks so the cursor-cell
+--- highlight and search matches layer above.
+local function apply_value_colors(tab)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.api.nvim_buf_clear_namespace(buf, value_ns, 0, -1)
+  if not tab or tab.kind ~= "table" or not tab.pmeta then return end
+  local pmeta = tab.pmeta
+  local start_row = (tab.page - 1) * tab.page_size + 1
+  for vis_row = 1, pmeta.row_count do
+    local cs = pmeta.col_starts[vis_row]
+    if not cs then break end
+    local global_row = start_row + vis_row - 1
+    local raw_row = tab.grid.rows[global_row]
+    local line_idx = pmeta.data_start_line + vis_row - 1
+    for col = 1, pmeta.col_count do
+      local range = cs[col]
+      if not range then break end
+      local hl
+      if col == 1 then
+        hl = "PosteRedisResultRowNum"
+      else
+        local raw = raw_row and raw_row[col]
+        hl = is_number_value(raw) and "PosteRedisResultNumber" or "PosteRedisResultString"
+      end
+      vim.api.nvim_buf_set_extmark(buf, value_ns, line_idx - 1, range.ext_start, {
+        end_row = line_idx - 1,
+        end_col = range.ext_end,
+        hl_group = hl,
+        priority = 50,
+      })
+    end
+  end
+end
+
 --- Render the active grid tab's current page into the buffer + header float.
 render_active_grid = function(tab)
   if not tab.layout then
@@ -498,6 +543,7 @@ render_active_grid = function(tab)
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 
   update_header()
+  apply_value_colors(tab)
   highlight_cell(tab)
   apply_search_highlights(tab)
 end
