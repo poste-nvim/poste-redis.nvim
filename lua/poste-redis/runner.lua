@@ -32,7 +32,7 @@ local function present(results, summaries, opts)
   local line_0 = opts.line_0
   if line_0 == nil then line_0 = vim.fn.line(".") - 1 end
 
-  buffer.render(results, { render = true })
+  buffer.render(results, { render = true, connection = opts.connection })
   local first = results[1]
   local any_failed = false
   local total_latency = 0

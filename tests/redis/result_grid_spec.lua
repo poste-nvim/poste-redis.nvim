@@ -104,6 +104,40 @@ describe("poste-redis result grid", function()
       } }, { render = true })
     end
 
+    it("refresh re-runs the tab's command and replaces the grid", function()
+      -- stub the session transport: first HGETALL returns v1, refresh returns v2
+      local session_conn = require("poste-redis.session_conn")
+      local connections = require("poste-redis.connections")
+      local orig_execute = session_conn.execute
+      local orig_resolve = connections.resolve_redis_url
+      connections.resolve_redis_url = function(name)
+        assert.equals("stub", name)
+        return "redis://stub:6379/0", nil
+      end
+      -- the initial tab is built directly; every execute call is a refresh
+      session_conn.execute = function(conn_url, cmd, cbs)
+        if cbs and cbs.on_response then
+          cbs.on_response({ seq = 1, command = table.concat(cmd, " "), status = "",
+            latency_ms = 1, value = { type = "hash", entries = { { "Bob", "31" } }, len = 1 } })
+        end
+        return "dispatched"
+      end
+      buffer.render({ {
+        seq = 1, command = "HGETALL k", status = "", latency_ms = 1,
+        value = { type = "hash", entries = { { "name", "Alice" } }, len = 1 },
+      } }, { render = true, connection = "stub" })
+      local tab = buffer.active_tab()
+      assert.equals("Alice", tab.grid.rows[1][3])
+      buffer.refresh()
+      local tab2 = buffer.active_tab()
+      -- refreshed entries: { "Bob", "31" } -> field col = "Bob", value col = "31"
+      assert.equals("Bob", tab2.grid.rows[1][2])
+      assert.equals("31", tab2.grid.rows[1][3])
+      assert.equals("HGETALL k", tab2.meta.command)
+      session_conn.execute = orig_execute
+      connections.resolve_redis_url = orig_resolve
+    end)
+
     it("colors cells: index gray, numbers Number, text String", function()
       open_grid({ { "name", "Alice" }, { "age", "30" } })
       local b = buffer.buf()

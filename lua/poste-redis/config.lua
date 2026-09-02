@@ -68,6 +68,8 @@ M.defaults = {
       next_search = "n",
       prev_search = "N",
       load_full = "F",
+      -- re-run the active tab's command against its recorded connection
+      refresh = "r",
     },
     -- Key browser (M2). Defaults land with that milestone; placeholders keep
     -- the section discoverable in :help and config docs.

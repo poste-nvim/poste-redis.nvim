@@ -34,6 +34,7 @@ local scroll_autocmd_id = nil
 -- Forward declarations (Lua pitfall: `local function` defined later is a new
 -- local, so earlier closures would capture a nil global instead).
 local render_active_grid
+local render_active  -- forward declaration: M.refresh's callback renders
 local update_winbar
 
 ------------------------------------------------------------------------
@@ -348,6 +349,74 @@ function M.prev_search_match()
 end
 
 ------------------------------------------------------------------------
+-- Refresh
+------------------------------------------------------------------------
+
+--- Re-run the active tab's command against its recorded connection and
+--- replace the tab with the fresh result. Works for browser value-viewer
+--- tabs (meta.connection + meta.db) and exec tabs that carry a connection.
+function M.refresh()
+  local tab = tabs[active]
+  if not tab or not tab.meta or not tab.meta.command or tab.meta.command == "" then
+    vim.notify("Nothing to refresh on this tab", vim.log.levels.INFO,
+      { title = constants.TITLE })
+    return
+  end
+  local conn_name = tab.meta.connection
+  if not conn_name or conn_name == "" then
+    vim.notify("This tab has no recorded connection — re-run the command instead",
+      vim.log.levels.WARN, { title = constants.TITLE })
+    return
+  end
+  local connections = require("poste-redis.connections")
+  local url = conn_name
+  if conn_name:sub(1, 8) ~= "redis://" and conn_name:sub(1, 9) ~= "rediss://" then
+    local err
+    url, err = connections.resolve_redis_url(conn_name)
+    if not url then
+      vim.notify("Cannot refresh: " .. tostring(err), vim.log.levels.ERROR,
+        { title = constants.TITLE })
+      return
+    end
+  end
+  local parser = require("poste-redis.parser")
+  local tokens, terr = parser.command_tokens(tab.meta.command)
+  if not tokens then
+    vim.notify("Cannot refresh: " .. tostring(terr), vim.log.levels.ERROR,
+      { title = constants.TITLE })
+    return
+  end
+  local session_conn = require("poste-redis.session_conn")
+  local dispatched = session_conn.execute(url, tokens, {
+    on_response = function(ev)
+      local out = format.format_result(ev)
+      out.meta = tab.meta
+      if out.kind == "table" then
+        out.page = tab.page or 1
+        out.page_size = tab.page_size or PAGE_SIZE
+        out.cursor = tab.cursor or { row = 1, col = 1 }
+        out.layout = nil
+        out.pmeta = nil
+        out.search_text = tab.search_text
+        out.search_matches = {}
+        out.search_idx = 0
+      end
+      tabs[active] = out
+      last_value = out.meta and out.meta.value
+      render_active()
+    end,
+    on_error = function(msg)
+      vim.notify("Refresh failed: " .. tostring(msg), vim.log.levels.ERROR,
+        { title = constants.TITLE })
+    end,
+  }, nil, { db = tab.meta.db })
+  if dispatched ~= "dispatched" then
+    vim.notify("Refresh failed: session not available (" .. tostring(dispatched) .. ")",
+      vim.log.levels.ERROR, { title = constants.TITLE })
+  end
+end
+
+------------------------------------------------------------------------
 -- Cell / page navigation
 ------------------------------------------------------------------------
 
@@ -549,7 +618,7 @@ render_active_grid = function(tab)
 end
 
 --- Render the active tab into the buffer + winbar + header float.
-local function render_active()
+render_active = function()
   if not M.is_open() then return end
   local tab = tabs[active]
   if tab and tab.kind == "table" then
@@ -566,7 +635,8 @@ end
 
 --- Store + optionally render a fresh result list.
 --- @param results table[]  result events (or { type="result", error=... } stubs)
---- @param opts table { src_buf, connection, render = boolean }
+--- @param opts table { src_buf, connection, render = boolean } — connection
+---   (name or URL) is stamped into every tab's meta so `r` can re-run it
 function M.render(results, opts)
   opts = opts or {}
   tabs = {}
@@ -574,6 +644,7 @@ function M.render(results, opts)
   last_value = nil
   for _, ev in ipairs(results or {}) do
     local out = format.format_result(ev)
+    if opts.connection then out.meta.connection = opts.connection end
     if out.kind == "table" then
       out.page = 1
       out.page_size = PAGE_SIZE
@@ -760,6 +831,8 @@ function M.show_panel(enter)
   if k then vim.keymap.set("n", k, function() M.next_search_match() end, km) end
   k = config.get_keymap("redis_result", "prev_search", "N")
   if k then vim.keymap.set("n", k, function() M.prev_search_match() end, km) end
+  k = config.get_keymap("redis_result", "refresh", "r")
+  if k then vim.keymap.set("n", k, function() M.refresh() end, km) end
 
   -- F: full-load a truncated string value (browser value viewer)
   k = config.get_keymap("redis_result", "load_full", "F")

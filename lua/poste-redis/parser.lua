@@ -268,6 +268,25 @@ function M.is_dangerous(entry)
   return constants.is_dangerous_command(entry.command)
 end
 
+--- Tokenize one standalone command line into redis tokens (first token
+--- uppercased, quotes stripped, comments dropped). Used by the result
+--- panel's refresh to re-run the tab's command.
+--- @param line string
+--- @return string[]|nil tokens, string|nil error
+function M.command_tokens(line)
+  if not line or line == "" then return nil, "empty command" end
+  local tokens = {}
+  for i, t in ipairs(tokenize_line(line)) do
+    if i == 1 then
+      tokens[1] = t:upper()
+    else
+      tokens[i] = unquote(t)
+    end
+  end
+  if #tokens == 0 then return nil, "empty command" end
+  return tokens, nil
+end
+
 M._test = {
   split_lines = split_lines,
   tokenize_line = tokenize_line,
