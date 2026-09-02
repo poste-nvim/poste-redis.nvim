@@ -19,10 +19,30 @@ describe("poste-redis browser tree", function()
     assert.match("user:2", lines[3])
     assert.match("hash", lines[3])
     assert.equals(3, #node_map)
-    -- flat keys nested under a db are leaves: no marker (nerd-font glyphs;
-    -- match full multibyte glyphs, not a byte class — all share byte 0xEF)
-    assert.is_nil(lines[2]:match("^%s*"))
-    assert.is_nil(lines[2]:match("^%s*"))
+    -- flat keys nested under a db are leaves: no marker (nerd-font glyphs,
+    -- written as Lua escapes so the bytes stay reviewable: f105 collapsed,
+    -- f107 expanded)
+    assert.is_nil(lines[2]:match("^%s*\239\132\133"))
+    assert.is_nil(lines[2]:match("^%s*\239\132\135"))
+  end)
+
+  it("renders no marker on keys, even at the tree top level", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {
+      tree.make_key_node("big-value", "c", 0),
+      tree.make_key_node("plain", "c", 0),
+    }
+    db.expanded = true
+    tree.display_root = db
+    local lines, node_map = tree.flatten_tree({ db })
+    tree.display_root = nil
+    assert.equals(2, #lines)
+    for i, line in ipairs(lines) do
+      -- leaves show only their icon: no expand cue to mislead the user
+      assert.is_nil(line:match("\239\132\133"), "line " .. i .. " got a collapsed marker")
+      assert.is_nil(line:match("\239\132\135"), "line " .. i .. " got an expanded marker")
+    end
+    assert.equals("big-value", node_map[1].name)
   end)
 
   it("renders collapsed/expanded markers on non-leaf nodes", function()
@@ -30,15 +50,15 @@ describe("poste-redis browser tree", function()
     local db = tree.make_db_node({ db = 0 }, "c")
     conn.children = { db }
     local lines = tree.flatten_tree({ conn })
-    assert.match("", lines[1])          -- collapsed marker
+    assert.match("\239\132\133", lines[1])          -- f105 collapsed marker
     conn.expanded = true
     db.expanded = true
     lines = tree.flatten_tree({ conn })
-    assert.match("", lines[1])          -- expanded marker
-    assert.match("", lines[2])
+    assert.match("\239\132\135", lines[1])          -- f107 expanded marker
+    assert.match("\239\132\135", lines[2])
   end)
 
-  it("maps buffer lines to nodes via get_node_at_line (2 header lines offset)", function()
+  it("maps buffer lines to nodes via get_node_at_line (3 header lines offset)", function()
     local conn = tree.make_connection_node({ name = "c", url = "u", dialect = "redis" })
     local db = tree.make_db_node({ db = 1 }, "c")
     local key = tree.make_key_node("k", "c", 1)
@@ -47,13 +67,15 @@ describe("poste-redis browser tree", function()
     conn.expanded = true
     db.expanded = true
     local _, node_map = tree.flatten_tree({ conn })
-    -- HEADER_LINES = 2: search bar (1) + db select (2), nodes start at line 3
+    -- HEADER_LINES = 3: search bar (1) + db select (2) + separator (3),
+    -- nodes start at line 4
     assert.is_nil(tree.get_node_at_line(node_map, 1))
     assert.is_nil(tree.get_node_at_line(node_map, 2))
-    assert.equals(conn, tree.get_node_at_line(node_map, 3))
-    assert.equals(db, tree.get_node_at_line(node_map, 4))
-    assert.equals(key, tree.get_node_at_line(node_map, 5))
-    assert.is_nil(tree.get_node_at_line(node_map, 6))
+    assert.is_nil(tree.get_node_at_line(node_map, 3))
+    assert.equals(conn, tree.get_node_at_line(node_map, 4))
+    assert.equals(db, tree.get_node_at_line(node_map, 5))
+    assert.equals(key, tree.get_node_at_line(node_map, 6))
+    assert.is_nil(tree.get_node_at_line(node_map, 7))
   end)
 end)
 
@@ -127,6 +149,86 @@ describe("poste-redis browser async grouping", function()
     assert.equals("connection", nodes[1].node_type)
     assert.match("redis://127.0.0.1:16479", nodes[1].meta.url)
   end)
+
+  it("search results REPLACE the tree: kept outside the db node's children", function()
+    local session_conn = require("poste-redis.session_conn")
+    local orig_execute = session_conn.execute
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        cbs.on_response({ value = { value = { "cache:a", "cache:b" }, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = { tree.make_group_node("user", "c", 0) }
+    async.search(db, "redis://h", "c", "cache")
+
+    -- results live on _search_results, never spliced into the db children
+    assert.is_truthy(db._search_results)
+    local results = db._search_results
+    assert.equals("cache", results.name)
+    assert.equals(2, #results.children)
+    assert.equals("cache:a", results.children[1].name)
+    assert.equals("cache:b", results.children[2].name)
+    assert.equals(1, #db.children)
+    assert.equals("user", db.children[1].name)
+
+    -- as display root the results render at the top with no extra header line
+    tree.display_root = results
+    local lines, node_map = tree.flatten_tree({ results })
+    tree.display_root = nil
+    assert.equals(2, #lines)
+    assert.match("cache:a", lines[1])
+    assert.match("cache:b", lines[2])
+    assert.equals(results, node_map[1].parent)
+
+    async.search_clear(db)
+    assert.is_nil(db._search_results)
+    assert.equals(1, #db.children)
+    assert.equals("user", db.children[1].name)
+
+    session_conn.execute = orig_execute
+  end)
+end)
+
+describe("poste-redis browser search bar", function()
+  local browser = require("poste-redis.browser.init")
+  local prefix = tree.SEARCH_PREFIX
+
+  it("keeps the hint out of the query: prefix + tail parsing", function()
+    assert.equals("", browser._test.parse_search_line(prefix))
+    assert.equals("", browser._test.parse_search_line(prefix .. "   "))
+    assert.equals("sear", browser._test.parse_search_line(prefix .. "sear"))
+    assert.equals("cache:a", browser._test.parse_search_line(prefix .. "cache:a  "))
+    -- prompt remnants can never become the query — only the tail counts
+    assert.equals("", browser._test.parse_search_line(""))
+    assert.equals("sear", browser._test.parse_search_line("sear"))
+  end)
+
+  it("search line is icon + query; hint is virt text, never buffer text", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "", "" })
+
+    tree.render_search_line(buf, "")
+    assert.equals(prefix, vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
+      "empty state: the 'filter by key' hint must not be buffer text")
+
+    tree.render_search_line(buf, "cache")
+    assert.equals(prefix .. "cache", vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1],
+      "committed query stays on the search line")
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("separator rule lands under the db select (3 header lines)", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local sep = browser._test.separator_text()
+    assert.truthy(sep:find("^%-+$"), "separator is a dash rule")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { prefix, "[ db 0]", sep })
+    assert.match("^%-+$", vim.api.nvim_buf_get_lines(buf, 2, 3, false)[1])
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
 end)
 
 describe("poste-redis browser window", function()
@@ -158,6 +260,71 @@ describe("poste-redis browser window", function()
     async.load_connections = orig_load
     async.render_hook = orig_render_hook
     pcall(vim.api.nvim_buf_delete, source, { force = true })
+  end)
+
+  it("<leader>/ search replaces the tree; committed query stays on the bar", function()
+    local browser = require("poste-redis.browser.init")
+    local session_conn = require("poste-redis.session_conn")
+    local prefix = tree.SEARCH_PREFIX
+
+    local orig_load = async.load_connections
+    local orig_execute = session_conn.execute
+    async.load_connections = function(cb)
+      cb({ tree.make_connection_node({
+        name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis",
+      }) })
+    end
+    -- SCAN without MATCH → whole db; MATCH user* → the search hits
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        local keys
+        if vim.tbl_contains(cmd, "MATCH") then
+          keys = { "user:1", "user:2" }
+        else
+          keys = { "user:1", "user:2", "plain" }
+        end
+        cbs.on_response({ value = { value = keys, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    local ok, err = pcall(function() browser.open() end)
+    assert.is_true(ok, tostring(err))
+    local buf = browser.info().buffer
+    assert.is_true(vim.wait(2000, function()
+      return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
+    end, 5), "db scan did not render")
+
+    -- idle state: icon-only search bar (hint is virt text), db select, rule
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert.equals(prefix, lines[1])
+    assert.match("db 0%]", lines[2])  -- glyph-agnostic: icon sits before "db"
+    assert.match("^%-+$", lines[3])
+    local joined = table.concat(lines, "\n")
+    assert.is_true(joined:find("plain", 1, true) ~= nil, "unfiltered tree missing")
+
+    -- type into the bar: prefix + query only, then commit
+    browser._test.search_enter()
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { prefix .. "user" })
+    browser._test.search_commit()
+
+    -- matched keys REPLACE the tree — no unfiltered rows survive
+    lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    joined = table.concat(lines, "\n")
+    assert.is_true(joined:find("user:1", 1, true) ~= nil, "match missing")
+    assert.is_true(joined:find("user:2", 1, true) ~= nil, "match missing")
+    assert.is_nil(joined:find("plain", 1, true), "search appended instead of replacing")
+    assert.equals(prefix .. "user", lines[1], "committed query must stay on the bar")
+
+    -- clear restores the unfiltered tree
+    browser.search_clear()
+    joined = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+    assert.is_true(joined:find("plain", 1, true) ~= nil, "clear did not restore the tree")
+    assert.is_nil(joined:find("user:1", 1, true), "stale search rows after clear")
+
+    browser.close()
+    async.load_connections = orig_load
+    session_conn.execute = orig_execute
   end)
 end)
 
@@ -287,7 +454,7 @@ describe("poste-redis browser e2e (live redis)", function()
     assert.is_true(wait_ok, "search did not finish in 10s")
     assert.is_truthy(db._search_results, "search results node missing")
     local results = db._search_results
-    assert.match("", results.name)      -- nerd-font search glyph, no emoji
+    assert.equals("bench:a", results.name)  -- name = sub-path; the node is never rendered (display root)
     local names = {}
     for _, k in ipairs(results.children or {}) do
       names[#names + 1] = k.name
@@ -296,11 +463,11 @@ describe("poste-redis browser e2e (live redis)", function()
     assert.is_true(vim.tbl_contains(names, "bench:a:b:y"), "missing bench:a:b:y")
     assert.is_false(vim.tbl_contains(names, "bench:c:z"), "non-matching key leaked")
 
-    -- clearing removes the results node from db children
+    -- clearing drops the results node; the db children were never touched
     async.search_clear(db)
     assert.is_nil(db._search_results)
     for _, ch in ipairs(db.children) do
-      assert.is_false(ch.is_search, "search node not removed")
+      assert.is_false(ch.is_search, "search node leaked into db children")
     end
   end)
 

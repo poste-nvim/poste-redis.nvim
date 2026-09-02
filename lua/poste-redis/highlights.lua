@@ -51,6 +51,13 @@ function M.setup()
   link_if_empty("PosteRedisHistorySuccess", "DiagnosticOk")
   link_if_empty("PosteRedisHistoryError", "DiagnosticError")
 
+  -- Key browser search bar: the "filter by key" ghost hint and a committed
+  -- query both render as hint-colored text. @comment.hint when the
+  -- colorscheme defines it, Comment otherwise.
+  local hint_target = vim.fn.hlexists("@comment.hint") == 1 and "@comment.hint" or "Comment"
+  link_if_empty("PosteRedisBrowserSearchHint", hint_target)
+  link_if_empty("PosteRedisBrowserSearchText", hint_target)
+
   state.apply_highlight_overrides({
     "PosteRedisComment", "PosteRedisUse", "PosteRedisUseName",
     "PosteRedisContinuation", "PosteRedisString", "PosteRedisNumber",
@@ -63,6 +70,7 @@ function M.setup()
     "PosteRedisResultString", "PosteRedisResultKey", "PosteRedisResultScore",
     "PosteRedisResultRowNum", "PosteRedisResultTab",
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
+    "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
   })
 end
 

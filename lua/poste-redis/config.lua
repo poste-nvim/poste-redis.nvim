@@ -45,7 +45,6 @@ M.defaults = {
       move_left = "h",
       move_right = "l",
       refresh_node = "r",
-      search_filter = "/",
       search = "<leader>/",
       search_clear = "<Esc>",
       db_select = "<Space>",

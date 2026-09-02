@@ -15,7 +15,7 @@ local M = {}
 
 -- Nerd-font glyphs (no emoji): marker + icons per node type.
 local MARKER_COLLAPSED = " "
-local MARKER_EXPANDED = " "
+local MARKER_EXPANDED = " "
 local MARKER_LOADING = "… "
 
 local ICON = {
@@ -27,16 +27,17 @@ local ICON = {
 
 local hl_ns = vim.api.nvim_create_namespace("poste_redis_browser")
 
--- Two header lines above the tree: line 1 = search bar, line 2 = db select.
--- Every node line sits below them; line math (append_children,
--- apply_highlights, get_node_at_line) offsets by this constant.
-local HEADER_LINES = 2
+-- Three header lines above the tree: line 1 = search bar, line 2 = db
+-- select, line 3 = separator rule under the select. Every node line sits
+-- below them; line math (append_children, apply_highlights,
+-- get_node_at_line) offsets by this constant.
+local HEADER_LINES = 3
 
 M.HEADER_LINES = HEADER_LINES
 
 --- Header lines rendered above the tree. Set by browser/init.lua:
----   [1] search bar, [2] db select. Empty strings hide that line.
-M.header_lines = { "", "" }
+---   [1] search bar, [2] db select, [3] separator.
+M.header_lines = { "", "", "" }
 
 --- When set, this node is the hidden display root: its own line is not
 --- rendered; its children become the top level (depth 0). Used by the new
@@ -137,7 +138,7 @@ function M.flatten_tree(nodes, depth, multi_select)
       elseif node.expanded then
         marker = MARKER_EXPANDED
       elseif node.node_type == "connection" or node.node_type == "db"
-          or node.node_type == "group" or depth == 0 then
+          or node.node_type == "group" then
         marker = MARKER_COLLAPSED
       else
         marker = "  "
@@ -245,6 +246,56 @@ function M.set_header_line(buf, text, line)
   vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
   vim.api.nvim_buf_set_lines(buf, idx, idx + 1, false, { text })
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+end
+
+----------------------------------------------------------------------
+-- Search bar (header line 1): icon prefix + query text. The prefix is
+-- fixed buffer text; everything after it IS the query — nothing else on
+-- the line can leak into a search.
+----------------------------------------------------------------------
+
+local search_ns = vim.api.nvim_create_namespace("poste_redis_browser_search")
+
+--- Fixed prefix of the search bar: U+F002 (magnifying glass) + space. Typed
+--- query text always starts after these bytes; parse takes only the tail.
+M.SEARCH_PREFIX = "\239\128\130 "
+
+--- Draw the search bar in its idle state: prefix + committed query. With no
+--- query, an inline virt-text hint follows the icon — extmark virtual text,
+--- never buffer text, so it can never be parsed (or edited) as a query.
+--- @param buf number
+--- @param query string committed search text ("" → show the hint)
+function M.render_search_line(buf, query)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  M.set_header_line(buf, M.SEARCH_PREFIX .. query, 1)
+  M.decorate_search_line(buf, query)
+end
+
+--- Highlight the search bar: icon in PosteRedisBrowserSearchHint; a
+--- committed query in PosteRedisBrowserSearchText; with no query, the
+--- "filter by key" ghost hint after the icon.
+--- @param buf number
+--- @param query string
+function M.decorate_search_line(buf, query)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.api.nvim_buf_clear_namespace(buf, search_ns, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, search_ns, "PosteRedisBrowserSearchHint", 0, 0, #M.SEARCH_PREFIX)
+  if query == "" then
+    vim.api.nvim_buf_set_extmark(buf, search_ns, 0, #M.SEARCH_PREFIX, {
+      virt_text = { { "filter by key", "PosteRedisBrowserSearchHint" } },
+      virt_text_pos = "inline",
+    })
+  else
+    vim.api.nvim_buf_add_highlight(buf, search_ns, "PosteRedisBrowserSearchText", 0, #M.SEARCH_PREFIX, -1)
+  end
+end
+
+--- Drop the search bar's ghost hint + highlights (while the user is editing
+--- the line, the hint must not sit in the way).
+--- @param buf number
+function M.clear_search_decoration(buf)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.api.nvim_buf_clear_namespace(buf, search_ns, 0, -1)
 end
 
 --- Incrementally append newly-loaded child nodes under a rendered node

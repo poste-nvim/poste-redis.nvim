@@ -310,13 +310,16 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
 end
 
 --- Search-by-subpath: SCAN MATCH <subpath>* and render matching keys under a
---- dedicated ` <subpath>` result node attached to the db node. This is the
---- same cursor/pacing/append machinery as scan_group; the search bar in
---- browser/init.lua drives it on <leader>/> + <CR>.
+--- dedicated hidden `<subpath>` results node. This is the same
+--- cursor/pacing/append machinery as scan_group; the search bar in
+--- browser/init.lua drives it on <leader>/ + <CR>.
 ---
---- Reuses (or re-seeds) db_node._search_results so re-searching replaces the
---- previous results. Epoch is bumped on the db node so a stale search (or a
---- stale group scan on the same db) is dropped.
+--- The results node is NOT attached to db_node.children: while it exists,
+--- init.render_tree makes it the hidden display root, so matched keys
+--- REPLACE the rendered tree instead of appending a results subtree after
+--- the unfiltered one. Reuses (or re-seeds) db_node._search_results so
+--- re-searching replaces the previous results. Epoch is bumped on the db
+--- node so a stale search (or a stale group scan on the same db) is dropped.
 --- @param db_node table db node
 --- @param conn_url string
 --- @param conn_name string
@@ -330,22 +333,20 @@ function M.search(db_node, conn_url, conn_name, subpath)
   db_node.epoch = (db_node.epoch or 0) + 1
   local epoch = db_node.epoch
 
-  -- Result node: one per db, replaced on re-search.
+  -- Result node: one per db, replaced on re-search. Never a child of the
+  -- db node — init.render_tree swaps it in as the display root.
   local results = db_node._search_results
   if not results then
-    results = tree.make_group_node(" " .. subpath, conn_name, db)
+    results = tree.make_group_node(subpath, conn_name, db)
     results.is_search = true
     results.parent = db_node
     db_node._search_results = results
-    db_node.children = db_node.children or {}
-    table.insert(db_node.children, results)
   else
-    results.name = " " .. subpath
+    results.name = subpath
   end
   results.children = {}
   results.expanded = true
   results.loading = true
-  db_node.expanded = true
   schedule_render()
 
   local scan_count = config.config.scan_count or 500
@@ -372,7 +373,9 @@ function M.search(db_node, conn_url, conn_name, subpath)
         if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
           local new_nodes = {}
           for i = built + 1, #all_keys do
-            table.insert(new_nodes, tree.make_key_node(all_keys[i], conn_name, db))
+            local kn = tree.make_key_node(all_keys[i], conn_name, db)
+            kn.parent = results
+            table.insert(new_nodes, kn)
           end
           built = #all_keys
           for _, n in ipairs(new_nodes) do table.insert(results.children, n) end
@@ -397,17 +400,14 @@ function M.search(db_node, conn_url, conn_name, subpath)
   next_page("0")
 end
 
---- Remove the search results node from a db node and re-render.
+--- Drop a db node's search results; init.render_tree falls back to the db
+--- node as display root, restoring the unfiltered tree. The db node's own
+--- children were never touched by search(), so there is nothing to unsplice.
 --- @param db_node table
 function M.search_clear(db_node)
   if not db_node or not db_node._search_results then return end
   db_node.epoch = (db_node.epoch or 0) + 1
   db_node._search_results = nil
-  local kept = {}
-  for _, ch in ipairs(db_node.children or {}) do
-    if not ch.is_search then kept[#kept + 1] = ch end
-  end
-  db_node.children = kept
   schedule_render()
 end
 

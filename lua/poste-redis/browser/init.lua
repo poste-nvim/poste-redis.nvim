@@ -1,14 +1,21 @@
 --- Redis key browser window (M2, P1-1/P1-2).
 ---
---- Layout (v2):
----   [search]            <- search bar (line 1): <leader>/> focuses it, <CR>
+--- Layout (v3):
+---   <search>            <- search bar (line 1): <leader>/ focuses it, <CR>
 ---                          runs async.search on the selected db, empty + <CR>
----                          clears the search. Search operates on the db shown
----                          in the select below.
----   [ db 0]           <- db select (line 2): <Space> pops a dropdown list;
+---                          clears it. The bar is a fixed icon prefix; the
+---                          "filter by key" cue is extmark ghost text and a
+---                          committed query stays on the line in a hint
+---                          highlight — neither is ever part of the query.
+---                          `/` is left alone for nvim's own buffer search.
+---   [ db 0]           <- db select (line 2): <Space> pops a dropdown list;
 ---                          picking a db re-scans it and backfills the name.
+---   ------              <- separator (line 3) between header and key rows.
 ---   tree                <- the selected db's groups + flat keys as top level
 ---                          (the db node itself is the hidden display_root).
+---                          While a search is active the results node is the
+---                          display root instead: matched keys REPLACE the
+---                          tree; <Esc> (search_clear) restores it.
 ---
 --- All I/O goes through browser/async.lua on the persistent redis-session
 --- transport. The browser is scoped to ONE connection + ONE db at a time.
@@ -39,22 +46,50 @@ local search_query = ""
 
 --- Header text for line 2 (db select).
 local function db_select_text()
-  return "[ db " .. tostring(current_db) .. "]"
+  -- \239\135\128 = db icon U+F1C0 (explicit escape: reviewable bytes)
+  return "[\239\135\128 db " .. tostring(current_db) .. "]"
 end
 
---- Header text for line 1 (search bar).
+--- Header text for line 1 (search bar): fixed icon prefix + committed query.
+--- While the user is editing the line the buffer text is whatever they typed;
+--- render_tree keeps it when a render fires mid-edit.
 local function search_bar_text()
-  if search_query ~= "" then
-    return "[search: " .. search_query .. "]"
+  return tree.SEARCH_PREFIX .. search_query
+end
+
+--- Header text for line 3 (separator rule): dashes spanning the browser
+--- window so the key rows below read as a separate area.
+local function separator_text()
+  local width = 28
+  if browser_win and vim.api.nvim_win_is_valid(browser_win) then
+    width = vim.api.nvim_win_get_width(browser_win) - 2
   end
-  return "[search]"
+  return string.rep("-", math.max(width, 8))
+end
+
+--- The node rendered as the tree top level. While a search is active the
+--- results node takes over — matched keys REPLACE the tree; on clear the db
+--- node comes back with its children untouched.
+local function display_root_node()
+  if current_db_node and current_db_node._search_results then
+    return current_db_node._search_results
+  end
+  return current_db_node
 end
 
 local function render_tree()
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
-  tree.header_lines = { search_bar_text(), db_select_text() }
-  tree.display_root = current_db_node
-  line_to_node = tree.render_tree(browser_buf, line_to_node, { current_db_node })
+  local search_line = search_bar_text()
+  if search_active then
+    -- a render fired mid-edit (paced SCAN batch): keep the in-progress text
+    search_line = vim.api.nvim_buf_get_lines(browser_buf, 0, 1, false)[1] or search_line
+  end
+  tree.header_lines = { search_line, db_select_text(), separator_text() }
+  tree.display_root = display_root_node()
+  line_to_node = tree.render_tree(browser_buf, line_to_node, { tree.display_root })
+  if not search_active then
+    tree.decorate_search_line(browser_buf, search_query)
+  end
 end
 
 async.render_hook = render_tree
@@ -206,17 +241,20 @@ local function expand_or_child()
   end
 end
 
---- r: reload the current db's keys.
+--- r: reload the current db's keys. Any active search is cleared — the fresh
+--- scan rebuilds the unfiltered tree.
 local function refresh_node()
   if not current_db_node or not current_conn then return end
+  M.search_clear()
   current_db_node.children = nil
   async.scan_keys(current_db_node, current_conn.url, current_conn.name)
 end
 
---- / or <leader>/>: enter search state — focus the search bar on line 1,
---- insert mode (typed text lands in the in-buffer [search: ] bar, NOT the
---- command line). <CR> runs async.search on the current db and loses focus;
---- empty + <CR> clears the search; <Esc> cancels.
+--- <leader>/: enter search state — focus the search bar on line 1, insert
+--- mode (typed text lands after the fixed icon prefix, NOT the command
+--- line). <CR> runs async.search on the current db and loses focus; empty +
+--- <CR> clears the search; <Esc> cancels. `/` is untouched so nvim's own
+--- buffer search keeps working.
 local search_commit  -- forward declarations (AGENTS.md: local fn hoisting)
 local search_cancel
 local function search_enter()
@@ -225,31 +263,30 @@ local function search_enter()
   if win ~= -1 then vim.api.nvim_set_current_win(win) end
 
   search_active = true
-  local placeholder = "[search: " .. search_query .. "]"
-  tree.set_header_line(browser_buf, placeholder, 1)
+  tree.set_header_line(browser_buf, tree.SEARCH_PREFIX .. search_query, 1)
+  tree.clear_search_decoration(browser_buf)
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
-  -- place the cursor right after the prompt so typing appends the sub-path
-  local col = #("[search: ") + #search_query
-  vim.api.nvim_win_set_cursor(0, { 1, col })
+  -- place the cursor right after the prefix (+ committed query) so typing
+  -- edits the query only — the prefix icon stays intact
+  vim.api.nvim_win_set_cursor(0, { 1, #tree.SEARCH_PREFIX + #search_query })
   vim.keymap.set("i", "<CR>", search_commit, { buffer = browser_buf, silent = true })
   vim.keymap.set("i", "<Esc>", search_cancel, { buffer = browser_buf, silent = true })
   vim.cmd.startinsert()
 end
 
---- /: same as <leader>/> — both focus the in-buffer search bar (no command-line
---- prompt). Kept as a separate name so users can remap them independently.
-local function search_filter()
-  search_enter()
-end
-
---- Parse the query out of a "[search: <q>]" line (tolerant of missing brackets).
+--- Parse the query out of the search bar line: everything after the fixed
+--- icon prefix, trimmed. The prompt text can never leak into a query — the
+--- old "[search: ...]" line made the prompt itself editable, so deleting
+--- into it searched for the prompt remnant.
 --- @param line string
 --- @return string
 local function parse_search_line(line)
-  local q = line:match("%[search:%s*(.-)%s*%]")
-  if q then return q end
-  q = line:gsub("^%s*%[search:%s*", ""):gsub("%s*%]$", "")
-  return q:gsub("%s+$", "")
+  line = line or ""
+  if line:sub(1, #tree.SEARCH_PREFIX) == tree.SEARCH_PREFIX then
+    line = line:sub(#tree.SEARCH_PREFIX + 1)
+  end
+  line = line:gsub("^%s+", "")
+  return (line:gsub("%s+$", ""))
 end
 
 --- <CR> in the search bar: read the query, run async.search, return to tree.
@@ -315,8 +352,6 @@ local function setup_browser_buffer()
   if k then vim.keymap.set("n", k, expand_or_child, opts) end
   k = config.get_keymap("redis_browser", "refresh_node", "r")
   if k then vim.keymap.set("n", k, refresh_node, opts) end
-  k = config.get_keymap("redis_browser", "search_filter", "/")
-  if k then vim.keymap.set("n", k, search_filter, opts) end
   k = config.get_keymap("redis_browser", "search", "<leader>/")
   if k then vim.keymap.set("n", k, search_enter, opts) end
   k = config.get_keymap("redis_browser", "search_clear", "<Esc>")
@@ -382,9 +417,8 @@ local function setup_browser_buffer()
         "  <CR>  open/close node, view key value",
         "  h     collapse / parent",
         "  l     expand / first child",
-        "  r     reload db keys",
-        "  /     search by sub-path (cache matches cache:a)",
-        "  <leader>/>  search by sub-path (bench:a:b:c)",
+        "  r     reload db keys (clears search)",
+        "  <leader>/>  filter keys by sub-path (matches cache:a for 'cache')",
         "  <Esc>  clear search",
         "  <Space>  select database",
         "  d     delete key (confirm)",
@@ -392,6 +426,7 @@ local function setup_browser_buffer()
         "  t     show/edit TTL (secs, -1 = PERSIST)",
         "  R     rename key (conflict-checked)",
         "  q     close browser",
+        "  (/ stays nvim's own buffer search)",
       }
       vim.api.nvim_echo(lines, true, {})
     end, opts)
@@ -469,9 +504,11 @@ function M.close()
   end
 end
 
---- Toggle between tree view (default) and flat key view.
+--- Toggle between tree view (default) and flat key view. Any active search
+--- is cleared first — the rebuild walks the db node's unfiltered children.
 function M.toggle_view()
   async.tree_view = not async.tree_view
+  M.search_clear()
   if current_db_node and current_db_node.children then
     local keys = {}
     local function collect(node)
@@ -526,6 +563,8 @@ M._test = {
   parse_search_line = parse_search_line,
   search_bar_text = search_bar_text,
   db_select_text = db_select_text,
+  separator_text = separator_text,
+  display_root_node = display_root_node,
 }
 
 return M
