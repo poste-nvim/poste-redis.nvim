@@ -41,8 +41,10 @@ SQL/HTTP-specific files unless the task explicitly crosses protocols.
 | `connections.lua` | connections.toml → redis:// URL (url/field forms, `{{var}}`) |
 | `exec_run.lua` | Transport: run_async / run_file_async / run_sync, stale-guard |
 | `runner.lua` | `<CR>` entry: exec_run → buffer → history |
-| `format.lua` | Value rendering + error + preview_json |
-| `buffer.lua` | M1 result panel (tabs, K preview) |
+| `format.lua` | Value rendering + error + preview_json; list/set/hash/zset → table grid model (`kind="table"`) |
+| `buffer.lua` | Result panel (tabs, K preview, q/y) + table grid: floating header, cell nav, pagination, search, yank |
+| `result/grid.lua` | Pure grid renderer (layout widths, render_page, col maps, search matches) |
+| `result/header.lua` | Floating fixed header for grid tabs |
 | `history.lua` | In-memory history + float |
 | `toml.lua` | **Vendored** from poste-db — don't edit without syncing source |
 | `config.lua` / `state.lua` / `constants.lua` / `util.lua` | defaults / context / dims & blacklist / helpers |

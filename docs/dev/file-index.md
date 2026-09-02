@@ -25,8 +25,10 @@ fallback — see `requirements.md`.
 | `exec_run.lua` | `run_async` (stdin JSON → `poste redis-exec` → NDJSON events), `run_file_async` (USE grouping, sequential batches), `run_sync`, `run_selection_async`, stale-guard + busy bookkeeping |
 | `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`list`; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests; `opts.db` auto-SELECTs on db change |
 | `runner.lua` | `<CR>` / `:PosteRedisRunFile` entry: connects exec_run → buffer → history, spinner indicators |
-| `format.lua` | `format_result` (nil/int/string/binary/list/hash/zset/stream/unknown), `format_error`, `preview_json`, `status_summary` |
-| `buffer.lua` | M1 result panel (D2): `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`, `K` raw JSON float, `q` close, `yy` yank |
+| `format.lua` | `format_result` → `{kind}` — "text" for nil/int/string/binary/stream/unknown/error; "table" grid for list/set/hash/zset (`columns` + raw `rows`, `to_display`/`to_copy`); `format_error`, `preview_json`, `status_summary` |
+| `buffer.lua` | Result panel: `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`. Text tabs keep the compact block; table tabs render the grid with floating header + cell/page navigation + search + yank |
+| `result/grid.lua` | **Pure table-grid renderer**: `build_layout` (display widths + right-align), `render_page` (borderless `│` rows + col byte maps + pagination), `compute_matches` / `cell_match_range` (search). No vim ops — reusable in poste.nvim later |
+| `result/header.lua` | Floating fixed header for grid tabs (1-line float over the panel following horizontal scroll, per-char viewport slicing) |
 | `history.lua` | In-memory execution history + float list (j/k/CR/q) |
 
 ### Key browser (`browser/`)
@@ -80,12 +82,13 @@ fallback — see `requirements.md`.
 | `redis/connections_spec.lua` | §5: url/field forms, `{{var}}` + `.env`/OS, errors, list, use_connection |
 | `redis/config_spec.lua` | defaults, merge, keymap resolution |
 | `redis/toml_spec.lua` | vendored parser (sections, escapes, errors) |
-| `redis/format_spec.lua` | value rendering incl. binary / truncated / CJK |
+| `redis/format_spec.lua` | value rendering incl. binary / truncated / CJK / grid model for list/set/hash/zset |
+| `redis/result_grid_spec.lua` | grid: layout widths, render_page + pagination, panel cell navigation, page flip, search, yank cell/column, preview, header slicing |
 | `redis/exec_run_spec.lua` | transport contract (stubbed `poste.cli`), stale-guard, USE grouping |
 | `redis/session_conn_spec.lua` | M2 session pool (stubbed jobstart): start args, reuse, seq pairing, error routing, exit drops session, cleanup_buf, db auto-SELECT, chunk-split stdout |
 | `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/tree toggle, value page commands + live-redis e2e (SCAN groups, string/hash value render, TTL/DEL/RENAME) |
 | `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |
-| `redis/buffer_spec.lua` | panel tabs, preview, yank, close |
+| `redis/buffer_spec.lua` | panel tabs, preview, yank, close, grid tab render |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/completion_spec.lua` | P2-4: ctx detection, command table, conn names, SCAN key-prefix fetch+cache (stubbed session), orchestrator dispatch |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |

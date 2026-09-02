@@ -1,7 +1,8 @@
---- Result formatter: turns one `result` event into display lines.
---- Mirrors redis-cli's rendering (OK / (nil) / "value" / numbered lists /
---- field-value tables) but stays a compact text block — the M1 panel is a
---- self-built single-buffer + tabs (EXECUTION-PLAN D2), no dataset grid.
+--- Result formatter: turns one `result` event into display lines or a grid.
+--- Scalars (string / integer / nil / binary / stream / unknown / error) stay
+--- a compact text block (kind "text"). Set / List / Hash / Zset become a
+--- table grid (kind "table") rendered by poste-redis.result.grid — head
+--- fixed, body scrollable, page navigation (poste-db dataset style).
 local util = require("poste-redis.util")
 local constants = require("poste-redis.constants")
 
@@ -9,6 +10,10 @@ local M = {}
 
 --- Max rows rendered per tab (the binary already caps at --max-items).
 local MAX_RENDER_ROWS = 200
+
+--- Max rows kept in a table grid (matches the binary --max-items default so
+--- pagination has real work to do).
+local GRID_MAX_ROWS = 1000
 
 --- Escape a value for one-line display.
 --- @param v any
@@ -64,90 +69,77 @@ local function render_binary(v)
 end
 
 -----------------------------------------------------------------------
---- Collection renderers
------------------------------------------------------------------------
+------------------------------------------------------------------------
+--- Collection grids (Set / List / Hash / Zset)
+------------------------------------------------------------------------
 
---- Generic two-column table with a fixed left header.
---- @param rows table[]  { key, value } pairs
---- @param k_header string
---- @param v_header string
---- @return string[] lines, number rows_rendered, number rows_total
-local function render_pair_table(rows, k_header, v_header)
-  local shown = math.min(#rows, MAX_RENDER_ROWS)
-  local key_w = util.display_width(k_header)
-  local val_w = util.display_width(v_header)
-  for i = 1, shown do
-    local r = rows[i]
-    key_w = math.max(key_w, util.display_width(cell(r[1])))
-    val_w = math.max(val_w, util.display_width(cell(r[2])))
-  end
-  key_w = math.min(key_w, 40)
-  val_w = math.min(val_w, 80)
-  local sep = " │ "
-  local top = "┌" .. string.rep("─", key_w) .. "┬" .. string.rep("─", val_w) .. "┐"
-  local border = "├" .. string.rep("─", key_w) .. "┼" .. string.rep("─", val_w) .. "┤"
-  local bot = "└" .. string.rep("─", key_w) .. "┴" .. string.rep("─", val_w) .. "┘"
-  local lines = { top }
-  lines[#lines + 1] = "│" .. util.pad_right(k_header, key_w) .. sep .. util.pad_right(v_header, val_w) .. "│"
-  lines[#lines + 1] = border
-  for i = 1, shown do
-    local r = rows[i]
-    local k = util.truncate_display(cell(r[1]), key_w)
-    local v = util.truncate_display(cell(r[2]), val_w)
-    lines[#lines + 1] = "│" .. util.pad_right(k, key_w) .. sep .. util.pad_right(v, val_w) .. "│"
-  end
-  lines[#lines + 1] = bot
-  if shown < #rows then
-    lines[#lines + 1] = string.format("… %d more rows not rendered", #rows - shown)
-  end
-  return lines, shown, #rows
+--- Build a grid model for a collection reply.
+--- rows[i] holds RAW values with the row index at [1]; rendering/search use
+--- grid.to_display, yank/preview use grid.to_copy — the `#` index column is
+--- display-only, never part of a copied value.
+--- @param columns string[] header cells (includes the "#" column)
+--- @param rows table[][] raw cell values, rows[i][1] = row index
+--- @param total number  element count reported by the binary
+--- @param truncated boolean
+--- @param right_align number[]  extra right-aligned columns (1-based, beyond "#")
+--- @return table grid
+local function new_grid(columns, rows, total, truncated, right_align)
+  return {
+    columns = columns,
+    rows = rows,
+    total = total,
+    truncated = truncated,
+    right_align = right_align or {},
+    to_display = cell,
+    to_copy = util.to_clipboard,
+  }
 end
 
---- Numbered list (redis-cli style: `1) "item"`).
-local function render_list(v)
+--- Single-column collections (list / set): `# | value`.
+local function build_list_grid(v)
   local items = v.value or {}
   local total = v.len or #items
-  if #items == 0 then return { "(empty list)" } end
-  local rendered = math.min(#items, MAX_RENDER_ROWS)
-  local num_w = util.display_width(string.format("%.0f", rendered))
-  local lines = {}
-  for i = 1, rendered do
-    lines[#lines + 1] = util.pad_left(string.format("%.0f", i), num_w) .. ") " .. cell(items[i])
-  end
-  if rendered < total then
-    lines[#lines + 1] = string.format("… %d more not shown", total - rendered)
-  end
-  if v.truncated then
-    lines[#lines + 1] = string.format("(%d elements total, server output capped)", total)
-  end
-  return lines
-end
-
-local function render_hash(v)
-  local rows = v.entries or {}
-  local total = v.len or #rows
-  if #rows == 0 then return { "(empty hash)" } end
-  local lines, shown, _ = render_pair_table(rows, "field", "value")
-  if v.truncated or shown < total then
-    lines[#lines + 1] = string.format("(%d fields total)", total)
-  end
-  return lines
-end
-
-local function render_zset(v)
-  local items = v.value or {}
-  local total = v.len or #items
-  if #items == 0 then return { "(empty zset)" } end
+  local shown = math.min(#items, GRID_MAX_ROWS)
   local rows = {}
-  for i, it in ipairs(items) do
-    rows[#rows + 1] = { it.member or "", util.escape_for_line(tostring(it.score or 0)) }
+  for i = 1, shown do
+    rows[i] = { i, items[i] }
   end
-  local lines, shown, _ = render_pair_table(vim.list_slice(rows, 1, MAX_RENDER_ROWS), "member", "score")
-  if v.truncated or shown < total then
-    lines[#lines + 1] = string.format("(%d members total)", total)
-  end
-  return lines
+  return new_grid({ "#", "value" }, rows, total, v.truncated or shown < total)
 end
+
+--- Key/value collections (hash / map): `# | field | value`.
+local function build_hash_grid(v)
+  local entries = v.entries or {}
+  local total = v.len or #entries
+  local shown = math.min(#entries, GRID_MAX_ROWS)
+  local rows = {}
+  for i = 1, shown do
+    local e = entries[i]
+    rows[i] = { i, e[1], e[2] }
+  end
+  return new_grid({ "#", "field", "value" }, rows, total, v.truncated or shown < total)
+end
+
+--- Sorted-set: `# | member | score` with the score column right-aligned.
+local function build_zset_grid(v)
+  local items = v.value or {}
+  local total = v.len or #items
+  local shown = math.min(#items, GRID_MAX_ROWS)
+  local rows = {}
+  for i = 1, shown do
+    local it = items[i]
+    rows[i] = { i, it.member or "", it.score }
+  end
+  return new_grid({ "#", "member", "score" }, rows, total, v.truncated or shown < total, { 3 })
+end
+
+local GRID_BUILDERS = {
+  list = build_list_grid,
+  set = build_list_grid,
+  hash = build_hash_grid,
+  map = build_hash_grid,
+  zset = build_zset_grid,
+}
 
 local function render_stream(v)
   local items = v.value or {}
@@ -176,11 +168,6 @@ local RENDERERS = {
   integer = render_integer,
   string = render_string,
   binary = render_binary,
-  list = render_list,
-  set = render_list,
-  hash = render_hash,
-  map = render_hash,
-  zset = render_zset,
   stream = render_stream,
   unknown = render_unknown,
 }
@@ -189,9 +176,10 @@ local RENDERERS = {
 --- Public API
 -----------------------------------------------------------------------
 
---- Format a single result event into lines + metadata.
+--- Format a single result event into a tab payload.
+--- Returns kind "table" (grid) for collections, kind "text" (lines) otherwise.
 --- @param event table  { seq, command, status, latency_ms, value, error }
---- @return table { lines = string[], meta = table }
+--- @return table { kind = "text"|"table", lines = string[]|nil, grid = table|nil, meta = table }
 function M.format_result(event)
   event = event or {}
   local meta = {
@@ -204,28 +192,29 @@ function M.format_result(event)
     dangerous = M.is_dangerous_command(event.command or ""),
   }
 
-  local lines = {}
   if event.error and event.status == "error" then
     meta.error = event.error
-    lines = M.format_error(event.error, meta.command)
-    return { lines = lines, meta = meta }
+    return { kind = "text", lines = M.format_error(event.error, meta.command), meta = meta }
   end
 
   local value = event.value
   if type(value) == "table" and value.type then
+    local build = GRID_BUILDERS[value.type]
+    if build then
+      local ok, grid = pcall(build, value)
+      if ok then
+        return { kind = "table", grid = grid, meta = meta }
+      end
+      return { kind = "text", lines = { "  (failed to render value: " .. tostring(grid) .. ")" }, meta = meta }
+    end
     local render = RENDERERS[value.type] or render_unknown
     local ok, rendered = pcall(render, value)
     if ok then
-      lines = rendered
-    else
-      lines = { "  (failed to render value: " .. tostring(rendered) .. ")" }
+      return { kind = "text", lines = rendered, meta = meta }
     end
-  elseif type(value) ~= "table" then
-    lines = { cell(value) }
-  else
-    lines = { cell(value) }
+    return { kind = "text", lines = { "  (failed to render value: " .. tostring(rendered) .. ")" }, meta = meta }
   end
-  return { lines = lines, meta = meta }
+  return { kind = "text", lines = { cell(value) }, meta = meta }
 end
 
 --- Format an error message into panel lines.
@@ -275,9 +264,10 @@ end
 
 M._test = {
   cell = cell,
-  render_pair_table = render_pair_table,
   RENDERERS = RENDERERS,
+  GRID_BUILDERS = GRID_BUILDERS,
   MAX_RENDER_ROWS = MAX_RENDER_ROWS,
+  GRID_MAX_ROWS = GRID_MAX_ROWS,
 }
 
 return M

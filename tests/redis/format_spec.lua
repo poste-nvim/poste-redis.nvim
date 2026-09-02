@@ -51,44 +51,45 @@ describe("poste-redis format", function()
     assert.equals('"{"a": 1}"', out.lines[1])
   end)
 
-  it("renders a list as a numbered table", function()
+  it("renders a list as a table grid with an index column", function()
     local out = lines_for({ type = "list", value = { "a", "b", "c" }, len = 3 })
-    assert.equals('1) a', out.lines[1])
-    assert.equals('2) b', out.lines[2])
-    assert.equals('3) c', out.lines[3])
+    assert.equals("table", out.kind)
+    assert.same({ "#", "value" }, out.grid.columns)
+    assert.same({ 1, "a" }, out.grid.rows[1])
+    assert.same({ 3, "c" }, out.grid.rows[3])
+    assert.equals(3, out.grid.total)
   end)
 
-  it("renders an empty list", function()
+  it("renders an empty list as an empty grid", function()
     local out = lines_for({ type = "list", value = {}, len = 0 })
-    assert.equals("(empty list)", out.lines[1])
+    assert.equals("table", out.kind)
+    assert.equals(0, #out.grid.rows)
   end)
 
   it("renders a list capped by the binary with a truncation note", function()
     local out = lines_for({ type = "list", value = { "a" }, len = 1000, truncated = true })
-    assert.truthy(out.lines[#out.lines]:find("capped") or out.lines[#out.lines]:find("truncated"))
+    assert.equals("table", out.kind)
+    assert.is_true(out.grid.truncated)
+    assert.equals(1000, out.grid.total)
+    assert.equals(1, #out.grid.rows)
   end)
 
-  it("renders a hash (HGETALL) as a field/value table", function()
+  it("renders a hash (HGETALL) as a field/value grid", function()
     local out = lines_for({
       type = "hash",
       entries = { { "name", "Alice" }, { "age", "30" } },
       len = 2,
     })
-    local joined = table.concat(out.lines, "\n")
-    assert.truthy(joined:find("Alice"))
-    assert.truthy(joined:find("30"))
-    assert.truthy(joined:find("field"))
-    assert.truthy(joined:find("value"))
-    -- boxed table
-    assert.truthy(joined:find("┌"))
-    assert.truthy(joined:find("┘"))
+    assert.equals("table", out.kind)
+    assert.same({ "#", "field", "value" }, out.grid.columns)
+    assert.same({ 1, "name", "Alice" }, out.grid.rows[1])
+    assert.same({ 2, "age", "30" }, out.grid.rows[2])
   end)
 
   it("renders a native Redis 7 map like a hash", function()
     local out = lines_for({ type = "hash", entries = { { "k", "v" } }, len = 1 })
-    local joined = table.concat(out.lines, "\n")
-    assert.truthy(joined:find("k"))
-    assert.truthy(joined:find("v"))
+    assert.equals("table", out.kind)
+    assert.same({ 1, "k", "v" }, out.grid.rows[1])
   end)
 
   it("renders a zset with a score column", function()
@@ -97,10 +98,12 @@ describe("poste-redis format", function()
       value = { { member = "alice", score = 99 }, { member = "bob", score = 87 } },
       len = 2,
     })
-    local joined = table.concat(out.lines, "\n")
-    assert.truthy(joined:find("alice"))
-    assert.truthy(joined:find("99"))
-    assert.truthy(joined:find("score"))
+    assert.equals("table", out.kind)
+    assert.same({ "#", "member", "score" }, out.grid.columns)
+    assert.same({ 1, "alice", 99 }, out.grid.rows[1])
+    assert.same({ 2, "bob", 87 }, out.grid.rows[2])
+    -- score column is right-aligned
+    assert.same({ 3 }, out.grid.right_align)
   end)
 
   it("renders a stream with id + fields", function()
@@ -158,10 +161,12 @@ describe("poste-redis format", function()
 
   it("caps rendered rows for very large collections", function()
     local big = {}
-    for i = 1, 500 do big[#big + 1] = tostring(i) end
-    local out = lines_for({ type = "list", value = big, len = 500 })
-    assert.truthy(#out.lines < 500)
-    assert.truthy(out.lines[#out.lines]:find("more") or out.lines[#out.lines]:find("total"))
+    for i = 1, 1500 do big[#big + 1] = tostring(i) end
+    local out = lines_for({ type = "list", value = big, len = 1500 })
+    assert.equals("table", out.kind)
+    assert.equals(format._test.GRID_MAX_ROWS, #out.grid.rows)
+    assert.is_true(out.grid.truncated)
+    assert.equals(1500, out.grid.total)
   end)
 
   it("format_error produces a readable block", function()

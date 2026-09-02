@@ -87,6 +87,26 @@ function M.escape_for_line(s)
   return s:gsub("\r\n", "⏎"):gsub("\n", "⏎"):gsub("\r", "⏎"):gsub("\t", "  ")
 end
 
+--- Raw value for the clipboard (yank cell/column): keeps strings verbatim
+--- (no escape, no quotes), numbers as integers, tables as compact JSON.
+--- @param v any
+--- @return string
+function M.to_clipboard(v)
+  if v == nil or v == vim.NIL then return "" end
+  if type(v) == "boolean" then return v and "true" or "false" end
+  if type(v) == "number" then
+    if v == math.floor(v) and math.abs(v) < 1e15 then
+      return string.format("%.0f", v)
+    end
+    return tostring(v)
+  end
+  if type(v) == "table" then
+    local ok, s = pcall(vim.json.encode, v)
+    return ok and s or vim.inspect(v)
+  end
+  return tostring(v)
+end
+
 --- Format latency for display (ms → ms/s).
 --- @param ms number
 --- @return string

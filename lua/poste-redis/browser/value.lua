@@ -96,12 +96,19 @@ local function add_page(ev, label)
   out.meta.key = view.key
   out.meta.connection = view.conn_name
   out.meta.db = view.db
-  -- append the loaded/total footer to the page body
+  -- append the loaded/total footer: table grids carry it in meta (rendered
+  -- under the table), text pages append it to the body lines
   local f = footer(view.loaded, view.total, {
     cursor = view.cursor,
     truncated = (ev.value and ev.value.truncated) or false,
   })
-  if f ~= "" then out.lines[#out.lines + 1] = f end
+  if f ~= "" then
+    if out.kind == "table" then
+      out.meta.footer = f
+    else
+      out.lines[#out.lines + 1] = f
+    end
+  end
   view.pages[#view.pages + 1] = out
   -- Re-render all pages as tabs (render_tabs replaces the tab set)
   buffer.render_tabs(view.pages, { render = true })

@@ -47,6 +47,13 @@ function M.setup()
   link_if_empty("PosteRedisResultRowNum", "LineNr")
   link_if_empty("PosteRedisResultTab", "Title")
 
+  -- Table grid: current cell + search matches.
+  local cell_target = vim.fn.hlexists("SearchCurrent") == 1 and "SearchCurrent" or "Visual"
+  link_if_empty("PosteRedisResultCell", cell_target)
+  link_if_empty("PosteRedisResultSearchMatch", "Search")
+  local cur_target = vim.fn.hlexists("SearchCurrent") == 1 and "SearchCurrent" or "Search"
+  link_if_empty("PosteRedisResultSearchCurrent", cur_target)
+
   -- History sidebar.
   link_if_empty("PosteRedisHistorySuccess", "DiagnosticOk")
   link_if_empty("PosteRedisHistoryError", "DiagnosticError")
@@ -69,6 +76,7 @@ function M.setup()
     "PosteRedisResultOk", "PosteRedisResultNull", "PosteRedisResultNumber",
     "PosteRedisResultString", "PosteRedisResultKey", "PosteRedisResultScore",
     "PosteRedisResultRowNum", "PosteRedisResultTab",
+    "PosteRedisResultCell", "PosteRedisResultSearchMatch", "PosteRedisResultSearchCurrent",
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
     "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
   })
