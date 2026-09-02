@@ -38,6 +38,10 @@ GET session:abc
 `<CR>` executes the command under the cursor; results render in a result panel;
 `:PosteRedisHistory` shows past runs.
 
+`K` on a Redis command (e.g. `HSET`, `RPUSH`) opens a markdown doc — syntax plus
+examples; pressing `K` again focuses the popup. Run `:PosteRedisInfo` to inspect
+the active connection.
+
 ## Next
 
 Current follow-ups are the P2 items from `requirements.md`:

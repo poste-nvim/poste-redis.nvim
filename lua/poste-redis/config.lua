@@ -29,6 +29,7 @@ M.defaults = {
       history = "<leader>rh",
       help = "g?",
       trigger_completion = "<C-Space>",
+      show_doc = "K",
     },
     redis_result = {
       close = "q",

@@ -55,7 +55,9 @@ fallback — see `requirements.md`.
 
 | File | Role |
 |------|------|
-| `buffer_setup.lua` | Source-buffer keymaps (run n+v, history, help float) |
+| `buffer_setup.lua` | Source-buffer keymaps (run n+v, history, K docs, help float) |
+| `docs.lua` | Redis command doc data (~190 commands: category, syntax, desc, examples) + `lookup` — feeds the `K` hover |
+| `doc.lua` | `K` hover provider: vendored `open_doc_preview` (markdown float, track_key re-focus = second `K` focuses the popup) + `show_command_doc`/`build_lines` |
 | `autocmds.lua` | `FileType poste_redis` wiring + `setup_existing_buffers` |
 | `commands.lua` | `:PosteRedisConnection` / `:PosteRedisRunFile` / `:PosteRedisHistory` / `:PosteRedisInfo` / `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 | `health.lua` | `:checkhealth poste-redis` |
@@ -91,6 +93,7 @@ fallback — see `requirements.md`.
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close, grid tab render |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/completion_spec.lua` | P2-4: ctx detection, command table, conn names, SCAN key-prefix fetch+cache (stubbed session), orchestrator dispatch |
+| `redis/docs_spec.lua` | docs data parity with COMMANDS + entry shape, `build_lines` markdown, `resolve_command`, float track_key re-focus, show_doc keymap |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |
 | `scaffold_spec.lua` | harness smoke |
 

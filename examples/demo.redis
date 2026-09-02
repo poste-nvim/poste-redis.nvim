@@ -15,6 +15,9 @@ HSET user:42 name "Alice" \
       email "alice@example.com" \
       age 30
 HGETALL user:42          # 渲染为 field/value 表
+# DEL user:42
+# DEL session:abc
+
 
 # ── List ──
 RPUSH queue:jobs "job-1" "job-2" "job-3"
@@ -23,10 +26,12 @@ LRANGE queue:jobs 0 -1   # 编号列表
 # ── Set ──
 SADD tags:dev vim lua redis
 SMEMBERS tags:dev
+SADD tags:dev rust java c++ vue react
 
 # ── ZSet ──
 ZADD board 99 alice 87 bob
 ZREVRANGE board 0 -1 WITHSCORES   # member/score 表
+ZRANGE board 0 -1 WITHSCORES   # member/score 表
 
 # ── 整数 / 状态 ──
 INCR counter:hits
