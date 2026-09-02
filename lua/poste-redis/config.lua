@@ -87,6 +87,7 @@ M.defaults = {
       delete_prefix = "D",
       ttl = "t",
       rename = "R",
+      info = "i",
     },
   },
 }

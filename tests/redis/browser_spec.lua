@@ -1125,3 +1125,48 @@ describe("poste-redis browser gray text (types / hint / separator)", function()
     assert.equals(2, marks[1][2])  -- line 3 (0-based 2)
   end)
 end)
+
+
+describe("poste-redis browser node info", function()
+  it("format_bytes humanizes sizes", function()
+    local info = require("poste-redis.browser.info")
+    assert.equals("512 B", info.format_bytes(512))
+    assert.equals("2.0 KB", info.format_bytes(2048))
+    assert.equals("1.5 MB", info.format_bytes(1536 * 1024))
+    assert.equals("?", info.format_bytes(nil))
+  end)
+
+  it("key info gathers type/memory/ttl through the session", function()
+    local session_conn = require("poste-redis.session_conn")
+    local orig = session_conn.execute
+    local replies = {
+      TYPE = "hash", ENCODING = "listpack",
+    }
+    session_conn.execute = function(url, cmd, cbs, bufnr, opts)
+      local head = cmd[1]
+      local v
+      if head == "TYPE" then v = { type = "string", value = replies.TYPE }
+      elseif head == "OBJECT" then v = { type = "string", value = replies.ENCODING }
+      elseif head == "MEMORY" then v = { type = "integer", value = 2048 }
+      elseif head == "TTL" then v = { type = "integer", value = -1 }
+      end
+      cbs.on_response({ value = v })
+      return "dispatched"
+    end
+    local lines
+    local info = require("poste-redis.browser.info")
+    -- key_info is private; drive through show() with a key node + capture
+    local doc = require("poste-redis.doc")
+    local orig_preview = doc.open_doc_preview
+    doc.open_doc_preview = function(l) lines = l; return 1, 2, false end
+    info.show(tree.make_key_node("user:1", "c", 0), { url = "redis://x" })
+    doc.open_doc_preview = orig_preview
+    session_conn.execute = orig
+    assert.is_truthy(lines)
+    local text = table.concat(lines, "\n")
+    assert.match("hash", text)
+    assert.match("listpack", text)
+    assert.match("2.0 KB", text)
+    assert.match("persistent", text)
+  end)
+end)

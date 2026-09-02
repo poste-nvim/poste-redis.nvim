@@ -453,6 +453,14 @@ local function setup_browser_buffer()
       actions.rename_key(node, action_ctx())
     end, opts)
   end
+  k = config.get_keymap("redis_browser", "info", "i")
+  if k then
+    vim.keymap.set("n", k, function()
+      local node = current_node()
+      if not node or not current_conn then return end
+      require("poste-redis.browser.info").show(node, { url = current_conn.url })
+    end, opts)
+  end
 
   k = config.get_keymap("redis_browser", "help", "g?")
   if k then
@@ -471,6 +479,7 @@ local function setup_browser_buffer()
         "  D     delete all keys under prefix (count + confirm)",
         "  t     show/edit TTL (secs, -1 = PERSIST)",
         "  R     rename key (conflict-checked)",
+        "  i     node info (count / memory / ttl)",
         "  q     close browser",
         "  (/ stays nvim's own buffer search)",
       }
