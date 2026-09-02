@@ -834,6 +834,28 @@ function M.show_panel(enter)
   k = config.get_keymap("redis_result", "refresh", "r")
   if k then vim.keymap.set("n", k, function() M.refresh() end, km) end
 
+  -- Grid editing (poste-db dataset pattern): i edit cell, o add row, dd delete
+  local grid_edit = require("poste-redis.browser.grid_edit")
+  grid_edit.set_refresh(function() M.refresh() end)
+  k = config.get_keymap("redis_result", "edit_cell", "i")
+  if k then
+    vim.keymap.set("n", k, function()
+      grid_edit.edit_cell(tabs[active])
+    end, km)
+  end
+  k = config.get_keymap("redis_result", "add_row", "o")
+  if k then
+    vim.keymap.set("n", k, function()
+      grid_edit.add_row(tabs[active])
+    end, km)
+  end
+  k = config.get_keymap("redis_result", "delete_row", "dd")
+  if k then
+    vim.keymap.set("n", k, function()
+      grid_edit.delete_row(tabs[active])
+    end, km)
+  end
+
   -- F: full-load a truncated string value (browser value viewer)
   k = config.get_keymap("redis_result", "load_full", "F")
   if k then

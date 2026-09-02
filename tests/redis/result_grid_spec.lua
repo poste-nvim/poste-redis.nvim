@@ -298,3 +298,125 @@ describe("poste-redis result grid", function()
     end)
   end)
 end)
+
+describe("poste-redis grid editing", function()
+  local grid_edit = require("poste-redis.browser.grid_edit")
+  local session_conn = require("poste-redis.session_conn")
+  local connections = require("poste-redis.connections")
+
+  local sent_cmds = {}
+  local refreshes = 0
+
+  local function open_key_tab(value)
+    buffer.render({ {
+      seq = 1, command = "GET user:1", status = "", latency_ms = 1,
+      value = value, connection = "stubconn",
+    }, }, { render = true })
+    local t = buffer.active_tab()
+    t.meta.key = "user:1"
+    t.meta.db = 0
+  end
+
+  local function open_key_tab_conn(value)
+    buffer.render({ {
+      seq = 1, command = "GET user:1", status = "", latency_ms = 1,
+      value = value, connection = "stubconn",
+    }, }, { render = true, connection = "stubconn" })
+    local t = buffer.active_tab()
+    t.meta.key = "user:1"
+    t.meta.db = 0
+    -- show_panel's wiring re-registers M.refresh; re-assert the counter on top
+    -- (counting only — calling buffer.refresh here would re-dispatch through
+    -- the recording stub and pollute sent_cmds)
+    grid_edit.set_refresh(function()
+      refreshes = refreshes + 1
+    end)
+  end
+
+  before_each(function()
+    sent_cmds = {}
+    refreshes = 0
+    -- counting refresh that still re-runs the tab command (M.refresh)
+    grid_edit.set_refresh(function()
+      refreshes = refreshes + 1
+    end)
+    session_conn.execute = function(url, cmd, cbs)
+      sent_cmds[#sent_cmds + 1] = table.concat(cmd, " ")
+      if cbs and cbs.on_response then
+        cbs.on_response({ value = { type = "string", value = "OK" } })
+      end
+      return "dispatched"
+    end
+    connections.resolve_redis_url = function(name)
+      return "redis://stub:6379/0", nil
+    end
+  end)
+
+  after_each(function()
+    session_conn.execute = nil
+    connections.resolve_redis_url = nil
+  end)
+
+  it("string edit issues SET", function()
+    open_key_tab_conn({ type = "string", value = "hello" })
+    buffer.active_tab().cursor = { row = 1, col = 2 }
+    vim.ui.input = function(opts, cb) cb("world") end
+    grid_edit.edit_cell(buffer.active_tab())
+    assert.equals("SET user:1 world", sent_cmds[1])
+    assert.equals(1, refreshes)
+  end)
+
+  it("hash edit on the value column issues HSET", function()
+    open_key_tab_conn({ type = "hash", entries = { { "name", "Alice" } }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 3 }  -- value cell
+    vim.ui.input = function(opts, cb) cb("Bob") end
+    grid_edit.edit_cell(t)
+    assert.equals("HSET user:1 name Bob", sent_cmds[#sent_cmds])
+  end)
+
+  it("hash row delete issues HDEL field", function()
+    open_key_tab_conn({ type = "hash", entries = { { "name", "Alice" } }, len = 1 })
+    buffer.active_tab().cursor = { row = 1, col = 2 }
+    vim.fn.confirm = function() return 1 end
+    grid_edit.delete_row(buffer.active_tab())
+    assert.equals("HDEL user:1 name", sent_cmds[#sent_cmds])
+  end)
+
+  it("list row delete uses LSET sentinel + LREM", function()
+    open_key_tab_conn({ type = "list", value = { "job-1", "job-2" }, len = 2 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    vim.fn.confirm = function() return 1 end
+    grid_edit.delete_row(t)
+    assert.is_truthy(sent_cmds[#sent_cmds - 1]:find("^LSET user:1 0 __POSTE_DELETE_ROW__$"))
+    assert.equals("LREM user:1 1 __POSTE_DELETE_ROW__", sent_cmds[#sent_cmds])
+  end)
+
+  it("zset score edit issues ZADD", function()
+    open_key_tab_conn({ type = "zset", value = { { member = "alice", score = 99 } }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 3 }
+    vim.ui.input = function(opts, cb) cb("100") end
+    grid_edit.edit_cell(t)
+    assert.equals("ZADD user:1 100 alice", sent_cmds[#sent_cmds])
+  end)
+
+  it("add row on a set issues SADD", function()
+    open_key_tab_conn({ type = "set", value = { "vim" }, len = 1 })
+    vim.ui.input = function(opts, cb) cb("lua") end
+    grid_edit.add_row(buffer.active_tab())
+    assert.equals("SADD user:1 lua", sent_cmds[#sent_cmds])
+  end)
+
+  it("add row on a hash prompts field then value", function()
+    open_key_tab_conn({ type = "hash", entries = { { "name", "Alice" } }, len = 1 })
+    local prompts = {}
+    vim.ui.input = function(opts, cb)
+      prompts[#prompts + 1] = opts.prompt
+      cb(#prompts == 1 and "email" or "bob@x")
+    end
+    grid_edit.add_row(buffer.active_tab())
+    assert.equals("HSET user:1 email bob@x", sent_cmds[#sent_cmds])
+  end)
+end)

@@ -70,6 +70,10 @@ M.defaults = {
       load_full = "F",
       -- re-run the active tab's command against its recorded connection
       refresh = "r",
+      -- grid editing (poste-db dataset pattern)
+      edit_cell = "i",
+      add_row = "o",
+      delete_row = "dd",
     },
     -- Key browser (M2). Defaults land with that milestone; placeholders keep
     -- the section discoverable in :help and config docs.
