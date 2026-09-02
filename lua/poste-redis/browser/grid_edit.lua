@@ -41,6 +41,8 @@ end
 local buffer_refresh = nil  -- set by buffer.lua (M.refresh)
 
 local function refresh()
+  -- writes invalidate completion's key-prefix cache
+  pcall(function() require("poste-redis.completion.data").clear_key_cache() end)
   if buffer_refresh then buffer_refresh() end
 end
 

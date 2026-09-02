@@ -126,6 +126,12 @@ end
 --- cached per (conn_url, prefix) so repeated keystrokes don't re-SCAN.
 --- Empty prefix is skipped — completing `GET <space>` with the whole keyspace
 --- is a full-db scan (the browser already covers browsing; here we only hint).
+---
+--- Performance on large keyspaces (task 2026-09-03): SCAN MATCH is O(buckets)
+--- not O(keyspace) per call and COUNT bounds each page, so one round-trip
+--- stays ~ms even on 100k+ keys; caching per prefix means typing longer
+--- prefixes never re-scans. Completion is prefix-gated (empty prefix → no
+--- candidates) and capped at completion_max_keys so menus stay small.
 --- @param conn_url string
 --- @param prefix string
 --- @param db number|nil
@@ -159,6 +165,13 @@ function M.ensure_key_candidates(conn_url, prefix, db, callback)
         end
       end
       table.sort(candidates)
+      -- keep completion menus small: SCAN already caps pages at scan_count,
+      -- but a 500-entry menu is unusable — surface the first
+      -- completion_max_keys (config) only
+      local cap = config.config.completion_max_keys or 50
+      if #candidates > cap then
+        candidates = { unpack(candidates, 1, cap) }
+      end
       key_cache[key] = candidates
       flush_key(fkey, candidates)
     end,

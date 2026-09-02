@@ -247,3 +247,57 @@ describe("poste-redis completion orchestrator", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 end)
+
+
+describe("poste-redis key completion (task 0903 #10)", function()
+  local data = require("poste-redis.completion.data")
+  local completion = require("poste-redis.completion.init")
+  local session_conn = require("poste-redis.session_conn")
+  local parser = require("poste-redis.parser")
+
+  after_each(function()
+    session_conn.execute = nil
+    data.clear_key_cache()
+  end)
+
+  it("completes `GET ses` from SCAN MATCH ses* over the persistent session", function()
+    local scanned
+    local exec_run = require("poste-redis.exec_run")
+    local orig_conn_for = exec_run._connection_for
+    exec_run._connection_for = function() return "redis://x", "stub" end
+    session_conn.execute = function(url, cmd, cbs)
+      scanned = table.concat(cmd, " ")
+      cbs.on_response({ value = { value = { "session:abc", "session:xyz", "other" }, cursor = "0" } })
+      return "dispatched"
+    end
+    local items
+    completion.get_items(0, "GET ses", function(list) items = list end)
+    assert.match("SCAN 0 MATCH ses", scanned)
+    exec_run._connection_for = orig_conn_for
+    local labels = {}
+    for _, i in ipairs(items) do labels[#labels + 1] = i.label end
+    assert.is_true(vim.tbl_contains(labels, "session:abc"))
+    assert.is_false(vim.tbl_contains(labels, "other"))  -- prefix filter
+  end)
+
+  it("caps the candidate menu at completion_max_keys", function()
+    require("poste-redis.config").config.completion_max_keys = 2
+    session_conn.execute = function(url, cmd, cbs)
+      cbs.on_response({ value = { value = { "ses:a", "ses:b", "ses:c" }, cursor = "0" } })
+      return "dispatched"
+    end
+    local items
+    data.ensure_key_candidates("redis://x", "ses", 0, function(list) items = list end)
+    assert.equals(2, #items)
+    require("poste-redis.config").config.completion_max_keys = 50
+  end)
+
+  it("skips the fetch entirely on an empty prefix (no full-db scan)", function()
+    local called = false
+    session_conn.execute = function() called = true; return "dispatched" end
+    local items
+    data.ensure_key_candidates("redis://x", "", 0, function(list) items = list end)
+    assert.equals(0, #items)
+    assert.is_false(called)
+  end)
+end)

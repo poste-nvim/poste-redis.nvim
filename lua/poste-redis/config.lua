@@ -26,6 +26,9 @@ M.defaults = {
   -- a "... N more" notice renders and the scan stops early — narrow with the
   -- sub-path search instead.
   render_max_lines = 5000,
+  -- Max key candidates surfaced by the completion engine per prefix
+  -- (SCAN MATCH prefix* is single-page + cached; this caps the menu size).
+  completion_max_keys = 50,
   -- Max children rendered per expanded node (an inline "... N more" notice
   -- follows): a 100k-key group must not crowd its sibling groups out of the
   -- tree entirely.

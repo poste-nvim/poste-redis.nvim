@@ -42,6 +42,8 @@ end
 --- @param db_node table
 --- @param render fun()|nil
 local function reload(db_node, render)
+  -- mutations invalidate completion's key-prefix cache
+  pcall(function() require("poste-redis.completion.data").clear_key_cache() end)
   if not db_node then
     if render then render() end
     return
