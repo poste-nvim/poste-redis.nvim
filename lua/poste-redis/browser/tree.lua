@@ -18,11 +18,48 @@ local MARKER_COLLAPSED = " "
 local MARKER_EXPANDED = " "
 local MARKER_LOADING = "… "
 
+-- Structural nodes: connection/db keep the database glyph; the group node is
+-- the tree's folder in the v3 layout.
 local ICON = {
   connection = "",
   db = "",
-  group = "",
-  key = "",
+  group = "",
+  key = "",
+}
+
+-- Redis key type → glyph. TYPE only reports string/zset/hash/... so the
+-- subtype glyphs (bitmap/bitfield/hyperloglog/geo) are wired for a future
+-- probe; today they fall back to string/zset from TYPE.
+local KEY_ICON = {
+  string = "",
+  zset = "",
+  hash = "󰘦",
+  list = "",
+  set = "󰸳",
+  stream = "",
+  bitmap = "󱗼",
+  bitfield = "󱗼",
+  bitfields = "󱗼",
+  hyperloglog = "󱗼",
+  hyperlonglong = "󱗼",
+  geo = "",
+}
+
+-- Highlight group per key type: collections orange, string green, everything
+-- else (stream/bitmap/geo/unknown) purple.
+local KEY_HL = {
+  string = "PosteRedisBrowserString",
+  zset = "PosteRedisBrowserCollection",
+  hash = "PosteRedisBrowserCollection",
+  list = "PosteRedisBrowserCollection",
+  set = "PosteRedisBrowserCollection",
+  stream = "PosteRedisBrowserOther",
+  bitmap = "PosteRedisBrowserOther",
+  bitfield = "PosteRedisBrowserOther",
+  bitfields = "PosteRedisBrowserOther",
+  hyperloglog = "PosteRedisBrowserOther",
+  hyperlonglong = "PosteRedisBrowserOther",
+  geo = "PosteRedisBrowserOther",
 }
 
 local hl_ns = vim.api.nvim_create_namespace("poste_redis_browser")
@@ -105,14 +142,15 @@ end
 --- @param depth number internal
 --- @param multi_select table|nil unused placeholder (redis browser has no
 ---   table multi-select yet; kept for tree.render parity)
---- @return string[] lines, table[] node_map, number[] marker_cols
----   marker_cols[i] is the 0-based byte column of the marker/icon start for
----   line i, computed here so apply_highlights never re-reads the buffer.
+--- @return string[] lines, table[] node_map, number[] icon_cols
+---   icon_cols[i] is the 0-based byte column of the ICON start for line i
+---   (right after any marker glyph), computed here so apply_highlights never
+---   re-reads the buffer.
 function M.flatten_tree(nodes, depth, multi_select)
   depth = depth or 0
   local lines = {}
   local node_map = {}
-  local marker_cols = {}
+  local icon_cols = {}
 
   for _, node in ipairs(nodes) do
     -- Hidden display root: emit no line, render its children at depth 0 so
@@ -124,13 +162,20 @@ function M.flatten_tree(nodes, depth, multi_select)
         node._desc_lines = #child_lines
         for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
         for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
-        for _, cc in ipairs(child_cols) do table.insert(marker_cols, cc) end
+        for _, cc in ipairs(child_cols) do table.insert(icon_cols, cc) end
       else
         node._desc_lines = 0
       end
     else
       local indent = string.rep("  ", depth)
-      local icon = ICON[node.node_type] or "  "
+
+      local icon
+      if node.node_type == "key" then
+        local t = node.meta and node.meta.type
+        icon = (t and KEY_ICON[t]) or KEY_ICON.string
+      else
+        icon = ICON[node.node_type] or "  "
+      end
 
       local marker
       if node.loading then
@@ -149,7 +194,7 @@ function M.flatten_tree(nodes, depth, multi_select)
         suffix = ""
       elseif node.node_type == "db" then
         suffix = ""
-      elseif node.node_type == "key" and node.meta and node.meta.type then
+      elseif node.node_type == "key" and node.meta and type(node.meta.type) == "string" then
         suffix = "  " .. node.meta.type
         if node.meta.size then suffix = suffix .. " (" .. node.meta.size .. ")" end
       end
@@ -157,11 +202,12 @@ function M.flatten_tree(nodes, depth, multi_select)
       local line = indent .. marker .. icon .. " " .. node.name .. suffix
       table.insert(lines, line)
       table.insert(node_map, node)
-      -- First non-space byte = after the indent (marker glyph) or after a
-      -- two-space leaf marker — mirrors the old apply_highlights scan.
-      local marker_col = #indent
-      if marker == "  " then marker_col = marker_col + 2 end
-      table.insert(marker_cols, marker_col)
+      -- icon_col is the 0-based BYTE column of the icon start: indent bytes +
+      -- marker bytes (a glyph + trailing space, or two spaces on a leaf).
+      -- Computed here so apply_highlights never re-reads the buffer.
+      node._icon_len = #icon
+      local icon_col = #indent + #marker
+      table.insert(icon_cols, icon_col)
 
       node._depth = depth
       if node.expanded and node.children then
@@ -169,47 +215,64 @@ function M.flatten_tree(nodes, depth, multi_select)
         node._desc_lines = #child_lines
         for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
         for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
-        for _, cc in ipairs(child_cols) do table.insert(marker_cols, cc) end
+        for _, cc in ipairs(child_cols) do table.insert(icon_cols, cc) end
       else
         node._desc_lines = 0
       end
     end
   end
 
-  return lines, node_map, marker_cols
+  return lines, node_map, icon_cols
 end
 
---- Highlight one node's line. Marker columns come from flatten_tree, so no
---- buffer reads happen here.
+--- Highlight one node's line. Columns come from flatten_tree (icon byte
+--- start), so no buffer reads happen here.
 --- @param buf number
 --- @param line number 0-based buffer line
 --- @param node table
---- @param marker_col number 0-based byte column of marker/icon start
-local function highlight_line(buf, line, node, marker_col)
-  if marker_col > 0 then
-    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserMarker", line, marker_col, marker_col + 2)
+--- @param icon_col number 0-based byte column of the icon start
+local function highlight_line(buf, line, node, icon_col)
+  -- Marker glyph sits right before the icon; color it gray. Leaf markers are
+  -- two padding spaces — nothing to color there.
+  local marker_len = 2
+  if node.loading then
+    marker_len = #MARKER_LOADING
+  elseif node.expanded then
+    marker_len = #MARKER_EXPANDED
+  elseif node.node_type == "connection" or node.node_type == "db"
+      or node.node_type == "group" then
+    marker_len = #MARKER_COLLAPSED
   end
-  local icon_start = marker_col + 2
+  if icon_col and icon_col > 0 and marker_len > 2 then
+    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserMarker",
+      line, icon_col - marker_len, icon_col)
+  end
+
+  local start = icon_col or 0
+  local len = node._icon_len or 3
+  local hl = "PosteRedisBrowserOther"
   if node.node_type == "connection" then
-    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserConn", line, icon_start, icon_start + 2)
+    hl = "PosteRedisBrowserConn"
   elseif node.node_type == "db" then
-    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserDb", line, icon_start, icon_start + 2)
+    hl = "PosteRedisBrowserDb"
   elseif node.node_type == "group" then
-    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserGroup", line, icon_start, icon_start + 2)
+    hl = "PosteRedisBrowserGroup"
   elseif node.node_type == "key" then
-    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserKey", line, icon_start, icon_start + 2)
+    local t = node.meta and node.meta.type
+    hl = (t and KEY_HL[t]) or "PosteRedisBrowserOther"
   end
+  vim.api.nvim_buf_add_highlight(buf, hl_ns, hl, line, start, start + len)
 end
 
 --- Clear + re-apply browser highlights (marker + icon colors per node type).
---- Marker columns come from flatten_tree, so no buffer reads happen here.
+--- Icon columns come from flatten_tree, so no buffer reads happen here.
 --- @param buf number
 --- @param line_to_node table[]
---- @param marker_cols number[]|nil parallel marker columns (from flatten_tree)
-function M.apply_highlights(buf, line_to_node, marker_cols)
+--- @param icon_cols number[]|nil parallel icon columns (from flatten_tree)
+function M.apply_highlights(buf, line_to_node, icon_cols)
   vim.api.nvim_buf_clear_namespace(buf, hl_ns, 0, -1)
   for i, node in ipairs(line_to_node) do
-    highlight_line(buf, i - 1 + HEADER_LINES, node, (marker_cols and marker_cols[i]) or 0)
+    highlight_line(buf, i - 1 + HEADER_LINES, node, (icon_cols and icon_cols[i]) or 0)
   end
 end
 
@@ -222,7 +285,7 @@ end
 function M.render_tree(browser_buf, line_to_node, root_nodes)
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return line_to_node end
 
-  local lines, node_map, marker_cols = M.flatten_tree(root_nodes)
+  local lines, node_map, icon_cols = M.flatten_tree(root_nodes)
   -- The search bar header line can legitimately be empty (query ""), so every
   -- header line is always written — skipping empties would drop the bar.
   for i = #M.header_lines, 1, -1 do
@@ -231,7 +294,7 @@ function M.render_tree(browser_buf, line_to_node, root_nodes)
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
   vim.api.nvim_buf_set_lines(browser_buf, 0, -1, false, lines)
   vim.api.nvim_set_option_value("modifiable", false, { buf = browser_buf })
-  M.apply_highlights(browser_buf, node_map, marker_cols)
+  M.apply_highlights(browser_buf, node_map, icon_cols)
   return node_map
 end
 
@@ -336,7 +399,7 @@ function M.append_children(buf, line_to_node, node, new_nodes)
   if not node_idx then return false end  -- node not rendered → full render
 
   local child_depth = (node._depth or 0) + 1
-  local lines, node_map, marker_cols = M.flatten_tree(new_nodes, child_depth)
+  local lines, node_map, icon_cols = M.flatten_tree(new_nodes, child_depth)
 
   -- Buffer insert point (0-based): right after the node's rendered subtree.
   -- node_idx is a 1-based slot in line_to_node → buffer line node_idx+HEADER.
@@ -353,7 +416,7 @@ function M.append_children(buf, line_to_node, node, new_nodes)
 
   -- Highlight only the new lines (existing highlights auto-shift on insert).
   for k, n in ipairs(node_map) do
-    highlight_line(buf, insert_0 + k - 1, n, marker_cols[k])
+    highlight_line(buf, insert_0 + k - 1, n, icon_cols[k])
   end
   node._desc_lines = (node._desc_lines or 0) + #lines
   return true

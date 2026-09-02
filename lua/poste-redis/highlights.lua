@@ -12,6 +12,13 @@ local function link_if_empty(name, target)
   end
 end
 
+local function define_if_empty(name, fg)
+  local existing = vim.api.nvim_get_hl(0, { name = name })
+  if vim.tbl_isempty(existing) then
+    vim.api.nvim_set_hl(0, name, { fg = fg })
+  end
+end
+
 function M.setup()
   -- Source buffer (regex fallback, M1): reuse builtin syntax groups.
   link_if_empty("PosteRedisComment", "Comment")
@@ -65,6 +72,18 @@ function M.setup()
   link_if_empty("PosteRedisBrowserSearchHint", hint_target)
   link_if_empty("PosteRedisBrowserSearchText", hint_target)
 
+  -- Key browser tree icons: gray expand/collapse markers, blue folder,
+  -- green string, orange collections (zset/hash/list/set), purple everything
+  -- else. Explicit fg so the palette is stable across colorschemes; users
+  -- override via config.highlights.
+  define_if_empty("PosteRedisBrowserMarker", "#808080")
+  define_if_empty("PosteRedisBrowserConn", "#808080")
+  define_if_empty("PosteRedisBrowserDb", "#808080")
+  define_if_empty("PosteRedisBrowserGroup", "#61AFEF")
+  define_if_empty("PosteRedisBrowserString", "#98C379")
+  define_if_empty("PosteRedisBrowserCollection", "#D19A66")
+  define_if_empty("PosteRedisBrowserOther", "#C678DD")
+
   state.apply_highlight_overrides({
     "PosteRedisComment", "PosteRedisUse", "PosteRedisUseName",
     "PosteRedisContinuation", "PosteRedisString", "PosteRedisNumber",
@@ -79,6 +98,9 @@ function M.setup()
     "PosteRedisResultCell", "PosteRedisResultSearchMatch", "PosteRedisResultSearchCurrent",
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
     "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
+    "PosteRedisBrowserMarker", "PosteRedisBrowserConn", "PosteRedisBrowserDb",
+    "PosteRedisBrowserGroup", "PosteRedisBrowserString",
+    "PosteRedisBrowserCollection", "PosteRedisBrowserOther",
   })
 end
 

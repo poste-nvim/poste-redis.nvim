@@ -63,6 +63,40 @@ local function schedule_append(node, new_nodes)
   schedule_render()
 end
 
+--- Fetch the Redis type of key nodes via TYPE (persistent session, so the
+--- requests pipeline over one connection). Sets node.meta.type as each
+--- resolves and renders once the whole batch is typed — the type suffix +
+--- icon flip together in one re-render. Skipped for nodes already typed.
+--- TYPE reports only string/hash/list/set/zset/stream, so bitmap/hyperloglog/
+--- geo still resolve as string/zset here (subtype probing is future work).
+--- @param key_nodes table[] key nodes (node_type == "key")
+--- @param conn_url string
+--- @param db number
+function M.fetch_types(key_nodes, conn_url, db)
+  local to_fetch = {}
+  for _, n in ipairs(key_nodes or {}) do
+    if n.node_type == "key" and not n.meta.type then
+      to_fetch[#to_fetch + 1] = n
+    end
+  end
+  if #to_fetch == 0 then return end
+  local pending = #to_fetch
+  for _, n in ipairs(to_fetch) do
+    session_conn.execute(conn_url, { "TYPE", n.meta.key }, {
+      on_response = function(ev)
+        local t = ev.value and ev.value.value
+        if type(t) == "string" then n.meta.type = t end
+        pending = pending - 1
+        if pending <= 0 then schedule_render() end
+      end,
+      on_error = function()
+        pending = pending - 1
+        if pending <= 0 then schedule_render() end
+      end,
+    }, nil, { db = db })
+  end
+end
+
 --- Reorder a node's children: flat keys first (arrival order), then group
 --- nodes sorted by name — the stable layout for a db node.
 local function sort_children(node)
@@ -218,6 +252,13 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
         else
           sort_children(node)
           node.loading = false
+          -- Only flat keys live on the db node (groups stay lazy); fetch
+          -- their types so the tree shows real type icons immediately.
+          local flat = {}
+          for _, ch in ipairs(node.children or {}) do
+            if ch.node_type == "key" then flat[#flat + 1] = ch end
+          end
+          M.fetch_types(flat, conn_url, db)
           schedule_render()
         end
       end,
@@ -294,6 +335,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
           next_page(new_cursor)
         else
           node.loading = false
+          M.fetch_types(node.children, conn_url, db)
           schedule_render()
         end
       end,
@@ -385,6 +427,7 @@ function M.search(db_node, conn_url, conn_name, subpath)
           next_page(new_cursor)
         else
           results.loading = false
+          M.fetch_types(results.children, conn_url, db)
           schedule_render()
         end
       end,
@@ -468,6 +511,7 @@ end
 M._test = {
   build_children = build_children,
   build_group_headers = build_group_headers,
+  fetch_types = M.fetch_types,
   SPLIT_NEST = SPLIT_NEST,
 }
 
