@@ -13,6 +13,12 @@ function M.setup(opts)
 
   require("poste-redis.autocmds").setup()
   require("poste-redis.commands").setup()
+
+  -- context in the statusline (mini.statusline / lualine), colored per
+  -- connection via connections.toml `color`; opt out with statusline = false
+  if opts.statusline ~= false then
+    require("poste-redis.statusline").setup()
+  end
   require("poste-redis.autocmds").setup_existing_buffers()
 
   -- P2-4: completion source (blink.cmp). Register when blink is present;

@@ -319,6 +319,9 @@ function M.apply_connection(name, url)
   redis_state.context.connection = name
   redis_state.context.db = nil
   redis_state.current_url = url
+  -- keep the poste-wide state in sync so the key browser picks the context
+  local ok, poste_state = pcall(require, "poste.state")
+  if ok then poste_state.connection = name end
 end
 
 --- Resolve + apply a connection name as the current context.
@@ -356,6 +359,50 @@ function M.select_connection()
         if string.format("%s  %s", c.name, redis_util.redact_url(c.url or "")) == selected then
           M.apply_connection(c.name, c.url)
           vim.notify("Redis connection: " .. c.name, vim.log.levels.INFO, { title = redis_state.TITLE })
+          -- the open browser follows the new context immediately
+          pcall(function() require("poste-redis.browser.init").open({ source_buf = vim.api.nvim_get_current_buf() }) end)
+          break
+        end
+      end
+    end)
+  end)
+end
+
+--- Open the context picker: pick a connection, make it the current context
+--- (all later queries run against it) and notify with its configured color.
+function M.select_context()
+  local redis_util = require("poste-redis.util")
+  local statusline = require("poste-redis.statusline")
+  M.list_connections(function(list)
+    if #list == 0 then
+      vim.notify("No redis connections found in connections.toml",
+        vim.log.levels.WARN, { title = redis_state.TITLE })
+      return
+    end
+    local items = {}
+    for _, c in ipairs(list) do
+      items[#items + 1] = string.format("%s  %s", c.name, redis_util.redact_url(c.url or ""))
+    end
+    local ok, select_mod = pcall(require, "poste.select")
+    if not ok then
+      vim.notify("poste.select unavailable", vim.log.levels.ERROR, { title = redis_state.TITLE })
+      return
+    end
+    select_mod.select(items, "Select Redis Context", function(selected)
+      if not selected then return end
+      for _, c in ipairs(list) do
+        if string.format("%s  %s", c.name, redis_util.redact_url(c.url or "")) == selected then
+          local use_ok, use_err = M.use_connection(c.name)
+          if not use_ok then
+            vim.notify("Context switch failed: " .. tostring(use_err),
+              vim.log.levels.ERROR, { title = redis_state.TITLE })
+            return
+          end
+          local hl = statusline.get_ctx_color(c.name)
+          vim.notify(("Context: %s%s"):format(c.name,
+            hl and (" (%s)" % hl) or ""),
+            vim.log.levels.INFO, { title = redis_state.TITLE })
+          pcall(function() require("poste-redis.browser.init").open({ source_buf = vim.api.nvim_get_current_buf() }) end)
           break
         end
       end

@@ -263,3 +263,56 @@ port = 6379
     assert.match("connections%.toml$", path)
   end)
 end)
+
+
+describe("poste-redis context statusline", function()
+  local statusline = require("poste-redis.statusline")
+  local redis_state = require("poste-redis.state")
+
+  after_each(function()
+    redis_state.context.connection = nil
+    redis_state.context.db = nil
+  end)
+
+  it("builds a per-connection highlight group from connections.toml color", function()
+    local connections = require("poste-redis.connections")
+    local orig = connections.get_connection_config
+    connections.get_connection_config = function(name)
+      assert.equals("prod", name)
+      return { dialect = "redis", url = "redis://h:6379/0", color = "#ff0000" }
+    end
+    local hl = statusline.get_ctx_color("prod")
+    connections.get_connection_config = orig
+    assert.equals("PosteRedisCtxprod", hl)
+    local hl_def = vim.api.nvim_get_hl(0, { name = hl })
+    assert.equals("#ff0000", string.format("#%06x", hl_def.fg or 0):gsub("^#ff0000$", "#ff0000") and "#ff0000" or nil)
+  end)
+
+  it("returns nil when the connection has no color configured", function()
+    local connections = require("poste-redis.connections")
+    local orig = connections.get_connection_config
+    connections.get_connection_config = function() return { dialect = "redis", url = "redis://h/0" } end
+    assert.is_nil(statusline.get_ctx_color("plain"))
+    connections.get_connection_config = orig
+  end)
+
+  it("context text follows the applied connection", function()
+    local connections = require("poste-redis.connections")
+    local orig = connections.get_connection_config
+    connections.get_connection_config = function(name)
+      return { dialect = "redis", url = "redis://h:6379/0", color = "#61afef" }
+    end
+    local orig_resolve = connections.resolve_redis_url
+    connections.resolve_redis_url = function(name)
+      return "redis://staging:6379/0", nil
+    end
+    local ok = connections.use_connection("staging")
+    assert.is_true(ok)
+    assert.equals("staging", statusline.get_context_text())
+    assert.equals("PosteRedisCtxstaging", statusline.get_context_hl())
+    assert.match("%%#PosteRedisCtxstaging#", statusline.get_context())
+    assert.match("staging", statusline.get_context())
+    connections.get_connection_config = orig
+    connections.resolve_redis_url = orig_resolve
+  end)
+end)

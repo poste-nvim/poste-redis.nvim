@@ -6,6 +6,10 @@ function M.setup()
     require("poste-redis.connections").select_connection()
   end, { desc = "Select a redis connection from connections.toml" })
 
+  vim.api.nvim_create_user_command("PosteRedisContext", function()
+    require("poste-redis.connections").select_context()
+  end, { desc = "Select the redis connection used as the current context" })
+
   vim.api.nvim_create_user_command("PosteRedisRunFile", function(args)
     if args.args and args.args ~= "" then
       local fname = vim.fn.fnameescape(args.args)
