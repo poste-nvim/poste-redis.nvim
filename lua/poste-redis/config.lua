@@ -88,6 +88,7 @@ M.defaults = {
       ttl = "t",
       rename = "R",
       info = "i",
+      multi_select_toggle = "<Tab>",
     },
   },
 }

@@ -1170,3 +1170,140 @@ describe("poste-redis browser node info", function()
     assert.match("persistent", text)
   end)
 end)
+
+
+describe("poste-redis browser delete node + multi-select", function()
+  local actions = require("poste-redis.browser.actions")
+  local session_conn = require("poste-redis.session_conn")
+  local browser = require("poste-redis.browser.init")
+
+  after_each(function()
+    actions.set_confirm(nil)
+    session_conn.execute = nil
+  end)
+
+  it("d on a group scans all keys, confirms y and removes the node", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local group = tree.make_group_node("queue", "c", 0)
+    group.parent = db
+    db.children = { group }
+    -- SCAN returns two pages of keys, then DEL per key
+    local pages = { { "queue:1", "queue:2" }, { "queue:3" } }
+    local page_i = 0
+    local deleted = {}
+    session_conn.execute = function(url, cmd, cbs)
+      if cmd[1] == "SCAN" then
+        page_i = page_i + 1
+        local page = pages[page_i] or {}
+        local cursor = page_i >= #pages and "0" or tostring(page_i)
+        cbs.on_response({ value = { value = page, cursor = cursor } })
+      elseif cmd[1] == "DEL" then
+        deleted[#deleted + 1] = cmd[2]
+        cbs.on_response({ value = { type = "integer", value = 1 } })
+      end
+      return "dispatched"
+    end
+    actions.set_confirm(function() return true end)  -- y
+    local rendered = false
+    actions.delete_node(group, { db_node = db, render = function() rendered = true end })
+    assert.same({ "queue:1", "queue:2", "queue:3" }, deleted)
+    assert.equals(1, #db.children)  -- node dropped from the parent
+    assert.is_false(db.children[1] == group)
+    assert.is_true(rendered)
+  end)
+
+  it("confirm n cancels the node deletion", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local group = tree.make_group_node("queue", "c", 0)
+    group.parent = db
+    db.children = { group }
+    session_conn.execute = function(url, cmd, cbs)
+      if cmd[1] == "SCAN" then
+        cbs.on_response({ value = { value = { "queue:1" }, cursor = "0" } })
+      elseif cmd[1] == "DEL" then
+        assert.fail("DEL must not run after cancel")
+      end
+      return "dispatched"
+    end
+    actions.set_confirm(function() return false end)  -- n / esc
+    actions.delete_node(group, { db_node = db, render = function() end })
+    assert.equals(1, #db.children)
+  end)
+
+  it("multi-select renders a ✓ marker and toggles per node", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local g1 = tree.make_group_node("a", "c", 0)
+    local g2 = tree.make_group_node("b", "c", 0)
+    db.children = { g1, g2 }
+    db.expanded = true
+    tree.display_root = db
+    local sel = { selected = { [g1] = true } }
+    local lines, node_map = tree.flatten_tree({ db }, 0, sel)
+    tree.display_root = nil
+    assert.match("✓", lines[1])
+    assert.is_nil(lines[2]:match("✓"))
+    assert.equals(g1, node_map[1])
+  end)
+
+  it("<Tab> toggles selection; D batch-deletes all selected nodes", function()
+    -- open the browser with stubs and seed groups via select_db
+    local orig_load = async.load_connections
+    async.load_connections = function(cb)
+      cb({ tree.make_connection_node({ name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis" }) })
+    end
+    local orig_execute = session_conn.execute
+    local deleted = {}
+    session_conn.execute = function(url, cmd, cbs)
+      if cmd[1] == "SCAN" then
+        local match = cmd[5] or ""
+        local keys
+        if match:find("user:") then keys = { "user:1", "user:2" }
+        elseif match:find("cache:") then keys = { "cache:a" }
+        else keys = { "user:1", "cache:a", "plain" } end
+        cbs.on_response({ value = { value = keys, cursor = "0" } })
+      elseif cmd[1] == "DEL" then
+        deleted[#deleted + 1] = cmd[2]
+        cbs.on_response({ value = { type = "integer", value = 1 } })
+      end
+      return "dispatched"
+    end
+    browser.open({ source_buf = vim.api.nvim_get_current_buf() })
+    browser._test.select_db(0)
+    vim.wait(2000, function()
+      local b = browser.info().buffer
+      if b == nil then return false end
+      local ls = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+      for _, l in ipairs(ls) do
+        if l:find("user", 1, true) then return true end
+      end
+      return false
+    end, 5)
+    -- toggle two groups into the selection
+    local b = browser.info().buffer
+    local ls = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+    local targets = {}
+    for n, l in ipairs(ls) do
+      if l:find("user", 1, true) or l:find("cache", 1, true) then targets[#targets + 1] = n end
+    end
+    local win = vim.fn.bufwinid(b)
+    vim.api.nvim_set_current_win(win)
+    actions.set_confirm(function() return true end)
+    for _, n in ipairs(targets) do
+      vim.api.nvim_win_set_cursor(win, { n, 0 })
+      browser._test.toggle_multi_select()
+    end
+    local sel = browser._test.multi_select_state()
+    assert.is_true(sel.active)
+    assert.equals(2, vim.tbl_count(sel.selected))
+    -- D batch-deletes (cursor sits on a selected row)
+    vim.api.nvim_win_set_cursor(win, { targets[1], 0 })
+    vim.api.nvim_feedkeys("D", "mx", false)
+    vim.wait(2000, function() return #deleted >= 3 end, 10)
+    assert.is_true(#deleted >= 3, "expected batch DELs, got " .. #deleted)
+    assert.is_true(vim.tbl_contains(deleted, "user:1"))
+    assert.is_true(vim.tbl_contains(deleted, "cache:a"))
+    assert.is_false(browser._test.multi_select_state().active)
+    async.load_connections = orig_load
+    session_conn.execute = orig_execute
+  end)
+end)

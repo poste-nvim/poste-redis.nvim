@@ -20,6 +20,7 @@ local config = require("poste-redis.config")
 local MARKER_COLLAPSED = " "
 local MARKER_EXPANDED = " "
 local MARKER_LOADING = "… "
+local MARKER_SELECTED = "✓ "
 
 local icons = require("poste-redis.icons")
 local ICON = icons.ICON
@@ -163,7 +164,7 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
 
   local function emit_children(node, kids, child_depth)
     local child_lines, child_map, child_cols, child_skipped, child_budget = M.flatten_tree(
-      kids, child_depth, nil, budget)
+      kids, child_depth, multi_select, budget)
     skipped = skipped + child_skipped
     budget_skipped = budget_skipped + child_budget
     node._desc_lines = #child_lines
@@ -223,15 +224,21 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
         end
 
         local marker
-        if node.loading then
-          marker = MARKER_LOADING
-        elseif node.expanded then
-          marker = MARKER_EXPANDED
-        elseif node.node_type == "connection" or node.node_type == "db"
-            or node.node_type == "group" then
-          marker = MARKER_COLLAPSED
+        if multi_select and multi_select.selected and multi_select.selected[node] then
+          marker = MARKER_SELECTED
+          node._selected_marker = true
         else
-          marker = "  "
+          node._selected_marker = nil
+          if node.loading then
+            marker = MARKER_LOADING
+          elseif node.expanded then
+            marker = MARKER_EXPANDED
+          elseif node.node_type == "connection" or node.node_type == "db"
+              or node.node_type == "group" then
+            marker = MARKER_COLLAPSED
+          else
+            marker = "  "
+          end
         end
 
         local suffix = ""
@@ -298,7 +305,9 @@ local function highlight_line(buf, line, node, icon_col)
   -- Marker glyph sits right before the icon; color it gray. Leaf markers are
   -- two padding spaces — nothing to color there.
   local marker_len = 2
-  if node.loading then
+  if node._selected_marker then
+    marker_len = #MARKER_SELECTED
+  elseif node.loading then
     marker_len = #MARKER_LOADING
   elseif node.expanded then
     marker_len = #MARKER_EXPANDED
@@ -359,11 +368,11 @@ M.last_truncated = 0
 --- @param line_to_node table[]  (in/out: replaced)
 --- @param root_nodes table[]
 --- @return table[] new line_to_node
-function M.render_tree(browser_buf, line_to_node, root_nodes)
+function M.render_tree(browser_buf, line_to_node, root_nodes, multi_select)
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return line_to_node end
 
   local cap = config.config.render_max_lines
-  local lines, node_map, icon_cols, skipped, budget_skipped = M.flatten_tree(root_nodes, 0, nil, cap)
+  local lines, node_map, icon_cols, skipped, budget_skipped = M.flatten_tree(root_nodes, 0, multi_select, cap)
   M.last_truncated = skipped or 0
   if (budget_skipped or 0) > 0 then
     -- per-node cuts render their notice inline; only a total-budget cut

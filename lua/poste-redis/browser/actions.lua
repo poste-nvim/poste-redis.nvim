@@ -26,12 +26,16 @@ local function notify(msg, level)
   vim.notify(msg, level or vim.log.levels.INFO, { title = redis_state.TITLE })
 end
 
---- Unified confirm gate for destructive browser actions.
+--- Unified confirm gate for destructive browser actions. Swappable in tests
+--- via _test.set_confirm.
 --- @param question string
 --- @return boolean
-local function confirm(question)
+local confirm_impl = function(question)
   local choice = vim.fn.confirm(question, "&Yes\n&No", 2, "Warning")
   return choice == 1
+end
+local function confirm(question)
+  return confirm_impl(question)
 end
 
 --- Refresh the db node's key list after a mutation.
@@ -132,6 +136,181 @@ function M.delete_prefix(node, ctx)
       notify("SCAN estimate failed: " .. tostring(msg), vim.log.levels.ERROR)
     end,
   }, nil, { db = db })
+end
+
+--- Delete a group/db node and every key under it (full SCAN cursor loop,
+--- y/n confirm before the batch). The node is removed from the tree after.
+--- @param node table group node (or any node with a meta.prefix)
+--- @param ctx table { db_node, render }
+function M.delete_node(node, ctx)
+  ctx = ctx or {}
+  local prefix = node.meta and node.meta.prefix
+  local db_node = ctx.db_node or node.parent
+  local url, err = conn_url_for(node)
+  if not prefix or not url then
+    notify("Cannot resolve prefix/connection: " .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+  local db = node.meta and node.meta.db
+  local key_list = {}
+
+  local function delete_batch()
+    local question
+    if #key_list == 0 then
+      question = ("Delete node  %s  (no keys under it)?"):format(prefix)
+    else
+      question = ("Delete node  %s  and all %d key(s) under it?"):format(prefix, #key_list)
+    end
+    if not confirm(question) then
+      notify("Deletion cancelled")
+      return
+    end
+    local function del_next(i)
+      if i > #key_list then
+        notify(("Deleted node %s (%d key(s))"):format(prefix, #key_list))
+        -- drop the node from its parent; reload() re-scans empty groups away
+        local parent = node.parent
+        if parent and parent.children then
+          local kept = {}
+          for _, ch in ipairs(parent.children) do
+            if ch ~= node then kept[#kept + 1] = ch end
+          end
+          parent.children = kept
+          if parent._segs then parent._segs[prefix] = nil end
+        end
+        reload(db_node, ctx.render)
+        return
+      end
+      session_conn.execute(url, { "DEL", key_list[i] }, {
+        on_response = function() del_next(i + 1) end,
+        on_error = function(msg)
+          notify(("DEL %s failed: %s"):format(key_list[i], tostring(msg)), vim.log.levels.ERROR)
+          del_next(i + 1)
+        end,
+      }, nil, { db = db })
+    end
+    del_next(1)
+  end
+
+  local function next_page(cursor)
+    session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", prefix .. ":*" }, {
+      on_response = function(ev)
+        for _, k in ipairs(ev.value and ev.value.value or {}) do
+          if type(k) == "string" then key_list[#key_list + 1] = k end
+        end
+        local cursor2 = (ev.value and ev.value.cursor) or "0"
+        if cursor2 == "0" then
+          delete_batch()
+        else
+          next_page(cursor2)
+        end
+      end,
+      on_error = function(msg)
+        notify("SCAN failed: " .. tostring(msg), vim.log.levels.ERROR)
+      end,
+    }, nil, { db = db })
+  end
+
+  next_page("0")
+end
+
+--- Batch-delete several selected nodes (multi-select) with one confirm.
+--- Key nodes DEL directly; group nodes SCAN their prefix first.
+--- @param nodes table[] selected nodes
+--- @param ctx table { db_node, render }
+--- @param on_done fun()|nil  called after the batch (e.g. exit multi-select)
+function M.delete_nodes(nodes, ctx)
+  ctx = ctx or {}
+  if not nodes or #nodes == 0 then return end
+  local db_node = ctx.db_node
+  local url, err = conn_url_for(nodes[1])
+  if not url then
+    notify("Cannot resolve connection: " .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+
+  -- Resolve each node's keys: keys contribute themselves, groups scan.
+  local jobs = {}  -- { node = node, keys = { ... } }
+  for _, node in ipairs(nodes) do
+    if node.node_type == "key" then
+      jobs[#jobs + 1] = { node = node, keys = { node.meta.key } }
+    else
+      jobs[#jobs + 1] = { node = node, keys = {} }
+    end
+  end
+  local pending_scans = 0
+  local confirm_and_run  -- forward declaration: scan callbacks call it
+  for _, job in ipairs(jobs) do
+    if job.node.node_type == "group" then
+      pending_scans = pending_scans + 1
+      local match = (job.node.meta.prefix or "") .. ":*"
+      local db = job.node.meta and job.node.meta.db
+      local function scan_next(cursor)
+        session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", match }, {
+          on_response = function(ev)
+            for _, k in ipairs(ev.value and ev.value.value or {}) do
+              if type(k) == "string" then job.keys[#job.keys + 1] = k end
+            end
+            local cursor2 = (ev.value and ev.value.cursor) or "0"
+            if cursor2 == "0" then
+              pending_scans = pending_scans - 1
+              if pending_scans == 0 then confirm_and_run() end
+            else
+              scan_next(cursor2)
+            end
+          end,
+          on_error = function(msg)
+            notify("SCAN failed: " .. tostring(msg), vim.log.levels.ERROR)
+            pending_scans = pending_scans - 1
+            if pending_scans == 0 then confirm_and_run() end
+          end,
+        }, nil, { db = db })
+      end
+      scan_next("0")
+    end
+  end
+
+  function confirm_and_run()
+    if pending_scans > 0 then return end
+    local total = 0
+    for _, job in ipairs(jobs) do total = total + #job.keys end
+    if not confirm(("Delete %d selected node(s) and their %d key(s)?"):format(#jobs, total)) then
+      notify("Deletion cancelled")
+      return
+    end
+    local flat = {}
+    for _, job in ipairs(jobs) do
+      for _, k in ipairs(job.keys) do flat[#flat + 1] = k end
+    end
+    local function del_next(i)
+      if i > #flat then
+        notify(("Deleted %d key(s) across %d node(s)"):format(#flat, #jobs))
+        for _, job in ipairs(jobs) do
+          local parent = job.node.parent
+          if parent and parent.children then
+            local kept = {}
+            for _, ch in ipairs(parent.children) do
+              if ch ~= job.node then kept[#kept + 1] = ch end
+            end
+            parent.children = kept
+          end
+        end
+        reload(db_node, ctx.render)
+        if ctx.on_done then ctx.on_done() end
+        return
+      end
+      session_conn.execute(url, { "DEL", flat[i] }, {
+        on_response = function() del_next(i + 1) end,
+        on_error = function(msg)
+          notify(("DEL %s failed: %s"):format(flat[i], tostring(msg)), vim.log.levels.ERROR)
+          del_next(i + 1)
+        end,
+      }, nil, { db = nodes[1].meta and nodes[1].meta.db })
+    end
+    del_next(1)
+  end
+
+  if pending_scans == 0 then confirm_and_run() end
 end
 
 ----------------------------------------------------------------------
@@ -238,6 +417,7 @@ end
 M._test = {
   conn_url_for = conn_url_for,
   confirm = confirm,
+  set_confirm = function(fn) confirm_impl = fn end,
 }
 
 return M

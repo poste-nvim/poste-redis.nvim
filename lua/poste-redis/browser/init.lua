@@ -44,6 +44,11 @@ local current_db_node = nil    -- tree.make_db_node(...)
 local search_active = false
 local search_query = ""
 
+--- Multi-select (poste-db db-browser pattern): <Tab> toggles a node into the
+--- selection (restricted to nodes under the current db), <Esc> exits, D
+--- batch-deletes the selection. Selected nodes render with a ✓ marker.
+local multi_select = { active = false, selected = {} }
+
 --- Header text for line 2 (db select).
 local function db_select_text()
   -- \239\135\128 = db icon U+F1C0 (explicit escape: reviewable bytes)
@@ -98,7 +103,8 @@ local function render_tree()
   end
   tree.header_lines = { search_line, db_select_text(), separator_text() }
   tree.display_root = display_root_node()
-  line_to_node = tree.render_tree(browser_buf, line_to_node, { tree.display_root })
+  line_to_node = tree.render_tree(browser_buf, line_to_node, { tree.display_root },
+    multi_select.active and multi_select or nil)
   if not search_active then
     tree.decorate_search_line(browser_buf, search_query)
   end
@@ -184,6 +190,58 @@ end
 local function collapse_node(node)
   node.expanded = false
   render_tree()
+end
+
+--- <Tab>: toggle multi-select on the node under the cursor. The first press
+--- enters multi-select mode; every selected node renders with a ✓ marker.
+--- Selection is restricted to nodes under the current db (single folder).
+local function toggle_multi_select()
+  local node = current_node()
+  if not node or not current_db_node then return end
+  if node.node_type ~= "key" and node.node_type ~= "group" then return end
+  if not multi_select.active then
+    multi_select.active = true
+    multi_select.selected = {}
+  end
+  if multi_select.selected[node] then
+    multi_select.selected[node] = nil
+  else
+    multi_select.selected[node] = true
+  end
+  render_tree()
+end
+
+--- Leave multi-select mode (Esc while active, or after a batch delete).
+local function exit_multi_select()
+  if not multi_select.active then return end
+  multi_select.active = false
+  multi_select.selected = {}
+  render_tree()
+end
+
+--- D with an active selection: batch-delete every selected node's keys after
+--- one confirm; without a selection D keeps the single-prefix delete.
+local function delete_selected_or_prefix()
+  if multi_select.active and next(multi_select.selected) then
+    local nodes = {}
+    for node in pairs(multi_select.selected) do nodes[#nodes + 1] = node end
+    require("poste-redis.browser.actions").delete_nodes(nodes, {
+      db_node = current_db_node,
+      render = render_tree,
+      on_done = exit_multi_select,
+    })
+    return
+  end
+  local node = current_node()
+  if not node or node.node_type ~= "group" then
+    vim.notify("Move to a group node to delete by prefix",
+      vim.log.levels.INFO, { title = redis_state.TITLE })
+    return
+  end
+  require("poste-redis.browser.actions").delete_prefix(node, {
+    db_node = current_db_node,
+    render = render_tree,
+  })
 end
 
 ----------------------------------------------------------------------
@@ -403,7 +461,13 @@ local function setup_browser_buffer()
   k = config.get_keymap("redis_browser", "search_clear", "<Esc>")
   if k then
     vim.keymap.set("n", k, function()
-      if search_active then search_cancel() else M.search_clear() end
+      if search_active then
+        search_cancel()
+      elseif multi_select.active then
+        exit_multi_select()
+      else
+        M.search_clear()
+      end
     end, opts)
   end
   k = config.get_keymap("redis_browser", "db_select", "<Space>")
@@ -421,22 +485,21 @@ local function setup_browser_buffer()
   if k then
     vim.keymap.set("n", k, function()
       local node = current_node()
-      if not node or node.node_type ~= "key" then return end
-      actions.delete_key(node, action_ctx())
+      if not node then return end
+      if node.node_type == "group" then
+        -- delete the node and every key under it (y/n confirm)
+        actions.delete_node(node, action_ctx())
+      elseif node.node_type == "key" then
+        actions.delete_key(node, action_ctx())
+      end
     end, opts)
   end
   k = config.get_keymap("redis_browser", "delete_prefix", "D")
   if k then
-    vim.keymap.set("n", k, function()
-      local node = current_node()
-      if not node or node.node_type ~= "group" then
-        vim.notify("Move to a group node to delete by prefix",
-          vim.log.levels.INFO, { title = redis_state.TITLE })
-        return
-      end
-      actions.delete_prefix(node, action_ctx())
-    end, opts)
+    vim.keymap.set("n", k, delete_selected_or_prefix, opts)
   end
+  k = config.get_keymap("redis_browser", "multi_select_toggle", "<Tab>")
+  if k then vim.keymap.set("n", k, toggle_multi_select, opts) end
   k = config.get_keymap("redis_browser", "ttl", "t")
   if k then
     vim.keymap.set("n", k, function()
@@ -477,6 +540,8 @@ local function setup_browser_buffer()
         "  <Space>  select database",
         "  d     delete key (confirm)",
         "  D     delete all keys under prefix (count + confirm)",
+        "  <Tab> multi-select nodes (same db); D deletes all selected",
+        "  i     node info (count / memory / ttl)",
         "  t     show/edit TTL (secs, -1 = PERSIST)",
         "  R     rename key (conflict-checked)",
         "  i     node info (count / memory / ttl)",
@@ -617,6 +682,9 @@ M._test = {
   search_cancel = search_cancel,
   pick_db = pick_db,
   select_db = select_db,
+  toggle_multi_select = toggle_multi_select,
+  exit_multi_select = exit_multi_select,
+  multi_select_state = function() return multi_select end,
   parse_search_line = parse_search_line,
   search_bar_text = search_bar_text,
   db_select_text = db_select_text,
