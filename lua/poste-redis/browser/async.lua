@@ -32,6 +32,59 @@ M.render_hook = nil
 --- @return boolean handled
 M.append_hook = nil
 
+--- Buffer work (renders + incremental appends) NEVER runs inside a
+--- job-response callback: nvim 0.12 can permanently starve a job channel's
+--- stdout reads when a buffer mutation overlaps responses arriving on
+--- another chain (the browser froze mid-scan — timers kept firing, stdout
+--- events never did). All buffer work is marked dirty here and flushed by a
+--- one-shot uv timer once the session has nothing in flight. uv timers run
+--- on the same loop that reads the pipes (and fire inside headless
+--- vim.wait), so this is safe for tests too.
+local render_dirty = false
+local append_queue = {}  -- { { node = node, nodes = new_nodes }, ... }
+local flush_timer = assert(vim.loop.new_timer())
+
+local flush  -- forward declaration: arm_flush's timer callback captures it
+local function arm_flush()
+  -- Restart unconditionally: this debounces bursts of dirty marks into one
+  -- flush 10ms after the last one (a quiet point), and never depends on a
+  -- previous timer's pending state. schedule_wrap: the uv callback runs in a
+  -- fast event context where nvim API calls (every render) are forbidden.
+  flush_timer:start(10, 0, vim.schedule_wrap(function()
+    pcall(flush)
+  end))
+end
+
+local function schedule_flush()
+  arm_flush()
+end
+
+function flush()
+  if session_conn.in_flight() > 0 then
+    -- still streaming: retry on the next timer tick
+    arm_flush()
+    return
+  end
+  local appends = append_queue
+  append_queue = {}
+  if render_dirty then
+    -- a full render covers every queued append (the nodes are already in
+    -- node.children; render_tree reads from there)
+    render_dirty = false
+    if M.render_hook then M.render_hook() end
+    return
+  end
+  for _, a in ipairs(appends) do
+    if not M.append_hook or not M.append_hook(a.node, a.nodes) then
+      render_dirty = true  -- node not rendered: fall back to a full render
+    end
+  end
+  if render_dirty and M.render_hook then
+    render_dirty = false
+    M.render_hook()
+  end
+end
+
 --- Tree view: group keys by the first `:`-segment. Flat view: keys hang
 --- directly under the db node.
 M.tree_view = true
@@ -41,6 +94,15 @@ M.tree_view = true
 local SPLIT_NEST = 2
 
 local function schedule_render()
+  render_dirty = true
+  schedule_flush()
+end
+
+--- Synchronous first-paint: the scan-start render runs before the first
+--- request is dispatched (buffer is a single loading row — nothing can race
+--- it). Keeps P1-1 (<300ms first screen) while every other buffer mutation
+--- stays deferred to the quiet-point flush.
+local function render_now()
   if M.render_hook then M.render_hook() end
 end
 
@@ -55,12 +117,12 @@ local function scan_session_opts(db)
   return { db = db, max_items = max_items }
 end
 
---- Render a batch delta: append under `node` incrementally when possible,
---- otherwise fall back to a full render.
+--- Render a batch delta: queue the nodes for an incremental append under
+--- `node` (flushed off the response path).
 local function schedule_append(node, new_nodes)
   if not new_nodes or #new_nodes == 0 then return end
-  if M.append_hook and M.append_hook(node, new_nodes) then return end
-  schedule_render()
+  append_queue[#append_queue + 1] = { node = node, nodes = new_nodes }
+  schedule_flush()
 end
 
 --- Fetch the Redis type of key nodes via TYPE (persistent session, so the
@@ -69,6 +131,14 @@ end
 --- icon flip together in one re-render. Skipped for nodes already typed.
 --- TYPE reports only string/hash/list/set/zset/stream, so bitmap/hyperloglog/
 --- geo still resolve as string/zset here (subtype probing is future work).
+---
+--- BOUNDED on purpose: at most `config.type_fetch_limit` keys are typed and
+--- at most TYPE_WINDOW requests are in flight. Typing one request per key
+--- flooded the shared redis-session process (a 100k-key group expand sent
+--- 100k TYPEs; every later SCAN queued behind them and the browser looked
+--- dead — no error, no refresh, nothing).
+local TYPE_WINDOW = 64
+
 --- @param key_nodes table[] key nodes (node_type == "key")
 --- @param conn_url string
 --- @param db number
@@ -79,22 +149,45 @@ function M.fetch_types(key_nodes, conn_url, db)
       to_fetch[#to_fetch + 1] = n
     end
   end
-  if #to_fetch == 0 then return end
-  local pending = #to_fetch
-  for _, n in ipairs(to_fetch) do
-    session_conn.execute(conn_url, { "TYPE", n.meta.key }, {
-      on_response = function(ev)
-        local t = ev.value and ev.value.value
-        if type(t) == "string" then n.meta.type = t end
-        pending = pending - 1
-        if pending <= 0 then schedule_render() end
-      end,
-      on_error = function()
-        pending = pending - 1
-        if pending <= 0 then schedule_render() end
-      end,
-    }, nil, { db = db })
+  local limit = math.min(#to_fetch, config.config.type_fetch_limit or 500)
+  if limit <= 0 then return end
+  local pending = limit
+  local next_idx = 0
+  local in_flight = 0
+
+  local pump
+  local function finish(n, ev)
+    if ev then
+      local t = ev.value and ev.value.value
+      if type(t) == "string" then n.meta.type = t end
+    end
+    pending = pending - 1
+    if pending <= 0 then
+      schedule_render()
+    else
+      pump()
+    end
   end
+
+  function pump()
+    while next_idx < limit and in_flight < TYPE_WINDOW do
+      next_idx = next_idx + 1
+      local n = to_fetch[next_idx]
+      in_flight = in_flight + 1
+      session_conn.execute(conn_url, { "TYPE", n.meta.key }, {
+        on_response = function(ev)
+          in_flight = in_flight - 1
+          finish(n, ev)
+        end,
+        on_error = function()
+          in_flight = in_flight - 1
+          finish(n, nil)
+        end,
+      }, nil, { db = db })
+    end
+  end
+
+  pump()
 end
 
 --- Reorder a node's children: flat keys first (arrival order), then group
@@ -212,10 +305,11 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
   node.epoch = (node.epoch or 0) + 1
   local epoch = node.epoch
   node.loading = true
+  node.error = nil
   node.children = {}
   node._segs = {}
   node.expanded = true
-  schedule_render()
+  render_now()
 
   local scan_count = config.config.header_scan_count or 5000
   local all_keys = {}
@@ -247,7 +341,21 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
         local new_nodes = build_group_headers(node, all_keys, conn_name, db, built + 1)
         built = #all_keys
         schedule_append(node, new_nodes)
-        if not final_page then
+        -- Render cap hit: stop walking the keyspace — rows beyond it would
+        -- never render, and each page's fallback render costs real time.
+        if not final_page and tree.last_truncated > 0 then
+          sort_children(node)
+          node.loading = false
+          local flat = {}
+          for _, ch in ipairs(node.children or {}) do
+            if ch.node_type == "key" then flat[#flat + 1] = ch end
+          end
+          -- render BEFORE dispatching the TYPE batch: the drain-end render
+          -- must never run while responses are in flight (heavy buffer work
+          -- that overlaps arriving channel events starves them — nvim 0.12)
+          schedule_render()
+          M.fetch_types(flat, conn_url, db)
+        elseif not final_page then
           next_page(new_cursor)
         else
           sort_children(node)
@@ -258,8 +366,11 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
           for _, ch in ipairs(node.children or {}) do
             if ch.node_type == "key" then flat[#flat + 1] = ch end
           end
-          M.fetch_types(flat, conn_url, db)
+          -- render BEFORE dispatching the TYPE batch: the drain-end render
+          -- must never run while responses are in flight (heavy buffer work
+          -- that overlaps arriving channel events starves them — nvim 0.12)
           schedule_render()
+          M.fetch_types(flat, conn_url, db)
         end
       end,
       on_error = function(msg)
@@ -287,10 +398,11 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
   node.epoch = (node.epoch or 0) + 1
   local epoch = node.epoch
   node.loading = true
+  node.error = nil
   node.children = {}
   node.expanded = true
   node.loaded = true
-  schedule_render()
+  render_now()
 
   local scan_count = config.config.scan_count or 500
   local all_keys = {}
@@ -331,12 +443,19 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
           for _, n in ipairs(new_nodes) do table.insert(node.children, n) end
           schedule_append(node, new_nodes)
         end
-        if not final_page then
+        -- Render cap hit: stop paging — rows beyond it would never render.
+        if not final_page and tree.last_truncated > 0 then
+          node.loading = false
+          -- render BEFORE dispatching the TYPE batch (see scan_keys note)
+          schedule_render()
+          M.fetch_types(node.children, conn_url, db)
+        elseif not final_page then
           next_page(new_cursor)
         else
           node.loading = false
-          M.fetch_types(node.children, conn_url, db)
+          -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           schedule_render()
+          M.fetch_types(node.children, conn_url, db)
         end
       end,
       on_error = function(msg)
@@ -389,7 +508,8 @@ function M.search(db_node, conn_url, conn_name, subpath)
   results.children = {}
   results.expanded = true
   results.loading = true
-  schedule_render()
+  results.error = nil
+  render_now()
 
   local scan_count = config.config.scan_count or 500
   local all_keys = {}
@@ -423,18 +543,27 @@ function M.search(db_node, conn_url, conn_name, subpath)
           for _, n in ipairs(new_nodes) do table.insert(results.children, n) end
           schedule_append(results, new_nodes)
         end
-        if not final_page then
+        if not final_page and tree.last_truncated > 0 then
+          -- render cap hit: stop paging, the remaining matches would never show
+          results.loading = false
+          -- render BEFORE dispatching the TYPE batch (see scan_keys note)
+          schedule_render()
+          M.fetch_types(results.children, conn_url, db)
+        elseif not final_page then
           next_page(new_cursor)
         else
           results.loading = false
-          M.fetch_types(results.children, conn_url, db)
+          -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           schedule_render()
+          M.fetch_types(results.children, conn_url, db)
         end
       end,
       on_error = function(msg)
         if db_node.epoch ~= epoch then return end
         results.loading = false
-        db_node.error = msg
+        -- the results node IS the display root while searching: its error
+        -- must land there or the status line never shows it
+        results.error = msg
         schedule_render()
       end,
     }, nil, scan_session_opts(db))

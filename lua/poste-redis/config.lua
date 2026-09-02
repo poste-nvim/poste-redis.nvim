@@ -15,6 +15,21 @@ M.defaults = {
   -- round-trips (10k keys ≈ 11 pages vs 200 at 500). Key lists under a group
   -- still page at scan_count.
   header_scan_count = 5000,
+  -- Cap on per-key TYPE lookups in the browser (key icons + type suffix).
+  -- Only the first N scanned keys get typed; a 100k-key group must never
+  -- turn into 100k pipelined session requests (that wedges the shared
+  -- redis-session process: every later SCAN queues behind the flood).
+  type_fetch_limit = 500,
+  -- Max rows rendered in the key browser tree. A 100k-key group flattened
+  -- into buffer lines makes every full re-render a 100k-line rewrite, which
+  -- starves the session's stdout processing (browser freeze). Beyond the cap
+  -- a "... N more" notice renders and the scan stops early — narrow with the
+  -- sub-path search instead.
+  render_max_lines = 5000,
+  -- Max children rendered per expanded node (an inline "... N more" notice
+  -- follows): a 100k-key group must not crowd its sibling groups out of the
+  -- tree entirely.
+  render_max_per_node = 500,
   -- Result panel split: share of the editor height.
   result_height_ratio = 0.4,
   -- Execute confirm heuristic: write commands always require a confirm

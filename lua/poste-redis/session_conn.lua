@@ -226,6 +226,7 @@ function M.execute(conn_url, command, callbacks, bufnr, opts)
   session.pending[seq] = {
     on_response = callbacks.on_response,
     on_error = callbacks.on_error,
+    at = os.time(),
   }
   local payload = vim.json.encode({ seq = seq, command = command }) .. "\n"
   local sent = vim.fn.chansend(session.job_id, payload)
@@ -266,6 +267,55 @@ function M.cleanup_buf(bufnr)
       M.stop(conn_url)
     end
   end
+end
+
+-- A stalled session (dead TCP connection under the Rust driver, or a
+-- channel whose stdout the event loop stopped reading) used to wedge the
+-- browser forever: every later request queued behind the stall with no
+-- error and no recovery. The watchdog fails requests that have been
+-- pending too long and restarts the session process; the next execute
+-- spawns a fresh one and the browser keeps working.
+local STALL_LIMIT = 10  -- seconds without a response before restarting
+
+local watchdog = assert(vim.loop.new_timer())
+watchdog:start(2000, 2000, vim.schedule_wrap(function()
+  local now = os.time()
+  for conn_url, s in pairs(pool) do
+    local stalled = false
+    for _, cb in pairs(s.pending) do
+      if cb.at and now - cb.at >= STALL_LIMIT then
+        stalled = true
+        break
+      end
+    end
+    if stalled then
+      log("WARN", "session stalled (no response for " .. STALL_LIMIT .. "s); restarting it")
+      local job = s.job_id
+      s.alive = false
+      pool[conn_url] = nil
+      for _, cb in pairs(s.pending) do
+        if cb.on_error then
+          pcall(cb.on_error, "redis session stalled; it was restarted", nil)
+        end
+      end
+      s.pending = {}
+      if job then pcall(vim.fn.jobstop, job) end
+    end
+  end
+end))
+
+--- Total requests awaiting a response, across all pooled sessions. The
+--- browser's render flusher uses this to keep buffer mutations out of the
+--- response stream (see browser/async.lua).
+--- @return number
+function M.in_flight()
+  local n = 0
+  for _, s in pairs(pool) do
+    if s.alive then
+      for _ in pairs(s.pending) do n = n + 1 end
+    end
+  end
+  return n
 end
 
 --- List active sessions (debugging / health).

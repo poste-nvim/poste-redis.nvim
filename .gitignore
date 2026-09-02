@@ -7,3 +7,5 @@
 
 # Test artifacts
 nvim.log
+
+ignore/

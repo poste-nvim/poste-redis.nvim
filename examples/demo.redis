@@ -10,6 +10,8 @@ SET session:abc "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0" EX 3600
 GET session:abc
 GET missing:key          # 应为 (nil)
 
+TYPE user:42
+
 # ── Hash：长命令用 \ 续行 ──
 HSET user:42 name "Alice" \
       email "alice@example.com" \

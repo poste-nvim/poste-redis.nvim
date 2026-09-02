@@ -83,6 +83,7 @@ function M.setup()
   define_if_empty("PosteRedisBrowserString", "#98C379")
   define_if_empty("PosteRedisBrowserCollection", "#D19A66")
   define_if_empty("PosteRedisBrowserOther", "#C678DD")
+  define_if_empty("PosteRedisBrowserError", "#E06C75")
 
   state.apply_highlight_overrides({
     "PosteRedisComment", "PosteRedisUse", "PosteRedisUseName",
@@ -101,6 +102,7 @@ function M.setup()
     "PosteRedisBrowserMarker", "PosteRedisBrowserConn", "PosteRedisBrowserDb",
     "PosteRedisBrowserGroup", "PosteRedisBrowserString",
     "PosteRedisBrowserCollection", "PosteRedisBrowserOther",
+    "PosteRedisBrowserError",
   })
 end
 

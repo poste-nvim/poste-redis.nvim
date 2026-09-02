@@ -13,6 +13,8 @@
 
 local M = {}
 
+local config = require("poste-redis.config")
+
 -- Nerd-font glyphs (no emoji): marker + icons per node type.
 local MARKER_COLLAPSED = " "
 local MARKER_EXPANDED = " "
@@ -137,92 +139,183 @@ function M.make_key_node(key, conn_name, db, opts)
   }
 end
 
+--- Count a node plus all its descendants (for the truncation notice).
+local function count_nodes(node)
+  local n = 1
+  for _, ch in ipairs(node.children or {}) do
+    n = n + count_nodes(ch)
+  end
+  return n
+end
+
+--- Cap a node's rendered children at the per-node limit; returns the sliced
+--- list and how many rows were hidden (surfaced as an inline notice).
+local function cap_kids(kids)
+  local per_node_cap = config.config.render_max_per_node
+  if not per_node_cap or per_node_cap <= 0 or #kids <= per_node_cap then
+    return kids, 0
+  end
+  local sliced = {}
+  for i = 1, per_node_cap do sliced[i] = kids[i] end
+  return sliced, #kids - per_node_cap
+end
+
+local function notice_node()
+  return { node_type = "notice", name = "truncation notice", _icon_len = 0 }
+end
+
 --- Flatten a node list into display lines + a parallel node map.
+--- Rendering is bounded twice: config.render_max_per_node children per node
+--- (an inline "… N more" notice renders under the truncated node, so its
+--- siblings stay reachable) and config.render_max_lines rows total (a
+--- 100k-key tree flattened into buffer lines makes every full re-render a
+--- huge rewrite, which starves the session's stdout processing — browser
+--- freeze). Both cuts feed the skipped count the scans use to stop early.
 --- @param nodes table[] root nodes
 --- @param depth number internal
 --- @param multi_select table|nil unused placeholder (redis browser has no
 ---   table multi-select yet; kept for tree.render parity)
---- @return string[] lines, table[] node_map, number[] icon_cols
+--- @param budget number|nil remaining total row budget (nil = unlimited,
+---   used by the incremental-append delta path)
+--- @return string[] lines, table[] node_map, number[] icon_cols, number skipped
 ---   icon_cols[i] is the 0-based byte column of the ICON start for line i
 ---   (right after any marker glyph), computed here so apply_highlights never
----   re-reads the buffer.
-function M.flatten_tree(nodes, depth, multi_select)
+---   re-reads the buffer. skipped = rows not rendered by per-node or total
+---   caps (the scans stop paging once this is non-zero).
+function M.flatten_tree(nodes, depth, multi_select, budget)
   depth = depth or 0
   local lines = {}
   local node_map = {}
   local icon_cols = {}
+  local skipped = 0       -- per-node cap cuts (+ budget cuts, below)
+  local budget_skipped = 0  -- rows cut by the total row budget
+
+  local function emit(node_line, node, icon_col)
+    table.insert(lines, node_line)
+    table.insert(node_map, node)
+    table.insert(icon_cols, icon_col)
+  end
+
+  local function emit_children(node, kids, child_depth)
+    local child_lines, child_map, child_cols, child_skipped, child_budget = M.flatten_tree(
+      kids, child_depth, nil, budget)
+    skipped = skipped + child_skipped
+    budget_skipped = budget_skipped + child_budget
+    node._desc_lines = #child_lines
+    for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
+    for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
+    for _, cc in ipairs(child_cols) do table.insert(icon_cols, cc) end
+    return #child_lines
+  end
 
   for _, node in ipairs(nodes) do
-    -- Hidden display root: emit no line, render its children at depth 0 so
-    -- the tree top level is the selected db's groups/keys directly.
+    -- Hidden display root: emit no node line, render its children at depth 0
+    -- so the tree top level is the selected db's groups/keys directly. While
+    -- it loads (or after a failed scan) one status line IS emitted — the db
+    -- node has no row of its own, so without it a slow/failed scan would
+    -- render as a silently blank tree.
     if node == M.display_root then
       node._depth = -1
+      local status_lines, status_map, status_cols = {}, {}, {}
+      if node.loading then
+        node._icon_len = 0
+        table.insert(status_lines, MARKER_LOADING .. "scanning keys…")
+        table.insert(status_map, node)
+        table.insert(status_cols, #MARKER_LOADING)
+      elseif node.error then
+        node._icon_len = 0
+        node._err_s = 0
+        node._err_e = #("scan failed: " .. tostring(node.error))
+        table.insert(status_lines, "scan failed: " .. tostring(node.error))
+        table.insert(status_map, node)
+        table.insert(status_cols, 0)
+      end
+      node._desc_lines = #status_lines
       if node.expanded and node.children then
-        local child_lines, child_map, child_cols = M.flatten_tree(node.children, 0)
-        node._desc_lines = #child_lines
-        for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
-        for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
-        for _, cc in ipairs(child_cols) do table.insert(icon_cols, cc) end
-      else
-        node._desc_lines = 0
+        local kids, hidden = cap_kids(node.children)
+        skipped = skipped + hidden
+        local rendered = emit_children(node, kids, 0)
+        node._desc_lines = #status_lines + rendered
+        if hidden > 0 then
+          emit(("… %d more — use <leader>/ search to narrow"):format(hidden),
+            notice_node(), 0)
+          node._desc_lines = node._desc_lines + 1
+        end
+      end
+      for i, cl in ipairs(status_lines) do
+        emit(cl, status_map[i], status_cols[i])
       end
     else
-      local indent = string.rep("  ", depth)
+      if budget == nil or budget > 0 then
+        local indent = string.rep("  ", depth)
 
-      local icon
-      if node.node_type == "key" then
-        local t = node.meta and node.meta.type
-        icon = (t and KEY_ICON[t]) or KEY_ICON.string
+        local icon
+        if node.node_type == "key" then
+          local t = node.meta and node.meta.type
+          icon = (t and KEY_ICON[t]) or KEY_ICON.string
+        else
+          icon = ICON[node.node_type] or "  "
+        end
+
+        local marker
+        if node.loading then
+          marker = MARKER_LOADING
+        elseif node.expanded then
+          marker = MARKER_EXPANDED
+        elseif node.node_type == "connection" or node.node_type == "db"
+            or node.node_type == "group" then
+          marker = MARKER_COLLAPSED
+        else
+          marker = "  "
+        end
+
+        local suffix = ""
+        if node.node_type == "connection" then
+          suffix = ""
+        elseif node.node_type == "db" then
+          suffix = ""
+        elseif node.node_type == "key" and node.meta and type(node.meta.type) == "string" then
+          suffix = "  " .. node.meta.type
+          if node.meta.size then suffix = suffix .. " (" .. node.meta.size .. ")" end
+        end
+
+        local line = indent .. marker .. icon .. " " .. node.name .. suffix
+        -- Failed scans on visible nodes (group/db/connection) surface inline —
+        -- silent errors made every failure look like "the tree is broken".
+        if node.error then
+          node._err_s = #line
+          line = line .. "  (error: " .. tostring(node.error) .. ")"
+          node._err_e = #line
+        end
+        emit(line, node, #indent + #marker)
+        node._icon_len = #icon
+
+        node._depth = depth
+        if budget then budget = budget - 1 end
+        if node.expanded and node.children then
+          local kids, hidden = cap_kids(node.children)
+          skipped = skipped + hidden
+          local rendered = emit_children(node, kids, depth + 1)
+          node._desc_lines = rendered
+          if hidden > 0 then
+            emit(string.rep("  ", depth + 1)
+              .. ("… %d more — use <leader>/ search to narrow"):format(hidden),
+              notice_node(), 0)
+            node._desc_lines = node._desc_lines + 1
+          end
+        else
+          node._desc_lines = 0
+        end
       else
-        icon = ICON[node.node_type] or "  "
-      end
-
-      local marker
-      if node.loading then
-        marker = MARKER_LOADING
-      elseif node.expanded then
-        marker = MARKER_EXPANDED
-      elseif node.node_type == "connection" or node.node_type == "db"
-          or node.node_type == "group" then
-        marker = MARKER_COLLAPSED
-      else
-        marker = "  "
-      end
-
-      local suffix = ""
-      if node.node_type == "connection" then
-        suffix = ""
-      elseif node.node_type == "db" then
-        suffix = ""
-      elseif node.node_type == "key" and node.meta and type(node.meta.type) == "string" then
-        suffix = "  " .. node.meta.type
-        if node.meta.size then suffix = suffix .. " (" .. node.meta.size .. ")" end
-      end
-
-      local line = indent .. marker .. icon .. " " .. node.name .. suffix
-      table.insert(lines, line)
-      table.insert(node_map, node)
-      -- icon_col is the 0-based BYTE column of the icon start: indent bytes +
-      -- marker bytes (a glyph + trailing space, or two spaces on a leaf).
-      -- Computed here so apply_highlights never re-reads the buffer.
-      node._icon_len = #icon
-      local icon_col = #indent + #marker
-      table.insert(icon_cols, icon_col)
-
-      node._depth = depth
-      if node.expanded and node.children then
-        local child_lines, child_map, child_cols = M.flatten_tree(node.children, depth + 1)
-        node._desc_lines = #child_lines
-        for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
-        for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
-        for _, cc in ipairs(child_cols) do table.insert(icon_cols, cc) end
-      else
-        node._desc_lines = 0
+        -- total budget exhausted: this node's whole subtree is not rendered
+        local n = count_nodes(node)
+        skipped = skipped + n
+        budget_skipped = budget_skipped + n
       end
     end
   end
 
-  return lines, node_map, icon_cols
+  return lines, node_map, icon_cols, skipped, budget_skipped
 end
 
 --- Highlight one node's line. Columns come from flatten_tree (icon byte
@@ -262,6 +355,11 @@ local function highlight_line(buf, line, node, icon_col)
     hl = (t and KEY_HL[t]) or "PosteRedisBrowserOther"
   end
   vim.api.nvim_buf_add_highlight(buf, hl_ns, hl, line, start, start + len)
+
+  if node._err_s and node._err_e and node._err_e > node._err_s then
+    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserError",
+      line, node._err_s, node._err_e)
+  end
 end
 
 --- Clear + re-apply browser highlights (marker + icon colors per node type).
@@ -276,6 +374,10 @@ function M.apply_highlights(buf, line_to_node, icon_cols)
   end
 end
 
+--- Rows dropped by the last render_tree (budget exhausted). The scan loops
+--- read this to stop paging keys that would never render anyway.
+M.last_truncated = 0
+
 --- Write the flattened tree into the browser buffer, prepending the two
 --- header lines (search bar + db select) from M.header_lines.
 --- @param browser_buf number
@@ -285,14 +387,27 @@ end
 function M.render_tree(browser_buf, line_to_node, root_nodes)
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return line_to_node end
 
-  local lines, node_map, icon_cols = M.flatten_tree(root_nodes)
+  local cap = config.config.render_max_lines
+  local lines, node_map, icon_cols, skipped, budget_skipped = M.flatten_tree(root_nodes, 0, nil, cap)
+  M.last_truncated = skipped or 0
+  if (budget_skipped or 0) > 0 then
+    -- per-node cuts render their notice inline; only a total-budget cut
+    -- appends the trailing notice row
+    local notice = notice_node()
+    node_map[#node_map + 1] = notice
+    icon_cols[#icon_cols + 1] = 0
+    lines[#lines + 1] = ("  … %d more not rendered — use <leader>/ search to narrow"):format(budget_skipped)
+  end
   -- The search bar header line can legitimately be empty (query ""), so every
   -- header line is always written — skipping empties would drop the bar.
   for i = #M.header_lines, 1, -1 do
     table.insert(lines, 1, M.header_lines[i] or "")
   end
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
-  vim.api.nvim_buf_set_lines(browser_buf, 0, -1, false, lines)
+  -- Explicit end index, NOT -1: nvim 0.12's delete-to-end path races job
+  -- stdout processing during streamed scans (browser froze mid-scan; set_lines
+  -- with an explicit end never reproduced it — 8/8 vs 2/4 drained runs).
+  vim.api.nvim_buf_set_lines(browser_buf, 0, vim.api.nvim_buf_line_count(browser_buf), false, lines)
   vim.api.nvim_set_option_value("modifiable", false, { buf = browser_buf })
   M.apply_highlights(browser_buf, node_map, icon_cols)
   return node_map
@@ -388,6 +503,13 @@ end
 ---   must fall back to a full render)
 function M.append_children(buf, line_to_node, node, new_nodes)
   if not new_nodes or #new_nodes == 0 then return true end
+  -- Render cap: refuse to append past it — the caller falls back to a full
+  -- render, which truncates and flags the scan to stop paging.
+  local cap = config.config.render_max_lines
+  if cap and cap > 0
+      and (#line_to_node + #new_nodes > cap or (M.last_truncated or 0) > 0) then
+    return false
+  end
   local node_idx
   if node == M.display_root then
     node_idx = 0  -- hidden root: children occupy the whole tree below headers
@@ -419,6 +541,15 @@ function M.append_children(buf, line_to_node, node, new_nodes)
     highlight_line(buf, insert_0 + k - 1, n, icon_cols[k])
   end
   node._desc_lines = (node._desc_lines or 0) + #lines
+  -- Ancestors count these lines too: with two scans streaming at once (e.g.
+  -- new db-level groups arriving while a group's keys append), the ancestor
+  -- append computes its insert offset from ITS _desc_lines — leaving it
+  -- stale splices buffer lines and line_to_node at the wrong place.
+  local anc = node.parent
+  while anc do
+    anc._desc_lines = (anc._desc_lines or 0) + #lines
+    anc = anc.parent
+  end
   return true
 end
 

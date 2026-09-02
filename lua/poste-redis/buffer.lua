@@ -492,7 +492,9 @@ render_active_grid = function(tab)
   tab.header_padded = lines[1]
 
   vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, body)
+  -- explicit end index: nvim 0.12's set_lines(-1) path can starve job stdout
+  -- while results stream in (see browser/tree.lua render_tree note)
+  vim.api.nvim_buf_set_lines(buf, 0, vim.api.nvim_buf_line_count(buf), false, body)
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 
   update_header()
@@ -510,7 +512,7 @@ local function render_active()
     header.close()
     local lines = tab and tab.lines or { "" }
     vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.api.nvim_buf_set_lines(buf, 0, vim.api.nvim_buf_line_count(buf), false, lines)
     vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   end
   update_winbar()
@@ -586,7 +588,7 @@ function M.clear()
   header.close()
   if buf and vim.api.nvim_buf_is_valid(buf) then
     vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+    vim.api.nvim_buf_set_lines(buf, 0, vim.api.nvim_buf_line_count(buf), false, {})
     vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   end
 end

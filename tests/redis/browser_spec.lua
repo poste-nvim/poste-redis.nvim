@@ -885,3 +885,207 @@ describe("poste-redis browser actions e2e (live redis)", function()
     vim.wait(3000, function() return cleaned end, 5)
   end)
 end)
+
+describe("poste-redis browser expand regressions", function()
+  local session_conn = require("poste-redis.session_conn")
+
+  it("shows a status line while the hidden display root is scanning", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.loading = true
+    db.expanded = true
+    db.children = {}
+    tree.display_root = db
+    local lines, node_map = tree.flatten_tree({ db })
+    tree.display_root = nil
+    -- the db node has no row of its own; without this a slow/failed scan
+    -- renders as a silently blank tree
+    assert.equals(1, #lines)
+    assert.match("scanning", lines[1])
+    assert.equals(db, node_map[1])
+    assert.equals(1, db._desc_lines)
+  end)
+
+  it("shows the hidden display root's scan error", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.error = "connection refused"
+    db.expanded = true
+    db.children = {}
+    tree.display_root = db
+    local lines = tree.flatten_tree({ db })
+    tree.display_root = nil
+    assert.equals(1, #lines)
+    assert.match("scan failed: connection refused", lines[1])
+  end)
+
+  it("appends an error suffix to a failed group node", function()
+    local g = tree.make_group_node("user", "c", 0)
+    g.error = "ERR db index out of range"
+    local lines = tree.flatten_tree({ g })
+    assert.match("%(error: ERR db index out of range%)", lines[1])
+  end)
+
+  it("append_children keeps ancestors' _desc_lines in sync", function()
+    -- two scans can stream at once (db groups + a group's keys): the db
+    -- append computes its insert offset from the db node's _desc_lines, so
+    -- a stale count splices lines into the middle of the group's keys
+    local buf = vim.api.nvim_create_buf(false, true)
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local grp = tree.make_group_node("user", "c", 0)
+    grp.parent = db
+    db.children = { grp }
+    db.expanded = true
+    grp.expanded = true
+    tree.display_root = db
+    tree.header_lines = { "", "", "" }
+    local line_to_node = tree.render_tree(buf, {}, { db })
+    assert.equals(1, #line_to_node)
+    local keys = {
+      tree.make_key_node("user:1", "c", 0),
+      tree.make_key_node("user:2", "c", 0),
+    }
+    for _, k in ipairs(keys) do k.parent = grp end
+    assert.is_true(tree.append_children(buf, line_to_node, grp, keys))
+    assert.equals(2, grp._desc_lines)
+    assert.equals(3, db._desc_lines)  -- 1 group row + 2 appended keys
+    assert.equals(6, vim.api.nvim_buf_line_count(buf))  -- 3 headers + 3 rows
+    tree.display_root = nil
+  end)
+
+  it("fetch_types caps TYPE requests (no one-request-per-key session flood)", function()
+    local orig_execute = session_conn.execute
+    local dispatched = 0
+    local inflight = {}
+    session_conn.execute = function(conn_url, cmd, cbs, bufnr, opts)
+      dispatched = dispatched + 1
+      inflight[#inflight + 1] = cbs
+      return "dispatched"
+    end
+    local nodes = {}
+    for i = 1, 1200 do nodes[i] = tree.make_key_node("k" .. i, "c", 0) end
+    async.fetch_types(nodes, "redis://h", 0)
+    -- windowed: only the first window is on the wire at once
+    assert.equals(64, #inflight)
+    -- drain: each response refills the window until the cap is hit
+    while #inflight > 0 do
+      local cbs = table.remove(inflight, 1)
+      cbs.on_response({ value = { value = "string" } })
+    end
+    assert.equals(500, dispatched)  -- config.type_fetch_limit, NOT #nodes
+    assert.equals("string", nodes[1].meta.type)
+    assert.equals("string", nodes[500].meta.type)
+    assert.is_nil(nodes[501].meta.type)  -- beyond the cap: never sent
+    session_conn.execute = orig_execute
+  end)
+
+  it("fetch_types drains on errors and skips already-typed nodes", function()
+    local orig_execute = session_conn.execute
+    local inflight = {}
+    session_conn.execute = function(conn_url, cmd, cbs)
+      inflight[#inflight + 1] = cbs
+      return "dispatched"
+    end
+    local nodes = {
+      tree.make_key_node("typed", "c", 0, { type = "hash" }),
+      tree.make_key_node("a", "c", 0),
+      tree.make_key_node("b", "c", 0),
+    }
+    async.fetch_types(nodes, "redis://h", 0)
+    assert.equals(2, #inflight)  -- the already-typed node is skipped
+    while #inflight > 0 do
+      local cbs = table.remove(inflight, 1)
+      cbs.on_error("boom")
+    end
+    assert.equals("hash", nodes[1].meta.type)
+    assert.is_nil(nodes[2].meta.type)
+    session_conn.execute = orig_execute
+  end)
+end)
+
+describe("poste-redis browser render cap", function()
+  local config = require("poste-redis.config")
+
+  it("flatten stops at the budget and reports skipped rows", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {}
+    for i = 1, 50 do db.children[i] = tree.make_key_node("k" .. i, "c", 0) end
+    db.expanded = true
+    tree.display_root = db
+    local lines, _, _, skipped = tree.flatten_tree({ db }, 0, nil, 10)
+    assert.equals(10, #lines)
+    assert.equals(40, skipped)
+    -- no budget: everything renders, nothing skipped
+    local all_lines, _, _, all_skipped = tree.flatten_tree({ db }, 0, nil, nil)
+    tree.display_root = nil
+    assert.equals(50, #all_lines)
+    assert.equals(0, all_skipped)
+  end)
+
+  it("render_tree appends a truncation notice row", function()
+    local orig = config.config.render_max_lines
+    config.config.render_max_lines = 10
+    local buf = vim.api.nvim_create_buf(false, true)
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {}
+    for i = 1, 50 do db.children[i] = tree.make_key_node("k" .. i, "c", 0) end
+    db.expanded = true
+    tree.display_root = db
+    tree.header_lines = { "", "", "" }
+    local l2n = tree.render_tree(buf, {}, { db })
+    tree.display_root = nil
+    -- node map: capped rows + notice row (header lines are not node rows)
+    assert.equals(10 + 1, #l2n)
+    assert.equals("notice", l2n[#l2n].node_type)
+    -- buffer: 3 header rows + capped rows + notice row
+    assert.equals(3 + 10 + 1, vim.api.nvim_buf_line_count(buf))
+    local last = vim.api.nvim_buf_get_lines(buf, -2, -1, false)[1]
+    assert.match("40 more not rendered", last)
+    assert.equals(40, tree.last_truncated)
+    config.config.render_max_lines = orig
+    tree.last_truncated = 0
+  end)
+
+  it("append_children refuses to append past the cap", function()
+    local orig = config.config.render_max_lines
+    config.config.render_max_lines = 10
+    local buf = vim.api.nvim_create_buf(false, true)
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local grp = tree.make_group_node("user", "c", 0)
+    grp.parent = db
+    db.children = { grp }
+    db.expanded = true
+    grp.expanded = true
+    tree.display_root = db
+    tree.header_lines = { "", "", "" }
+    local l2n = tree.render_tree(buf, {}, { db })
+    -- tree holds 1 row; cap 10: appending 10 keys would exceed it
+    local keys = {}
+    for i = 1, 10 do keys[i] = tree.make_key_node("user:" .. i, "c", 0) end
+    for _, k in ipairs(keys) do k.parent = grp end
+    assert.is_false(tree.append_children(buf, l2n, grp, keys))
+    config.config.render_max_lines = orig
+    tree.last_truncated = 0
+  end)
+end)
+
+describe("poste-redis browser per-node render cap", function()
+  it("caps a huge group's keys but keeps sibling groups reachable", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local big = tree.make_group_node("bench", "c", 0)
+    big.children = {}
+    for i = 1, 1000 do big.children[i] = tree.make_key_node("bench:" .. i, "c", 0) end
+    big.expanded = true
+    local small = tree.make_group_node("user", "c", 0)
+    db.children = { big, small }
+    db.expanded = true
+    tree.display_root = db
+    local lines, node_map, _, skipped = tree.flatten_tree({ db })
+    tree.display_root = nil
+    -- bench row + 500 capped keys + inline notice + user row
+    assert.equals(1 + 500 + 1 + 1, #lines)
+    assert.match("bench", lines[1])
+    assert.match("500 more", lines[502])
+    assert.equals("notice", node_map[502].node_type)
+    assert.match("user", lines[503])
+    assert.equals(500, skipped)  -- 500 bench keys hidden by the per-node cap
+  end)
+end)
