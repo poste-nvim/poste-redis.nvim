@@ -301,6 +301,7 @@ local function dispatch_group(groups, index, opts, callbacks, all_results, all_s
       status = "error",
       error = g.error,
       command = "",
+      start_line = g.start_line,
     }
     all_results[#all_results + 1] = err_ev
     guarded(exec_seq, callbacks.on_result, err_ev)()
@@ -357,7 +358,9 @@ function M.run_selection_async(buf, mode, opts, callbacks)
   local my_seq = exec_seq
   local entries
   if mode == "visual" then
-    entries = parser.visual_entries(buf)
+    -- opts.range is captured by the visual keymap while the selection is live.
+    -- When absent (tests / programmatic), fall back to the '< '>' marks.
+    entries = parser.visual_entries(buf, opts.range)
   else
     local e = parser.cursor_entry(buf)
     entries = e and { e } or {}

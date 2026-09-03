@@ -301,7 +301,7 @@ describe("poste-redis exec_run", function()
     local redis_state = require("poste-redis.state")
     redis_state.current_url = nil
 
-    local src = vim.api.nvim_create_buf(false, true)
+    local src = vim.api.nvim_create_buf(false, false)
     vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE srv", "GET k" })
     vim.api.nvim_set_current_buf(src)
     vim.api.nvim_win_set_cursor(0, { 2, 0 })
@@ -314,6 +314,29 @@ describe("poste-redis exec_run", function()
     connections.resolve_redis_url = orig_resolve
     redis_state.current_url = nil
     vim.api.nvim_buf_delete(src, { force = true })
+  end)
+
+  it("run_selection_async visual mode honors the explicit range, not marks", function()
+    stub_emit({})
+    local src = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "GET a", "GET b", "GET c", "GET d" })
+    vim.api.nvim_set_current_buf(src)
+    -- cursor is on line 4 and there are no live '< '>' marks; only the
+    -- explicit range may select the batch
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    local errs = {}
+    exec_run.run_selection_async(src, "visual", {
+      connection = "redis://h:6379/0",
+      range = { start_line = 2, end_line = 3 },
+    }, {
+      on_error = function(m) errs[#errs + 1] = m end,
+    })
+    assert.equals(0, #errs)
+    assert.truthy(emitted)
+    local payload = vim.json.decode(emitted.stdin)
+    assert.same({ { "GET", "b" }, { "GET", "c" } }, payload.commands)
+    vim.api.nvim_buf_delete(src, { force = true })
+    exec_run.cancel()
   end)
 
   it("group_by_connection reports a bare USE", function()
