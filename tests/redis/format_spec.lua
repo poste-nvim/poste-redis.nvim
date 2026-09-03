@@ -201,6 +201,23 @@ describe("poste-redis format", function()
     assert.equals("1.50 s · OK", format.status_summary({ status = "OK", latency_ms = 1500 }))
   end)
 
+  it("status_summary shows the length for string replies, not the value", function()
+    local jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0"
+    assert.equals("4 ms · len 40", format.status_summary({
+      status = '"' .. jwt .. '"', latency_ms = 4,
+      value = { type = "string", value = jwt },
+    }))
+    -- non-string values keep the exec status text; the error path wins over both
+    assert.equals("2 ms · 2 elements", format.status_summary({
+      status = "2 elements", latency_ms = 2,
+      value = { type = "hash", entries = { { "a", "1" } }, len = 2 },
+    }))
+    assert.equals("✘ 1 ms", format.status_summary({
+      status = "error", latency_ms = 1, error = "WRONGTYPE",
+      value = { type = "string", value = "x" },
+    }))
+  end)
+
   it("flags dangerous commands", function()
     assert.is_true(format.is_dangerous_command("FLUSHALL"))
     assert.is_true(format.is_dangerous_command("config set save ''"))

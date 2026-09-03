@@ -260,7 +260,10 @@ function M.preview_json(value)
   return s
 end
 
---- Status summary line for the winbar / history (e.g. `2 ms · OK`).
+--- Status summary line for the winbar (e.g. `2 ms · OK`). Simple replies
+--- carry the value itself in `status` (exec summarizes GET etc. verbatim),
+--- so for string values only the length is shown — a long payload has no
+--- business in a winbar.
 --- @param event table
 --- @return string
 function M.status_summary(event)
@@ -268,6 +271,10 @@ function M.status_summary(event)
   local lat = ms and util.format_latency(ms) or ""
   local status = (event and event.status) or ""
   if status == "error" or (event and event.error) then return "✘ " .. lat end
+  local v = event and event.value
+  if v and v.type == "string" and type(v.value) == "string" then
+    status = "len " .. #v.value
+  end
   if status == "" then return lat end
   return lat ~= "" and (lat .. " · " .. status) or status
 end

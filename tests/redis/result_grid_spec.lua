@@ -420,3 +420,26 @@ describe("poste-redis grid editing", function()
     assert.equals("HSET user:1 email bob@x", sent_cmds[#sent_cmds])
   end)
 end)
+
+describe("poste-redis result winbar", function()
+  local view = require("poste-redis.buffer.view")
+
+  it("wraps the key argument in the green group", function()
+    assert.equals("GET %#PosteRedisResultWinbarKey#session:abc%*",
+      view._test.format_command("GET session:abc"))
+  end)
+
+  it("keeps the typed form (case, quoting) and leaves extra args plain", function()
+    assert.equals('set %#PosteRedisResultWinbarKey#k%* "v 1" extra',
+      view._test.format_command('set k "v 1" extra'))
+  end)
+
+  it("escapes % so the winbar encoding passes it through", function()
+    assert.equals("GET %#PosteRedisResultWinbarKey#100%%%*",
+      view._test.format_command("GET 100%"))
+  end)
+
+  it("single-token commands render plain", function()
+    assert.equals("PING", view._test.format_command("PING"))
+  end)
+end)

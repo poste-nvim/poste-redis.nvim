@@ -205,7 +205,7 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
         local rendered = emit_children(node, kids, 0)
         node._desc_lines = #status_lines + rendered
         if hidden > 0 then
-          emit(("… %d more — use <leader>/ search to narrow"):format(hidden),
+          emit(("  … %d more "):format(hidden),
             notice_node(), 0)
           node._desc_lines = node._desc_lines + 1
         end
@@ -266,7 +266,7 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
           node._desc_lines = rendered
           if hidden > 0 then
             emit(string.rep("  ", depth + 1)
-              .. ("… %d more — use <leader>/ search to narrow"):format(hidden),
+              .. ("  … %d more"):format(hidden),
               notice_node(), 0)
             node._desc_lines = node._desc_lines + 1
           end
@@ -370,7 +370,7 @@ function M.render_tree(browser_buf, line_to_node, root_nodes, multi_select)
     local notice = notice_node()
     node_map[#node_map + 1] = notice
     icon_cols[#icon_cols + 1] = 0
-    lines[#lines + 1] = ("  … %d more not rendered — use <leader>/ search to narrow"):format(budget_skipped)
+    lines[#lines + 1] = ("  … %d more not rendered"):format(budget_skipped)
   end
   -- Longest visible data row (cells): the browser's auto-width input. Must
   -- run BEFORE the header prepend — the separator's dash run derives from the

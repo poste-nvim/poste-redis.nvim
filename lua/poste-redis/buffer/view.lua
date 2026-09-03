@@ -213,6 +213,24 @@ function M.render_active()
   M.update_winbar()
 end
 
+--- Escape literal % so the winbar's %-encoding passes user/command text
+--- through untouched.
+local function esc(s)
+  return (s:gsub("%%", "%%%%"))
+end
+
+--- Winbar text for the command, with the key argument (2nd token) wrapped in
+--- the green PosteRedisResultWinbarKey group (`%#Group#…%*` encoding).
+--- Deliberately NOT parser.command_tokens: this is display, so the typed
+--- form (case, quoting) is kept as-is.
+local function format_command(cmd)
+  local name, key, rest = cmd:match("^%s*(%S+)%s+(%S+)%s*(.-)%s*$")
+  if not name then return esc(cmd) end
+  local out = esc(name) .. " %#PosteRedisResultWinbarKey#" .. esc(key) .. "%*"
+  if rest ~= "" then out = out .. " " .. esc(rest) end
+  return out
+end
+
 function M.update_winbar()
   if not state.win or not vim.api.nvim_win_is_valid(state.win) then return end
   local tab = state.tabs[state.active]
@@ -223,7 +241,7 @@ function M.update_winbar()
   end
   local status = meta and format.status_summary(meta) or ""
   if status ~= "" then
-    bar_parts[#bar_parts + 1] = status
+    bar_parts[#bar_parts + 1] = esc(status)
   end
   if tab and tab.kind == "table" and tab.grid then
     local rows = #tab.grid.rows
@@ -233,16 +251,21 @@ function M.update_winbar()
       bar_parts[#bar_parts + 1] = string.format("P %d/%d", tab.page, tab.num_pages)
     end
     if tab.search_text and tab.search_text ~= "" then
-      bar_parts[#bar_parts + 1] = string.format("/%s %d/%d", tab.search_text, tab.search_idx, #tab.search_matches)
+      bar_parts[#bar_parts + 1] = string.format("/%s %d/%d",
+        esc(tab.search_text), tab.search_idx, #tab.search_matches)
     end
   end
   local cmd = meta and meta.command or ""
   if cmd ~= "" then
-    bar_parts[#bar_parts + 1] = cmd
+    bar_parts[#bar_parts + 1] = format_command(cmd)
   end
   local bar = table.concat(bar_parts, "  ·  ")
   vim.api.nvim_set_option_value("winbar", bar, { win = state.win })
   pcall(vim.api.nvim_set_option_value, "winhl", "Normal:PosteRedisResultMeta", { win = state.win })
 end
+
+M._test = {
+  format_command = format_command,
+}
 
 return M
