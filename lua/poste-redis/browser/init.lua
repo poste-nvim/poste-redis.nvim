@@ -172,6 +172,8 @@ end
 -- Node actions
 ----------------------------------------------------------------------
 
+local current_node  -- forward decl (defined in "Keymap handlers")
+
 --- Expand a group node's children (lazy scan_group). Keys are leaves; the db
 --- lives in the header select, not the tree. In nested view the subfolders
 --- created by scan_group recurse here the same way — each is its own lazy
@@ -250,7 +252,10 @@ end
 -- Keymap handlers
 ----------------------------------------------------------------------
 
-local function current_node()
+-- NOTE: assigned (not `local function`) so it fills the forward-declared
+-- local at the top of "Node actions" — a second `local` would shadow it with
+-- nil (AGENTS.md local-fn hoisting pitfall).
+function current_node()
   return tree.get_node_at_line(line_to_node, vim.fn.line("."))
 end
 
