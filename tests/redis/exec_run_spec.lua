@@ -352,6 +352,33 @@ describe("poste-redis exec_run", function()
     assert.truthy(r:find("***"))
   end)
 
+  it("run_selection_async honors opts.entries (runner-injected batch)", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "USE a", "SELECT 3", "GET x" })
+    stub_emit({
+      vim.json.encode({ type = "result", seq = 1, command = "SELECT 3", status = "OK", latency_ms = 1, value = { type = "string", value = "OK" } }),
+      vim.json.encode({ type = "result", seq = 2, command = "GET x", status = "\"v\"", latency_ms = 1, value = { type = "string", value = "v" } }),
+    })
+    local results, done = {}, {}
+    -- cursor would land on the USE line: without opts.entries the batch
+    -- re-derives to nothing and errors out
+    exec_run.run_selection_async(buf, "cursor", {
+      entries = { entry("SELECT 3"), entry("GET x") },
+      connection = "redis://h:6379/0",
+    }, {
+      on_result = function(ev) results[#results + 1] = ev end,
+      on_done = function() done[#done + 1] = true end,
+    })
+    assert.equals(true, wait_for(done))
+    assert.equals(2, #results)
+    assert.equals(3, results[2].db)
+    local payload = vim.json.decode(emitted.stdin)
+    assert.same({ "SELECT", "3" }, payload.commands[1])
+    assert.same({ "GET", "x" }, payload.commands[2])
+    exec_run.cancel()
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
   it("stamps each result with the db its command ran on (SELECT-aware)", function()
     stub_emit({
       vim.json.encode({ type = "result", seq = 1, command = "GET k", status = "\"v\"", latency_ms = 1, value = { type = "string", value = "v" } }),

@@ -7,6 +7,9 @@ local state = require("poste.state")
 local buffer = require("poste-redis.buffer")
 local history = require("poste-redis.history")
 local indicators = require("poste.indicators")
+local connections = require("poste-redis.connections")
+local redis_state = require("poste-redis.state")
+local orig_resolve = connections.resolve_redis_url
 
 local SIGN_GROUP = "poste_sg_4a7f_indicator"
 
@@ -50,6 +53,12 @@ describe("poste-redis runner indicators", function()
     exec_run.run_selection_async = orig_run_selection
     exec_run.run_file_async = orig_run_file
     state.find_poste_binary = orig_find_binary
+    -- context leaks: a stubbed resolve or a stale current_url would make a
+    -- later render fire the winbar TTL probe through the fake binary
+    connections.resolve_redis_url = orig_resolve
+    redis_state.current_url = nil
+    redis_state.context.connection = nil
+    redis_state.context.db = nil
     pcall(vim.api.nvim_buf_delete, src, { force = true })
   end)
 
@@ -96,6 +105,48 @@ describe("poste-redis runner indicators", function()
     assert.is_true(has_sign(src, 1, "PosteIndicatorSuccess"))
     assert.is_true(has_sign(src, 2, "PosteIndicatorSuccess"))
     assert.is_false(has_sign(src, 0, "PosteIndicatorSuccess"))
+  end)
+
+  it("actually executes the injected SELECT through the real transport path", function()
+    -- regression: the runner once injected into ITS entry list while
+    -- exec_run re-derived entries from the buffer — the SELECT never ran,
+    -- db stayed 0, and the GET's success indicator was stolen by the SELECT
+    local cli = require("poste.cli")
+    local session_conn = require("poste-redis.session_conn")
+    local orig_run_async = cli.run_async
+    local orig_execute = session_conn.execute
+    cli.run_async = function(_cmd, opts)
+      local payload = vim.json.decode(opts.stdin)
+      assert.same({ "SELECT", "3" }, payload.commands[1])
+      assert.same({ "GET", "session:abc" }, payload.commands[2])
+      -- async emission (matches the real jobstart ordering: on_start fires
+      -- before any result lands, so success replaces the spinners)
+      vim.schedule(function()
+        opts.on_stdout({
+          vim.json.encode({ type = "result", seq = 1, command = "SELECT 3", status = "OK", latency_ms = 1, value = { type = "string", value = "OK" } }),
+          vim.json.encode({ type = "result", seq = 2, command = "GET session:abc", status = "\"v\"", latency_ms = 1, value = { type = "string", value = "v" } }),
+          vim.json.encode({ type = "summary", total = 2, failed = 0, elapsed_ms = 1 }),
+        })
+        opts.on_stderr({})
+        opts.on_exit(0)
+      end)
+      return 99
+    end
+    -- the sandbox has no connections.toml, and the winbar TTL probe would
+    -- hit the fake binary via the session
+    connections.resolve_redis_url = function(_name) return "redis://stub:6379/0", nil end
+    session_conn.execute = function() return "skipped" end
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE local", "SELECT 3", "GET session:abc" })
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    runner.run_selection("cursor")
+    -- SELECT rebinds on its own line, GET succeeds on its own line
+    assert.is_true(vim.wait(2000, function()
+      return has_sign(src, 1, "PosteIndicatorSuccess")
+        and has_sign(src, 2, "PosteIndicatorSuccess")
+    end, 10), "success indicators never landed")
+    cli.run_async = orig_run_async
+    session_conn.execute = orig_execute
+    connections.resolve_redis_url = orig_resolve
   end)
 
   it("places success on the source buffer when running the file", function()

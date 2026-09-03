@@ -373,14 +373,19 @@ function M.run_selection_async(buf, mode, opts, callbacks)
   opts = opts or {}
   callbacks = callbacks or {}
   local my_seq = exec_seq
-  local entries
-  if mode == "visual" then
-    -- opts.range is captured by the visual keymap while the selection is live.
-    -- When absent (tests / programmatic), fall back to the '< '>' marks.
-    entries = parser.visual_entries(buf, opts.range)
-  else
-    local e = parser.cursor_entry(buf)
-    entries = e and { e } or {}
+  local entries = opts.entries
+  if not entries then
+    -- derive from the buffer; callers that precompute entries (runner's
+    -- SELECT re-injection) pass them via opts.entries — both sides must
+    -- agree on the batch or indicators/db stamps misalign
+    if mode == "visual" then
+      -- opts.range is captured by the visual keymap while the selection is live.
+      -- When absent (tests / programmatic), fall back to the '< '>' marks.
+      entries = parser.visual_entries(buf, opts.range)
+    else
+      local e = parser.cursor_entry(buf)
+      entries = e and { e } or {}
+    end
   end
   if #entries == 0 then
     guarded(my_seq, callbacks.on_error, "No command at cursor", "")()

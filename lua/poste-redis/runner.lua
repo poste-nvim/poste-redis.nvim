@@ -134,7 +134,7 @@ function M.run_selection(mode, range)
   local ok, indicators = pcall(require, "poste.indicators")
   if ok then indicators.clear_all(src) end
 
-  exec_run.run_selection_async(src, mode, { range = range }, {
+  exec_run.run_selection_async(src, mode, { range = range, entries = entries }, {
     on_start = function(seq, _)
       local ok, indicators = pcall(require, "poste.indicators")
       if ok then
