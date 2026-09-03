@@ -75,6 +75,12 @@ function M.setup()
   define_if_empty("PosteRedisBrowserSearchHint", "#808080")
   link_if_empty("PosteRedisBrowserSearchText", hint_target)
 
+  -- Browser winbar db scope: the same orange as collection folders. The
+  -- separator rule links @comment (Comment when the theme lacks @comment).
+  define_if_empty("PosteRedisBrowserWinbarDb", "#D19A66")
+  local sep_target = vim.fn.hlexists("@comment") == 1 and "@comment" or "Comment"
+  link_if_empty("PosteRedisBrowserSep", sep_target)
+
   -- Key browser tree icons: gray expand/collapse markers, blue folder,
   -- green string, orange collections (zset/hash/list/set), purple everything
   -- else. Explicit fg so the palette is stable across colorschemes; users
@@ -104,6 +110,7 @@ function M.setup()
     "PosteRedisResultCell", "PosteRedisResultSearchMatch", "PosteRedisResultSearchCurrent",
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
     "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
+    "PosteRedisBrowserWinbarDb", "PosteRedisBrowserSep",
     "PosteRedisBrowserMarker", "PosteRedisBrowserConn", "PosteRedisBrowserDb",
     "PosteRedisBrowserGroup", "PosteRedisBrowserString",
     "PosteRedisBrowserCollection", "PosteRedisBrowserOther",

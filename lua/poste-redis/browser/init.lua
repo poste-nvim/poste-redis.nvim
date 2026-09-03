@@ -1,6 +1,8 @@
 --- Redis key browser window (M2, P1-1/P1-2).
 ---
---- Layout (v3):
+--- Layout (v4):
+---   winbar              <- db scope (orange), display-only chrome; <Space>
+---                          pops the db picker dropdown anywhere in the buffer
 ---   <search>            <- search bar (line 1): <leader>/ focuses it, <CR>
 ---                          runs async.search on the selected db, empty + <CR>
 ---                          clears it. The bar is a fixed icon prefix; the
@@ -8,9 +10,7 @@
 ---                          committed query stays on the line in a hint
 ---                          highlight — neither is ever part of the query.
 ---                          `/` is left alone for nvim's own buffer search.
----   [ db 0]           <- db select (line 2): <Space> pops a dropdown list;
----                          picking a db re-scans it and backfills the name.
----   ------              <- separator (line 3) between header and key rows.
+---   ------              <- separator (line 2) between header and key rows.
 ---   tree                <- the selected db's groups + flat keys as top level
 ---                          (the db node itself is the hidden display_root).
 ---                          While a search is active the results node is the
@@ -54,10 +54,25 @@ local search_query = ""
 --- batch-deletes the selection. Selected nodes render with a ✓ marker.
 local multi_select = { active = false, selected = {} }
 
---- Header text for line 2 (db select).
+--- Winbar text (db scope, orange). Display-only chrome: <Space> anywhere in
+--- the buffer pops the picker; picking a db re-scans it and repaints this.
 local function db_select_text()
   -- \239\135\128 = db icon U+F1C0 (explicit escape: reviewable bytes)
-  return "[\239\135\128 db " .. tostring(current_db) .. "]"
+  return "\239\135\128 db " .. tostring(current_db)
+end
+
+--- Paint the db scope into the browser window's winbar. The window handle is
+--- re-resolved the same way separator_text does — browser_win can be stale
+--- after :q / split churn. db text is plugin-generated (icon + number), no
+--- %-escaping needed.
+local function update_winbar()
+  local win = browser_win
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    win = browser_buf and vim.api.nvim_buf_is_valid(browser_buf) and vim.fn.bufwinid(browser_buf) or nil
+  end
+  if not win or win == -1 then return end
+  vim.api.nvim_set_option_value("winbar",
+    "%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. "%*", { win = win })
 end
 
 --- Header text for line 1 (search bar): the committed query only — the icon
@@ -116,10 +131,9 @@ local function update_browser_width()
   if not win or win == -1 then return end
 
   local content = tree.last_content_width or 0
-  -- header chrome to keep in view: the search bar + db select (separator is 3)
-  for i = 1, 2 do
-    content = math.max(content, vim.fn.strdisplaywidth(tree.header_lines[i] or ""))
-  end
+  -- header chrome to keep in view: the search bar only (the separator is
+  -- width-derived and excluded; the db scope lives in the winbar)
+  content = math.max(content, vim.fn.strdisplaywidth(tree.header_lines[1] or ""))
   local min_w = math.max(1, math.floor(tonumber(config.config.browser_min_width) or 30))
   min_w = math.max(min_w, opened_width)
   local ratio = tonumber(config.config.browser_width_max_ratio) or 0.7
@@ -138,14 +152,15 @@ local function render_tree()
     -- a render fired mid-edit (paced SCAN batch): keep the in-progress text
     search_line = vim.api.nvim_buf_get_lines(browser_buf, 0, 1, false)[1] or search_line
   end
-  tree.header_lines = { search_line, db_select_text(), separator_text() }
+  tree.header_lines = { search_line, separator_text() }
   tree.display_root = display_root_node()
   line_to_node = tree.render_tree(browser_buf, line_to_node, { tree.display_root },
     multi_select.active and multi_select or nil)
   if not search_active then
     tree.decorate_search_line(browser_buf, search_query)
   end
-  tree.decorate_separator(browser_buf, tree.header_lines[3])
+  tree.decorate_separator(browser_buf, tree.header_lines[2])
+  update_winbar()
   update_browser_width()
 end
 
@@ -191,7 +206,7 @@ local function select_db(db)
 end
 
 --- <Space>: pop a dropdown listing dbs of the current connection; picking one
---- re-scans it and backfills the db select line.
+--- re-scans it and repaints the winbar scope.
 local function pick_db()
   if not current_conn then return end
   local items = {}
@@ -475,7 +490,7 @@ local function setup_browser_buffer()
   vim.api.nvim_buf_set_name(browser_buf, "poste://redis_browser")
 
   --- The separator dash count derives from the window width, so a split
-  --- resize must refresh line 3 — otherwise a rule written for a wider
+  --- resize must refresh line 2 — otherwise a rule written for a wider
   --- split wraps onto two lines once the browser narrows. Refresh only the
   --- separator (cheap), never the whole tree. Skipped while the search bar
   --- is being edited: modifiable flips mid-insert would break typing; the
@@ -487,7 +502,7 @@ local function setup_browser_buffer()
       if search_active then return end
       if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
       if vim.fn.bufwinid(browser_buf) == -1 then return end
-      tree.set_header_line(browser_buf, separator_text(), 3)
+      tree.set_header_line(browser_buf, separator_text(), 2)
     end,
   })
 

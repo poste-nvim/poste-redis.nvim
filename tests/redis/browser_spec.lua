@@ -60,7 +60,7 @@ describe("poste-redis browser tree", function()
     assert.match("\239\132\135", lines[2])
   end)
 
-  it("maps buffer lines to nodes via get_node_at_line (3 header lines offset)", function()
+  it("maps buffer lines to nodes via get_node_at_line (2 header lines offset)", function()
     local conn = tree.make_connection_node({ name = "c", url = "u", dialect = "redis" })
     local db = tree.make_db_node({ db = 1 }, "c")
     local key = tree.make_key_node("k", "c", 1)
@@ -69,15 +69,13 @@ describe("poste-redis browser tree", function()
     conn.expanded = true
     db.expanded = true
     local _, node_map = tree.flatten_tree({ conn })
-    -- HEADER_LINES = 3: search bar (1) + db select (2) + separator (3),
-    -- nodes start at line 4
+    -- HEADER_LINES = 2: search bar (1) + separator (2), nodes start at line 3
     assert.is_nil(tree.get_node_at_line(node_map, 1))
     assert.is_nil(tree.get_node_at_line(node_map, 2))
-    assert.is_nil(tree.get_node_at_line(node_map, 3))
-    assert.equals(conn, tree.get_node_at_line(node_map, 4))
-    assert.equals(db, tree.get_node_at_line(node_map, 5))
-    assert.equals(key, tree.get_node_at_line(node_map, 6))
-    assert.is_nil(tree.get_node_at_line(node_map, 7))
+    assert.equals(conn, tree.get_node_at_line(node_map, 3))
+    assert.equals(db, tree.get_node_at_line(node_map, 4))
+    assert.equals(key, tree.get_node_at_line(node_map, 5))
+    assert.is_nil(tree.get_node_at_line(node_map, 6))
   end)
 end)
 
@@ -377,12 +375,12 @@ describe("poste-redis browser search bar", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
-  it("separator rule lands under the db select (3 header lines)", function()
+  it("separator rule lands under the search bar (2 header lines)", function()
     local buf = vim.api.nvim_create_buf(false, true)
     local sep = browser._test.separator_text()
     assert.truthy(sep:find("^%-+$"), "separator is a dash rule")
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { prefix, "[ db 0]", sep })
-    assert.match("^%-+$", vim.api.nvim_buf_get_lines(buf, 2, 3, false)[1])
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { prefix, sep })
+    assert.match("^%-+$", vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1])
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
@@ -399,7 +397,7 @@ describe("poste-redis browser search bar", function()
 
     -- default split: the dash run spans the window, always narrower than it
     local w = vim.api.nvim_win_get_width(win)
-    local sep = vim.api.nvim_buf_get_lines(buf, 2, 3, false)[1]
+    local sep = vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1]
     assert.match("^%-+$", sep)
     assert.is_true(#sep <= w - 1,
       "separator must fit one line (got " .. #sep .. " dashes in " .. w .. " cols)")
@@ -409,7 +407,7 @@ describe("poste-redis browser search bar", function()
     pcall(vim.api.nvim_win_set_width, win, 12)
     vim.api.nvim_exec_autocmds("WinResized", {})
     local w2 = vim.api.nvim_win_get_width(win)
-    sep = vim.api.nvim_buf_get_lines(buf, 2, 3, false)[1]
+    sep = vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1]
     assert.match("^%-+$", sep)
     assert.equals(math.max(w2 - 6, math.min(8, w2 - 1)), #sep,
       "separator length must match the narrowed width")
@@ -485,11 +483,13 @@ describe("poste-redis browser window", function()
       return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
     end, 5), "db scan did not render")
 
-    -- idle state: the icon is virt text, so line 1 holds no icon/query
+    -- idle state: the icon is virt text, so line 1 holds no icon/query;
+    -- the db scope lives in the winbar, the separator is buffer line 2
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     assert.equals("", lines[1])
-    assert.match("db 0%]", lines[2])  -- glyph-agnostic: icon sits before "db"
-    assert.match("^%-+$", lines[3])
+    assert.match("^%-+$", lines[2])
+    assert.match("db 0",
+      vim.api.nvim_get_option_value("winbar", { win = browser.info().window }))
     local joined = table.concat(lines, "\n")
     assert.is_true(joined:find("plain", 1, true) ~= nil, "unfiltered tree missing")
 
@@ -763,7 +763,7 @@ describe("poste-redis browser auto-width", function()
     }
     db.expanded = true
     tree.display_root = db
-    tree.header_lines = { "", "[ db 0]", "----------------" }
+    tree.header_lines = { "", "----------------" }
     tree.render_tree(buf, {}, { db })
     tree.display_root = nil
     local icons = require("poste-redis.icons")
@@ -1440,15 +1440,15 @@ describe("poste-redis browser gray text (hint / separator)", function()
     assert.match("user:1$", lines[2])
   end)
 
-  it("decorates the db separator line in gray", function()
+  it("decorates the separator line gray via @comment", function()
     local buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "", "----------" })
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "----------" })
     tree.decorate_separator(buf, "----------")
     local ns = vim.api.nvim_create_namespace("poste_redis_browser_header")
     local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
     assert.equals(1, #marks)
-    assert.equals("PosteRedisBrowserMarker", marks[1][4].hl_group)
-    assert.equals(2, marks[1][2])  -- line 3 (0-based 2)
+    assert.equals("PosteRedisBrowserSep", marks[1][4].hl_group)
+    assert.equals(1, marks[1][2])  -- line 2 (0-based 1)
   end)
 end)
 

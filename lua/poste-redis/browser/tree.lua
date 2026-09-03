@@ -32,17 +32,17 @@ local KEY_HL = icons.KEY_HL
 
 local hl_ns = vim.api.nvim_create_namespace("poste_redis_browser")
 
--- Three header lines above the tree: line 1 = search bar, line 2 = db
--- select, line 3 = separator rule under the select. Every node line sits
--- below them; line math (append_children, apply_highlights,
--- get_node_at_line) offsets by this constant.
-local HEADER_LINES = 3
+-- Two header lines above the tree: line 1 = search bar, line 2 = separator
+-- rule under it. The db scope lives in the window winbar, not a buffer line.
+-- Every node line sits below the headers; line math (append_children,
+-- apply_highlights, get_node_at_line) offsets by this constant.
+local HEADER_LINES = 2
 
 M.HEADER_LINES = HEADER_LINES
 
 --- Header lines rendered above the tree. Set by browser/init.lua:
----   [1] search bar, [2] db select, [3] separator.
-M.header_lines = { "", "", "" }
+---   [1] search bar, [2] separator.
+M.header_lines = { "", "" }
 
 --- When set, this node is the hidden display root: its own line is not
 --- rendered; its children become the top level (depth 0). Used by the new
@@ -353,7 +353,7 @@ M.last_truncated = 0
 M.last_content_width = 0
 
 --- Write the flattened tree into the browser buffer, prepending the two
---- header lines (search bar + db select) from M.header_lines.
+--- header lines (search bar + separator) from M.header_lines.
 --- @param browser_buf number
 --- @param line_to_node table[]  (in/out: replaced)
 --- @param root_nodes table[]
@@ -399,10 +399,10 @@ function M.render_tree(browser_buf, line_to_node, root_nodes, multi_select)
 end
 
 --- Replace only one header line without re-rendering the tree. Used while
---- typing in the search input or refreshing the db select.
+--- typing in the search input or refreshing the separator.
 --- @param buf number
 --- @param text string
---- @param line number 1-based header line (1 = search, 2 = db select)
+--- @param line number 1-based header line (1 = search, 2 = separator)
 function M.set_header_line(buf, text, line)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
   local idx = (line or 1) - 1
@@ -473,17 +473,18 @@ function M.clear_search_decoration(buf)
   vim.api.nvim_buf_clear_namespace(buf, search_ns, 0, -1)
 end
 
---- Gray the header separator line (line 3) so the db select reads as chrome.
+--- Gray the header separator line (line 2) so the key rows below read as a
+--- separate area.
 --- @param buf number
---- @param text string  the separator text currently on line 3
+--- @param text string  the separator text currently on line 2
 function M.decorate_separator(buf, text)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
-  vim.api.nvim_buf_clear_namespace(buf, header_ns, 2, 3)
+  vim.api.nvim_buf_clear_namespace(buf, header_ns, 1, 2)
   if not text or text == "" then return end
-  vim.api.nvim_buf_set_extmark(buf, header_ns, 2, 0, {
-    end_row = 2,
+  vim.api.nvim_buf_set_extmark(buf, header_ns, 1, 0, {
+    end_row = 1,
     end_col = #text,
-    hl_group = "PosteRedisBrowserMarker",
+    hl_group = "PosteRedisBrowserSep",
   })
 end
 
