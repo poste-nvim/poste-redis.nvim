@@ -648,10 +648,18 @@ function M.toggle_view(mode)
   end
   M.search_clear()
   if current_db_node and current_db_node.children then
+    -- Rebuild from key ENTRIES, not raw names: serialize type/size so the
+    -- fresh key nodes keep their icons + type highlights (a name-only rebuild
+    -- makes every key render as the default string icon + purple "other",
+    -- and fetch_types never re-runs after a view toggle).
     local keys = {}
     local function collect(node)
       if node.node_type == "key" then
-        keys[#keys + 1] = node.name
+        keys[#keys + 1] = {
+          name = node.name,
+          type = node.meta and node.meta.type,
+          size = node.meta and node.meta.size,
+        }
       elseif node.children then
         for _, c in ipairs(node.children) do collect(c) end
       end

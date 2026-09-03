@@ -174,6 +174,60 @@ describe("poste-redis browser async grouping", function()
     assert.equals("nested", async.toggle_view_mode())
   end)
 
+  it("build_children preserves key type/size through a view rebuild", function()
+    -- Regression: toggle_view collected names only, so rebuilding into the
+    -- other view made every key render as the default string icon + purple
+    -- "other" highlight (meta.type was dropped).
+    async.set_view_mode("flatten")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local typed = {
+      { name = "cache:a", type = "string", size = "4" },
+      { name = "user:1", type = "hash", size = "2" },
+      { name = "user:2", type = "zset", size = "5" },
+      { name = "plain", type = "string" },
+    }
+    async._test.build_children(db, typed, "c", 0)
+    -- flatten: group user holds its typed keys, cache + plain flat
+    local hashes = {}
+    for _, ch in ipairs(db.children) do
+      if ch.node_type == "group" then
+        for _, k in ipairs(ch.children) do hashes[k.name] = k end
+      else
+        hashes[ch.name] = ch
+      end
+    end
+    assert.equals("hash", hashes["user:1"].meta.type)
+    assert.equals("2", hashes["user:1"].meta.size)
+    assert.equals("zset", hashes["user:2"].meta.type)
+    assert.equals("string", hashes["cache:a"].meta.type)
+    assert.equals("string", hashes["plain"].meta.type)
+  end)
+
+  it("nested rebuild carries types into the deepest folder leaf", function()
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    async._test.build_children(db, {
+      { name = "a:b:c", type = "list", size = "3" },
+      { name = "a:b", type = "string" },
+      { name = "a:d", type = "set" },
+    }, "c", 0)
+    local a = db.children[1]
+    assert.equals("list", a.children[1].children[1].meta.type)  -- folder b → a:b:c
+    assert.equals("3", a.children[1].children[1].meta.size)
+    assert.equals("string", a.children[2].meta.type)
+    assert.equals("set", a.children[3].meta.type)
+  end)
+
+  it("build_children still accepts plain string keys", function()
+    async.set_view_mode("flatten")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    async._test.build_children(db, { "a", "b:1" }, "c", 0)
+    assert.equals("a", db.children[1].name)
+    assert.is_nil(db.children[1].meta.type)
+    assert.equals("b", db.children[2].name)
+    assert.is_nil(db.children[2].children[1].meta.type)
+  end)
+
   it("scan_group builds nested subfolders lazily in nested view", function()
     async.set_view_mode("nested")
     local session_conn = require("poste-redis.session_conn")
@@ -212,7 +266,7 @@ describe("poste-redis browser async grouping", function()
 
   it("view_mode default follows config.browser_view_mode", function()
     local config = require("poste-redis.config")
-    assert.equals("nested", config.defaults.browser_view_mode)
+    assert.equals("flat", config.defaults.browser_view_mode)
   end)
 
   it("load_connections keeps only redis-dialect entries", function()
@@ -421,6 +475,7 @@ describe("poste-redis browser window", function()
       return "dispatched"
     end
 
+    async.set_view_mode("flatten")
     local ok, err = pcall(function() browser.open() end)
     assert.is_true(ok, tostring(err))
     local buf = browser.info().buffer
@@ -1426,6 +1481,7 @@ describe("poste-redis browser delete node + multi-select", function()
       end
       return "dispatched"
     end
+    async.set_view_mode("flatten")  -- db scan stubs yield user:/cache: groups
     browser.open({ source_buf = vim.api.nvim_get_current_buf() })
     browser._test.select_db(0)
     vim.wait(2000, function()

@@ -313,6 +313,26 @@ local function build_group_headers(node, keys, conn_name, db, from)
   return new_nodes
 end
 
+--- Key entries in a rebuild key list may be plain strings (scan/tests) or
+--- `{ name = ..., type = ..., size = ... }` tables (toggle_view preserves the
+--- typed metadata so icons/highlights survive a view rebuild).
+--- @param e string|table
+--- @return string name
+local function key_entry_name(e)
+  return type(e) == "table" and e.name or e or ""
+end
+
+--- @param e string|table
+--- @return table|nil key-node opts ({ type, size }) for typed entries
+local function key_entry_meta(e)
+  if type(e) ~= "table" then return nil end
+  local meta = {}
+  if e.type then meta.type = e.type end
+  if e.size then meta.size = e.size end
+  if next(meta) then return meta end
+  return nil
+end
+
 --- Recursively build a nested folder tree (方案B) from a flat key list: each
 --- `:`-segment nest is one folder level, keys hang as leaves in the folder of
 --- their longest proper prefix. A key equal to a folder prefix (e.g. `a:b`
@@ -320,7 +340,7 @@ end
 --- nest at most SPLIT_NEST deep; deeper segments stay flat inside the deepest
 --- folder. Used by toggle_view (rebuild) and tests.
 --- @param node table db/group node
---- @param keys string[] full keys whose prefix equals node.meta.prefix
+--- @param keys (string|table)[] full keys whose prefix equals node.meta.prefix
 --- @param conn_name string
 --- @param db number
 --- @param depth number current folder depth (db node → 0)
@@ -329,15 +349,17 @@ local function build_nested_children(node, keys, conn_name, db, depth)
   local prefix = node.meta.prefix or ""
   if depth >= SPLIT_NEST then
     for _, k in ipairs(keys) do
-      table.insert(node.children, tree.make_key_node(k, conn_name, db))
+      table.insert(node.children, tree.make_key_node(
+        key_entry_name(k), conn_name, db, key_entry_meta(k)))
     end
     return
   end
   local buckets, order, leaves = {}, {}, {}
   for _, k in ipairs(keys) do
     -- key minus the folder's own prefix ("a:b" under prefix "a" → "b")
-    local rest = k
-    if prefix ~= "" then rest = k:sub(#prefix + 2) end
+    local name = key_entry_name(k)
+    local rest = name
+    if prefix ~= "" then rest = name:sub(#prefix + 2) end
     local seg = rest:match("^([^:]+):(.+)$")
     if seg then
       if not buckets[seg] then buckets[seg] = {}; order[#order + 1] = seg end
@@ -346,7 +368,7 @@ local function build_nested_children(node, keys, conn_name, db, depth)
       table.insert(leaves, k)
     end
   end
-  table.sort(leaves)
+  table.sort(leaves, function(a, b) return key_entry_name(a) < key_entry_name(b) end)
   table.sort(order)
   for _, seg in ipairs(order) do
     local child_prefix = (prefix == "" and seg) or (prefix .. ":" .. seg)
@@ -356,21 +378,25 @@ local function build_nested_children(node, keys, conn_name, db, depth)
     build_nested_children(group, buckets[seg], conn_name, db, depth + 1)
   end
   for _, k in ipairs(leaves) do
-    table.insert(node.children, tree.make_key_node(k, conn_name, db))
+    table.insert(node.children, tree.make_key_node(
+      key_entry_name(k), conn_name, db, key_entry_meta(k)))
   end
 end
 
 --- Full eager build of a db node's children from a flat key list, grouping by
 --- `:` prefix when tree view is on. Used by toggle_view (rebuild) and tests.
+--- Keys are plain names or `{ name, type, size }` entries (type/size survive
+--- the rebuild so icons + highlights don't reset to the string/default).
 --- @param node table db node
---- @param keys string[]
+--- @param keys (string|table)[]
 --- @param conn_name string
 --- @param db number
 local function build_children(node, keys, conn_name, db)
   node.children = {}
   if not M.tree_view or #keys == 0 then
     for _, k in ipairs(keys) do
-      table.insert(node.children, tree.make_key_node(k, conn_name, db))
+      table.insert(node.children, tree.make_key_node(
+        key_entry_name(k), conn_name, db, key_entry_meta(k)))
     end
     return
   end
@@ -380,9 +406,11 @@ local function build_children(node, keys, conn_name, db)
   end
   local buckets, order = {}, {}
   for _, k in ipairs(keys) do
-    local seg = k:match("^([^:]+):") or ""
+    local name = key_entry_name(k)
+    local seg = name:match("^([^:]+):") or ""
     if seg == "" then
-      table.insert(node.children, tree.make_key_node(k, conn_name, db))
+      table.insert(node.children, tree.make_key_node(
+        key_entry_name(k), conn_name, db, key_entry_meta(k)))
     else
       local b = buckets[seg]
       if not b then b = { keys = {} }; buckets[seg] = b; order[#order + 1] = seg end
@@ -394,7 +422,8 @@ local function build_children(node, keys, conn_name, db)
     local group = tree.make_group_node(seg, conn_name, db)
     group.children = {}
     for _, k in ipairs(buckets[seg].keys) do
-      table.insert(group.children, tree.make_key_node(k, conn_name, db))
+      table.insert(group.children, tree.make_key_node(
+        key_entry_name(k), conn_name, db, key_entry_meta(k)))
     end
     table.insert(node.children, group)
   end
