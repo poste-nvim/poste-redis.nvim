@@ -61,7 +61,8 @@ local function db_select_text()
   return "\239\135\128 db " .. tostring(current_db)
 end
 
---- Paint the db scope into the browser window's winbar. The window handle is
+--- Paint the db scope into the browser window's winbar, right-aligned
+--- (`%=` splits the winbar into left/right halves). The window handle is
 --- re-resolved the same way separator_text does — browser_win can be stale
 --- after :q / split churn. db text is plugin-generated (icon + number), no
 --- %-escaping needed.
@@ -72,7 +73,7 @@ local function update_winbar()
   end
   if not win or win == -1 then return end
   vim.api.nvim_set_option_value("winbar",
-    "%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. "%*", { win = win })
+    "%=%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. " %*", { win = win })
 end
 
 --- Header text for line 1 (search bar): the committed query only — the icon
