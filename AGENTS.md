@@ -48,6 +48,9 @@ Never write `poste_redis_*` as a command name; commands are `:PosteRedis*`.
   helper; satellites stay decoupled (copy/vendor, never `require`)
 - Tests are part of the change: `tests/run.sh` + no new luacheck warnings
   before every commit; new modules get a spec; internals exposed via `M._test`
+- Drawing is layered: pure layout (no `vim.*`) → vim-API application →
+  highlight *names* only at render sites (definitions live in
+  `highlights.lua`); one extmark namespace per visual layer
 - File add/split/rename updates `docs/dev/file-index.md` in the same commit
 
 ## Lua Pitfalls

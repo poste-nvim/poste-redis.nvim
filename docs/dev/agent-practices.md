@@ -94,6 +94,75 @@ be fixed in only one place:
 - Any file add/split/rename/retire updates `docs/dev/file-index.md` in the
   same commit — the index is the map agents navigate by.
 
+## 5. Neovim API conventions (drawing, buffers, lifecycle)
+
+### Separate data, layout, and drawing — yes, it's worth it
+
+The payoff is testability and theme-ability, not architecture points:
+
+- **Data stays raw**: `format.lua` keeps each cell's real value and exposes
+  `to_display` (padded text) and `to_copy` (what the user yanks) separately —
+  once display text is the only copy, yank fidelity is lost.
+- **Layout is pure** (no `vim.*` calls): `result/grid.lua` computes display
+  widths, rendered lines, and per-cell byte ranges (`col_starts`) as plain
+  functions, so it runs headless in specs (and stays portable).
+- **Drawing applies it**: `buffer/view.lua` owns the only
+  `nvim_buf_set_lines` / extmark calls and maps pure byte ranges onto buffer
+  lines.
+- **Highlight definitions live in `highlights.lua`**; render sites reference
+  the *names* (`"PosteRedisResultCell"`). Never hardcode colors or
+  `vim.cmd("hi ...")` at a render site — users re-link groups to re-theme.
+
+Don't force this on small features: a renderer emitting `{ line, hl_name }`
+pairs inline (browser/tree.lua) is fine. The split pays when layout math gets
+nontrivial (grids, floats, column maps), not for one-line highlights.
+
+### Extmarks: one namespace per visual layer
+
+`buffer/view.lua` layers value colors (priority 50), search matches (150),
+and the cursor-cell highlight (200) in three namespaces, so each layer is
+cleared and redrawn independently (`clear_namespace` per namespace) and
+priority decides stacking. One shared namespace means clearing search wipes
+the cursor highlight — the bug this pattern prevents.
+
+### Scratch buffers and windows
+
+- Panel/browser buffers follow one recipe: `nofile` + `bufhidden=hide` +
+  `swapfile=false` + `modifiable=false` by default, a `poste://…` name, and
+  a filetype for syntax.
+- Toggle `modifiable` around every `nvim_buf_set_lines`, and pass an explicit
+  end index (`nvim_buf_line_count`) — nvim 0.12's `set_lines(-1)` path can
+  starve job stdout while results stream in (see view.lua / tree.lua notes).
+- Set options scoped (`nvim_set_option_value(..., { buf = } / { win = })`),
+  not globally.
+- Check `nvim_win_is_valid` before use; pcall `nvim_win_close` /
+  `nvim_buf_delete` on teardown; re-home the panel when the tabpage changed
+  (`buffer.show_panel`'s panel_tabpage logic).
+- Autocmds registered with `buffer = buf` die with the buffer; ones created
+  manually (WinResized, WinScrolled) are tracked by id and deleted on close.
+
+### uv callbacks are a fast context
+
+uv timer callbacks run where nvim API calls are forbidden — wrap the body
+with `vim.schedule_wrap` (async.lua `arm_flush`). This is the complement of
+the AGENTS.md pitfall: no `vim.schedule` inside job event callbacks, but
+always `schedule_wrap` inside uv callbacks.
+
+### Keymaps
+
+Bind feature keys only through `config.get_keymap(section, action, default)`
+with the `if k then` guard — `false` disables a binding, everything else is
+user-overridable. Hardcoded `vim.keymap.set` keys bypass the override layer
+(the accepted exception: close keys on an ephemeral float the plugin owns).
+
+### Testing UI code headless
+
+Stub transport/IO by save-replace-restore (`session_conn.execute`,
+`vim.ui.input`) inside the spec and restore in the same test — see the scan
+tests in browser_spec. Assert on real buffer content via
+`nvim_buf_get_lines`; plenary runs real windows in the isolated XDG, so no
+mocking framework is needed.
+
 ## Pre-commit checklist
 
 - [ ] The touched module still has one job — if the diff pushed a file past
@@ -101,6 +170,8 @@ be fixed in only one place:
 - [ ] No logic duplicated that already exists in `util` / `format` / the
       owning module
 - [ ] Dependency graph still acyclic; no new `require` of a DB/HTTP satellite
+- [ ] Render sites reference highlight *names* only — no inline colors,
+      no `vim.cmd("hi …")`; new visual layer → new extmark namespace
 - [ ] `luacheck lua tests` — no new warnings
 - [ ] `tests/run.sh` green
 - [ ] `docs/dev/file-index.md` updated if files moved/appeared/disappeared
