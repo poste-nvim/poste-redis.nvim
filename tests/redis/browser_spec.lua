@@ -2,6 +2,7 @@
 --- no transport: build_children/flatten/fetch_command are tested directly).
 local tree = require("poste-redis.browser.tree")
 local async = require("poste-redis.browser.async")
+local scan = require("poste-redis.browser.scan")
 local value = require("poste-redis.browser.value")
 
 describe("poste-redis browser tree", function()
@@ -84,7 +85,7 @@ describe("poste-redis browser async grouping", function()
   it("builds flat children in flat view", function()
     async.set_view_mode("flat")
     local db = tree.make_db_node({ db = 0 }, "c")
-    async._test.build_children(db, { "a", "b:1", "c" }, "c", 0)
+    scan._test.build_children(db, { "a", "b:1", "c" }, "c", 0)
     assert.equals(3, #db.children)
     assert.equals("key", db.children[1].node_type)
     assert.equals("a", db.children[1].name)
@@ -93,7 +94,7 @@ describe("poste-redis browser async grouping", function()
   it("buckets keys by first : segment in tree view", function()
     async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "c")
-    async._test.build_children(db, { "user:1", "user:2", "cache:a", "plain" }, "c", 0)
+    scan._test.build_children(db, { "user:1", "user:2", "cache:a", "plain" }, "c", 0)
     -- plain stays flat; user/cache become group nodes
     local groups, flat = {}, {}
     for _, ch in ipairs(db.children) do
@@ -112,7 +113,7 @@ describe("poste-redis browser async grouping", function()
   it("sorts group buckets alphabetically", function()
     async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "c")
-    async._test.build_children(db, { "z:a", "a:x", "m:k" }, "c", 0)
+    scan._test.build_children(db, { "z:a", "a:x", "m:k" }, "c", 0)
     assert.equals(3, #db.children)
     assert.equals("a", db.children[1].name)
     assert.equals("m", db.children[2].name)
@@ -122,7 +123,7 @@ describe("poste-redis browser async grouping", function()
   it("keeps keys without : flat in tree view", function()
     async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "c")
-    async._test.build_children(db, { "nocolon", "has:colon" }, "c", 0)
+    scan._test.build_children(db, { "nocolon", "has:colon" }, "c", 0)
     local group_count, flat_count = 0, 0
     for _, ch in ipairs(db.children) do
       if ch.node_type == "group" then group_count = group_count + 1
@@ -136,7 +137,7 @@ describe("poste-redis browser async grouping", function()
   it("builds nested folders per : segment (方案B)", function()
     async.set_view_mode("nested")
     local db = tree.make_db_node({ db = 0 }, "c")
-    async._test.build_children(db, { "a:b:c", "a:b", "a:d", "b:c" }, "c", 0)
+    scan._test.build_children(db, { "a:b:c", "a:b", "a:d", "b:c" }, "c", 0)
     -- DB top: only first-segment folders (a, b), no leaves
     assert.equals(2, #db.children)
     assert.equals("a", db.children[1].name)
@@ -187,7 +188,7 @@ describe("poste-redis browser async grouping", function()
       { name = "user:2", type = "zset", size = "5" },
       { name = "plain", type = "string" },
     }
-    async._test.build_children(db, typed, "c", 0)
+    scan._test.build_children(db, typed, "c", 0)
     -- flatten: group user holds its typed keys, cache + plain flat
     local hashes = {}
     for _, ch in ipairs(db.children) do
@@ -207,7 +208,7 @@ describe("poste-redis browser async grouping", function()
   it("nested rebuild carries types into the deepest folder leaf", function()
     async.set_view_mode("nested")
     local db = tree.make_db_node({ db = 0 }, "c")
-    async._test.build_children(db, {
+    scan._test.build_children(db, {
       { name = "a:b:c", type = "list", size = "3" },
       { name = "a:b", type = "string" },
       { name = "a:d", type = "set" },
@@ -222,7 +223,7 @@ describe("poste-redis browser async grouping", function()
   it("build_children still accepts plain string keys", function()
     async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "c")
-    async._test.build_children(db, { "a", "b:1" }, "c", 0)
+    scan._test.build_children(db, { "a", "b:1" }, "c", 0)
     assert.equals("a", db.children[1].name)
     assert.is_nil(db.children[1].meta.type)
     assert.equals("b", db.children[2].name)
@@ -239,7 +240,7 @@ describe("poste-redis browser async grouping", function()
       return "dispatched"
     end
     local group = tree.make_group_node("a", "c", 0)
-    async.scan_group(group, "redis://h", "c")
+    scan.scan_group(group, "redis://h", "c")
     -- subfolder b created lazily (children nil); leaves a:b / a:d direct
     assert.equals("group", group.children[1].node_type)
     assert.equals("b", group.children[1].name)
@@ -258,7 +259,7 @@ describe("poste-redis browser async grouping", function()
       return "dispatched"
     end
     local group = tree.make_group_node("a", "c", 0)
-    async.scan_group(group, "redis://h", "c")
+    scan.scan_group(group, "redis://h", "c")
     assert.equals("key", group.children[1].node_type)  -- all flat, no subfolders
     assert.equals("a:b", group.children[1].name)
     assert.equals(3, #group.children)
@@ -889,7 +890,7 @@ describe("poste-redis browser e2e (live redis)", function()
 
     async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "browser-e2e")
-    async.scan_keys(db, url, "browser-e2e")
+    scan.scan_keys(db, url, "browser-e2e")
     -- SCAN is async; poll for loading to finish
     local wait_ok = vim.wait(10000, function()
       return not db.loading
@@ -914,7 +915,7 @@ describe("poste-redis browser e2e (live redis)", function()
       if ch.node_type == "group" and ch.name == "user" then user = ch end
     end
     assert.is_truthy(user, "user group missing")
-    async.scan_group(user, url, "browser-e2e")
+    scan.scan_group(user, url, "browser-e2e")
     local gwait = vim.wait(10000, function()
       return user.children ~= nil and #user.children >= 2
     end, 10)
@@ -985,7 +986,7 @@ describe("poste-redis browser e2e (live redis)", function()
     vim.wait(3000, function() return seeded end, 5)
 
     local db = tree.make_db_node({ db = 0 }, "nested-e2e")
-    async.scan_keys(db, url, "nested-e2e", "xa1b:*")
+    scan.scan_keys(db, url, "nested-e2e", "xa1b:*")
     assert.is_true(vim.wait(10000, function() return db.children and #db.children >= 1 end, 10),
       "scan xa1b:* produced no folder")
 
@@ -997,7 +998,7 @@ describe("poste-redis browser e2e (live redis)", function()
     assert.is_truthy(top, "folder xa1b missing")
 
     -- expand xa1b → subfolder b (prefix xa1b:b) + direct keys xa1b:b, xa1b:d
-    async.scan_group(top, url, "nested-e2e")
+    scan.scan_group(top, url, "nested-e2e")
     assert.is_true(vim.wait(10000, function() return not top.loading and top.children and #top.children >= 2 end, 10),
       "folder xa1b did not expand")
     local direct = {}
@@ -1012,19 +1013,19 @@ describe("poste-redis browser e2e (live redis)", function()
     assert.is_nil(sub_b.children, "subfolder must stay lazy before expand")
 
     -- expand xa1b:b → key xa1b:b:c
-    async.scan_group(sub_b, url, "nested-e2e")
+    scan.scan_group(sub_b, url, "nested-e2e")
     assert.is_true(vim.wait(10000, function() return not sub_b.loading and sub_b.children and #sub_b.children >= 1 end, 10),
       "subfolder xa1b:b did not expand")
     assert.equals("xa1b:b:c", sub_b.children[1].name)
 
     -- second top prefix zb2 → folder zb2 with key zb2:c
     local db2 = tree.make_db_node({ db = 0 }, "nested-e2e")
-    async.scan_keys(db2, url, "nested-e2e", "zb2:*")
+    scan.scan_keys(db2, url, "nested-e2e", "zb2:*")
     assert.is_true(vim.wait(10000, function() return db2.children and #db2.children >= 1 end, 10),
       "scan zb2:* produced no folder")
     local top2 = db2.children[1]
     assert.equals("zb2", top2.name)
-    async.scan_group(top2, url, "nested-e2e")
+    scan.scan_group(top2, url, "nested-e2e")
     assert.is_true(vim.wait(10000, function() return not top2.loading and top2.children and #top2.children >= 1 end, 10),
       "folder zb2 did not expand")
     assert.equals("zb2:c", top2.children[1].name)

@@ -53,9 +53,9 @@ local function reload(db_node, render)
     notify("Cannot resolve connection: " .. tostring(err), vim.log.levels.ERROR)
     return
   end
-  local async = require("poste-redis.browser.async")
+  local scan = require("poste-redis.browser.scan")
   db_node.children = nil
-  async.scan_keys(db_node, url, db_node.meta.connection)
+  scan.scan_keys(db_node, url, db_node.meta.connection)
 end
 
 ----------------------------------------------------------------------

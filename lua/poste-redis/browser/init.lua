@@ -23,6 +23,7 @@
 local config = require("poste-redis.config")
 local tree = require("poste-redis.browser.tree")
 local async = require("poste-redis.browser.async")
+local scan = require("poste-redis.browser.scan")
 local session_conn = require("poste-redis.session_conn")
 local redis_state = require("poste-redis.state")
 
@@ -185,7 +186,7 @@ local function select_db(db)
   current_db_node = tree.make_db_node({ db = db }, current_conn.name)
   tree.display_root = current_db_node
   search_query = ""
-  async.scan_keys(current_db_node, current_conn.url, current_conn.name)
+  scan.scan_keys(current_db_node, current_conn.url, current_conn.name)
   render_tree()
 end
 
@@ -219,7 +220,7 @@ local current_node  -- forward decl (defined in "Keymap handlers")
 --- @param conn_url string
 local function expand_node(node, conn_url)
   if node.node_type == "group" and not node.children then
-    async.scan_group(node, conn_url, current_conn and current_conn.name)
+    scan.scan_group(node, conn_url, current_conn and current_conn.name)
     node.expanded = true
     return
   end
@@ -365,7 +366,7 @@ local function refresh_node()
   if not current_db_node or not current_conn then return end
   M.search_clear()
   current_db_node.children = nil
-  async.scan_keys(current_db_node, current_conn.url, current_conn.name)
+  scan.scan_keys(current_db_node, current_conn.url, current_conn.name)
 end
 
 --- <leader>/: enter search state — focus the search bar on line 1, insert
@@ -697,7 +698,7 @@ function M.toggle_view(mode)
   M.search_clear()
   if current_db_node and current_conn then
     current_db_node.children = nil
-    async.scan_keys(current_db_node, current_conn.url, current_conn.name)
+    scan.scan_keys(current_db_node, current_conn.url, current_conn.name)
   end
   local label = applied == "nested" and "Nested folders"
     or (applied == "flatten" and "Flatten folders"

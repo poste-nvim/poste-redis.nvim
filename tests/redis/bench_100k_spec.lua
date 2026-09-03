@@ -2,7 +2,7 @@
 --- < 300ms, UI never freezes (requirements §7 / P1-1).
 ---
 --- Gated on REDIS_TEST_URL (live redis; CI service). Seeds 100k keys in
---- batches, then runs browser/async.scan_keys and measures:
+--- batches, then runs browser/scan.scan_keys and measures:
 ---   - first_screen_ms: time until the first SCAN batch renders
 ---   - full_load_ms:    time until the whole scan finishes
 ---   - event_loop_alive: a probe callback fires between batches (UI not frozen)
@@ -11,6 +11,7 @@
 
 local tree = require("poste-redis.browser.tree")
 local async = require("poste-redis.browser.async")
+local scan = require("poste-redis.browser.scan")
 local session_conn = require("poste-redis.session_conn")
 
 local BENCH_KEYS = 100000
@@ -81,7 +82,7 @@ describe("poste-redis M2 exit — 100k-key browser acceptance", function()
       end
     end
 
-    async.scan_keys(db, url, "bench-conn", PREFIX .. "*")
+    scan.scan_keys(db, url, "bench-conn", PREFIX .. "*")
     local done = vim.wait(30000, function() return not db.loading end, 5)
     local full_ms = (vim.loop.hrtime() - t0) / 1e6
     async.render_hook = nil
