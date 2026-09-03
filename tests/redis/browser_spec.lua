@@ -690,6 +690,63 @@ describe("poste-redis browser window", function()
     async.load_connections = orig_load
     session_conn.execute = orig_execute
   end)
+
+  it("toggle_view keeps lazy (unexpanded) groups — re-scans instead of rebuilding", function()
+    local browser = require("poste-redis.browser.init")
+    local session_conn = require("poste-redis.session_conn")
+
+    local orig_load = async.load_connections
+    local orig_execute = session_conn.execute
+    async.load_connections = function(cb)
+      cb({ tree.make_connection_node({
+        name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis",
+      }) })
+    end
+    -- every db-level scan returns the same key set; groups stay LAZY
+    -- (children = nil until expanded)
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        cbs.on_response({ value = { value = { "user:1", "cache:a", "plain" }, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    async.set_view_mode("flatten")
+    local ok, err = pcall(function() browser.open() end)
+    assert.is_true(ok, tostring(err))
+    local buf = browser.info().buffer
+    browser._test.select_db(0)
+    assert.is_true(vim.wait(2000, function()
+      return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
+    end, 5), "db scan did not render")
+
+    local function rows()
+      local out = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      return {
+        user = out:find("user", 1, true) ~= nil,
+        cache = out:find("cache", 1, true) ~= nil,
+        plain = out:find("plain", 1, true) ~= nil,
+      }
+    end
+    assert.is_true(rows().user and rows().cache and rows().plain, "seed rows missing")
+
+    -- toggle flatten -> nested -> flatten. The groups were never expanded, so
+    -- a collect-and-rebuild would drop them; re-scan must bring them back.
+    browser.toggle_view("nested")
+    assert.is_true(vim.wait(2000, function()
+      local r = rows()
+      return r.user and r.cache
+    end, 5), "nested toggle lost rows")
+    browser.toggle_view("flatten")
+    assert.is_true(vim.wait(2000, function()
+      local r = rows()
+      return r.user and r.cache and r.plain
+    end, 5), "flatten toggle lost rows")
+
+    browser.close()
+    async.load_connections = orig_load
+    session_conn.execute = orig_execute
+  end)
 end)
 
 describe("poste-redis browser value page commands", function()

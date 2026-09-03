@@ -635,9 +635,13 @@ end
 
 --- Toggle between flatten (方案A: one folder per first `:`-segment, keys flat
 --- underneath) and nested (方案B: folders nest per segment). Any active search
---- is cleared first — the rebuild walks the db node's collected keys. Use
---- :PosteRedisBrowserView with an argument (flat|flatten|nested) for a
---- specific mode.
+--- is cleared first. Use :PosteRedisBrowserView with an argument
+--- (flat|flatten|nested) for a specific mode.
+---
+--- Switches view by RE-SCANNING the db (same as `r`): rebuilding from the
+--- rendered tree would walk only LOADED children, so keys inside unexpanded
+--- folders/groups (children = nil) were silently dropped on every toggle —
+--- the tree looked empty until a manual refresh.
 --- @param mode? string|nil "flat" | "flatten" | "nested" (nil = toggle)
 function M.toggle_view(mode)
   local applied
@@ -647,32 +651,12 @@ function M.toggle_view(mode)
     applied = async.toggle_view_mode()
   end
   M.search_clear()
-  if current_db_node and current_db_node.children then
-    -- Rebuild from key ENTRIES, not raw names: serialize type/size so the
-    -- fresh key nodes keep their icons + type highlights (a name-only rebuild
-    -- makes every key render as the default string icon + purple "other",
-    -- and fetch_types never re-runs after a view toggle).
-    local keys = {}
-    local function collect(node)
-      if node.node_type == "key" then
-        keys[#keys + 1] = {
-          name = node.name,
-          type = node.meta and node.meta.type,
-          size = node.meta and node.meta.size,
-        }
-      elseif node.children then
-        for _, c in ipairs(node.children) do collect(c) end
-      end
-    end
-    for _, c in ipairs(current_db_node.children) do collect(c) end
+  if current_db_node and current_conn then
     current_db_node.children = nil
-    require("poste-redis.browser.async")._test.build_children(
-      current_db_node, keys, current_db_node.meta.connection, current_db_node.meta.db)
-    current_db_node.expanded = true
+    async.scan_keys(current_db_node, current_conn.url, current_conn.name)
   end
-  render_tree()
-  local label = applied == "nested" and "Nested folders (方案B) — :PosteRedisBrowserView flattens"
-    or (applied == "flatten" and "Flatten folders (方案A) — :PosteRedisBrowserView nests"
+  local label = applied == "nested" and "Nested folders"
+    or (applied == "flatten" and "Flatten folders"
     or "Flat view — :PosteRedisBrowserView [flatten|nested] for folders")
   vim.notify(label, vim.log.levels.INFO, { title = redis_state.TITLE })
 end
