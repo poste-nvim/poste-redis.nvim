@@ -39,7 +39,7 @@ M.defaults = {
   --   "nested"  → folders nest per `:`-segment (`a:b:c` → `a`/`b`/key,
   --               `a:b` sits in `a` alongside the `b` subfolder) — 方案B.
   -- No-arg `:PosteRedisBrowserView` toggles flatten <-> nested.
-  browser_view_mode = "flat",
+  browser_view_mode = "flatten",
   -- Key browser window auto-width: the split grows/shrinks to fit the longest
   -- visible row (expanded group keys), floored at browser_min_width and capped
   -- at browser_width_max_ratio of the editor columns. Rows never wrap — nowrap

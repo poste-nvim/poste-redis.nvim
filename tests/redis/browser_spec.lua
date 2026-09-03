@@ -267,7 +267,7 @@ describe("poste-redis browser async grouping", function()
 
   it("view_mode default follows config.browser_view_mode", function()
     local config = require("poste-redis.config")
-    assert.equals("flat", config.defaults.browser_view_mode)
+    assert.equals("flatten", config.defaults.browser_view_mode)
   end)
 
   it("load_connections keeps only redis-dialect entries", function()
