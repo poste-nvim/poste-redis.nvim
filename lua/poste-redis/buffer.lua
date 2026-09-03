@@ -47,6 +47,83 @@ function M.active_tab()
 end
 
 ------------------------------------------------------------------------
+-- TTL probe (winbar countdown)
+------------------------------------------------------------------------
+
+--- Countdown timer handle for the active tab's TTL (nil = not running).
+--- uv timers fire in a fast context, so the tick is schedule_wrap'd — the
+--- complement of the AGENTS.md "no vim.schedule in job callbacks" rule.
+local ttl_timer = nil
+
+local function stop_ttl_timer()
+  if ttl_timer then
+    pcall(function(t)
+      t:stop()
+      t:close()
+    end, ttl_timer)
+    ttl_timer = nil
+  end
+end
+
+--- Resolve a meta.connection entry (name or URL) to a redis URL.
+--- @param conn_name string
+--- @return string|nil url, string|nil err
+local function resolve_connection_url(conn_name)
+  if constants.is_redis_url(conn_name) then return conn_name, nil end
+  local connections = require("poste-redis.connections")
+  return connections.resolve_redis_url(conn_name)
+end
+
+local fetch_ttl  -- forward declaration: the expiry tick re-probes
+
+--- Tick the active tab's TTL down once a second and repaint the winbar.
+--- At zero, re-probe: the key either expired (part disappears) or its TTL
+--- was extended (countdown restarts).
+local function start_ttl_countdown()
+  stop_ttl_timer()
+  ttl_timer = vim.loop.new_timer()
+  ttl_timer:start(1000, 1000, vim.schedule_wrap(function()
+    local tab = state.tabs[state.active]
+    if not tab or type(tab.ttl) ~= "number" or tab.ttl <= 0 then
+      stop_ttl_timer()
+      return
+    end
+    tab.ttl = tab.ttl - 1
+    view.update_winbar()
+    if tab.ttl <= 0 then fetch_ttl() end
+  end))
+end
+
+--- Best-effort `TTL <key>` probe for the active tab: needs a recorded
+--- connection and a key-ish command (2nd token). -1 (persistent) / -2
+--- (missing key) / errors display nothing. Fired after every tab render;
+--- the winbar part itself is drawn by view.update_winbar from tab.ttl.
+function fetch_ttl()
+  stop_ttl_timer()
+  local tab = state.tabs[state.active]
+  local conn_name = tab and tab.meta and tab.meta.connection
+  local cmd = tab and tab.meta and tab.meta.command
+  if not conn_name or conn_name == "" or not cmd or cmd == "" then return end
+  local ok, tokens = pcall(require("poste-redis.parser").command_tokens, cmd)
+  if not ok or type(tokens) ~= "table" or #tokens < 2 then return end
+  local url = resolve_connection_url(conn_name)
+  if not url then return end
+  local session_conn = require("poste-redis.session_conn")
+  local dispatched = session_conn.execute(url, { "TTL", tokens[2] }, {
+    on_response = function(ev)
+      if state.tabs[state.active] ~= tab then return end  -- stale probe
+      local n = ev.value and ev.value.value
+      if type(n) ~= "number" or n < 0 then return end
+      tab.ttl = n
+      view.update_winbar()
+      start_ttl_countdown()
+    end,
+    on_error = function() end,  -- best effort: the result itself still shows
+  }, nil, { db = tab.meta.db })
+  if dispatched ~= "dispatched" then stop_ttl_timer() end
+end
+
+------------------------------------------------------------------------
 -- Refresh
 ------------------------------------------------------------------------
 
@@ -66,16 +143,11 @@ function M.refresh()
       vim.log.levels.WARN, { title = constants.TITLE })
     return
   end
-  local connections = require("poste-redis.connections")
-  local url = conn_name
-  if conn_name:sub(1, 8) ~= "redis://" and conn_name:sub(1, 9) ~= "rediss://" then
-    local err
-    url, err = connections.resolve_redis_url(conn_name)
-    if not url then
-      vim.notify("Cannot refresh: " .. tostring(err), vim.log.levels.ERROR,
-        { title = constants.TITLE })
-      return
-    end
+  local url, err = resolve_connection_url(conn_name)
+  if not url then
+    vim.notify("Cannot refresh: " .. tostring(err), vim.log.levels.ERROR,
+      { title = constants.TITLE })
+    return
   end
   local parser = require("poste-redis.parser")
   local tokens, terr = parser.command_tokens(tab.meta.command)
@@ -102,6 +174,7 @@ function M.refresh()
       state.tabs[state.active] = out
       state.last_value = out.meta and out.meta.value
       view.render_active()
+      fetch_ttl()
     end,
     on_error = function(msg)
       vim.notify("Refresh failed: " .. tostring(msg), vim.log.levels.ERROR,
@@ -230,6 +303,7 @@ function M.render(results, opts)
   if opts.render ~= false then
     M.show_panel(false)
     view.render_active()
+    fetch_ttl()
   end
 end
 
@@ -257,11 +331,13 @@ function M.render_tabs(tab_list, opts)
   if opts.render ~= false then
     M.show_panel(false)
     view.render_active()
+    fetch_ttl()
   end
 end
 
 --- Clear all tabs and close the panel content (keeps window if open).
 function M.clear()
+  stop_ttl_timer()
   state.tabs = {}
   state.active = 1
   state.last_value = nil
@@ -284,6 +360,7 @@ function M.render_snapshot(lines, meta)
   state.last_value = meta.value
   M.show_panel()
   view.render_active()
+  fetch_ttl()
 end
 
 ------------------------------------------------------------------------
@@ -444,6 +521,7 @@ function M.next_tab()
   if state.active > #state.tabs then state.active = 1 end
   state.last_value = state.tabs[state.active].meta.value
   view.render_active()
+  fetch_ttl()
 end
 
 function M.prev_tab()
@@ -452,9 +530,11 @@ function M.prev_tab()
   if state.active < 1 then state.active = #state.tabs end
   state.last_value = state.tabs[state.active].meta.value
   view.render_active()
+  fetch_ttl()
 end
 
 function M.close()
+  stop_ttl_timer()
   if scroll_autocmd_id then
     pcall(vim.api.nvim_del_autocmd, scroll_autocmd_id)
     scroll_autocmd_id = nil

@@ -306,6 +306,7 @@ describe("poste-redis grid editing", function()
 
   local sent_cmds = {}
   local refreshes = 0
+  local ttl_reply = 60  -- what the stub's TTL probe answers
 
   local function open_key_tab(value)
     buffer.render({ {
@@ -336,11 +337,19 @@ describe("poste-redis grid editing", function()
   before_each(function()
     sent_cmds = {}
     refreshes = 0
+    ttl_reply = 60
     -- counting refresh that still re-runs the tab command (M.refresh)
     grid_edit.set_refresh(function()
       refreshes = refreshes + 1
     end)
     session_conn.execute = function(url, cmd, cbs)
+      -- the winbar TTL probe: answered, never recorded as an edit command
+      if cmd[1] == "TTL" then
+        if cbs and cbs.on_response then
+          cbs.on_response({ value = { type = "number", value = ttl_reply } })
+        end
+        return "dispatched"
+      end
       sent_cmds[#sent_cmds + 1] = table.concat(cmd, " ")
       if cbs and cbs.on_response then
         cbs.on_response({ value = { type = "string", value = "OK" } })
@@ -419,27 +428,53 @@ describe("poste-redis grid editing", function()
     grid_edit.add_row(buffer.active_tab())
     assert.equals("HSET user:1 email bob@x", sent_cmds[#sent_cmds])
   end)
+
+  it("probes the key's TTL and shows it in the winbar as Number", function()
+    open_key_tab_conn({ type = "string", value = "x" })
+    local wb = vim.api.nvim_get_option_value("winbar", { win = buffer.win() })
+    -- label is plain, the seconds sit inside the Number group encoding
+    assert.match("ttl %%#Number#60%%%*", wb)
+  end)
+
+  it("counts the ttl down once per second", function()
+    open_key_tab_conn({ type = "string", value = "x" })
+    assert.is_true(vim.wait(1500, function()
+      return (buffer.active_tab().ttl or 0) == 59
+    end, 25), "ttl did not tick to 59")
+  end)
+
+  it("hides the ttl for persistent keys (-1)", function()
+    ttl_reply = -1
+    open_key_tab_conn({ type = "string", value = "x" })
+    local wb = vim.api.nvim_get_option_value("winbar", { win = buffer.win() })
+    assert.is_nil(wb:find("ttl", 1, true))
+    ttl_reply = 60
+  end)
 end)
 
 describe("poste-redis result winbar", function()
   local view = require("poste-redis.buffer.view")
 
-  it("wraps the key argument in the green group", function()
-    assert.equals("GET %#PosteRedisResultWinbarKey#session:abc%*",
+  it("wraps the keyword in the Cmd group and the key in the green group", function()
+    assert.equals(
+      "%#PosteRedisResultWinbarCmd#GET%* %#PosteRedisResultWinbarKey#session:abc%*",
       view._test.format_command("GET session:abc"))
   end)
 
   it("keeps the typed form (case, quoting) and leaves extra args plain", function()
-    assert.equals('set %#PosteRedisResultWinbarKey#k%* "v 1" extra',
+    assert.equals(
+      '%#PosteRedisResultWinbarCmd#set%* %#PosteRedisResultWinbarKey#k%* "v 1" extra',
       view._test.format_command('set k "v 1" extra'))
   end)
 
   it("escapes % so the winbar encoding passes it through", function()
-    assert.equals("GET %#PosteRedisResultWinbarKey#100%%%*",
+    assert.equals(
+      "%#PosteRedisResultWinbarCmd#GET%* %#PosteRedisResultWinbarKey#100%%%*",
       view._test.format_command("GET 100%"))
   end)
 
-  it("single-token commands render plain", function()
-    assert.equals("PING", view._test.format_command("PING"))
+  it("single-token commands render in the Cmd group", function()
+    assert.equals("%#PosteRedisResultWinbarCmd#PING%*",
+      view._test.format_command("PING"))
   end)
 end)

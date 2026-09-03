@@ -219,14 +219,16 @@ local function esc(s)
   return (s:gsub("%%", "%%%%"))
 end
 
---- Winbar text for the command, with the key argument (2nd token) wrapped in
---- the green PosteRedisResultWinbarKey group (`%#Group#…%*` encoding).
---- Deliberately NOT parser.command_tokens: this is display, so the typed
---- form (case, quoting) is kept as-is.
+--- Winbar text for the command: the keyword (1st token) in
+--- PosteRedisResultWinbarCmd (linked to Function), the key argument (2nd
+--- token) in the green PosteRedisResultWinbarKey group (`%#Group#…%*`
+--- encoding). Deliberately NOT parser.command_tokens: this is display, so
+--- the typed form (case, quoting) is kept as-is.
 local function format_command(cmd)
   local name, key, rest = cmd:match("^%s*(%S+)%s+(%S+)%s*(.-)%s*$")
-  if not name then return esc(cmd) end
-  local out = esc(name) .. " %#PosteRedisResultWinbarKey#" .. esc(key) .. "%*"
+  if not name then return "%#PosteRedisResultWinbarCmd#" .. esc(cmd) .. "%*" end
+  local out = "%#PosteRedisResultWinbarCmd#" .. esc(name) .. "%*"
+    .. " %#PosteRedisResultWinbarKey#" .. esc(key) .. "%*"
   if rest ~= "" then out = out .. " " .. esc(rest) end
   return out
 end
@@ -254,6 +256,11 @@ function M.update_winbar()
       bar_parts[#bar_parts + 1] = string.format("/%s %d/%d",
         esc(tab.search_text), tab.search_idx, #tab.search_matches)
     end
+  end
+  -- Key TTL (probed by buffer.lua after each tab renders; the countdown tick
+  -- repaints this): plain label, seconds in the builtin Number group.
+  if type(tab and tab.ttl) == "number" then
+    bar_parts[#bar_parts + 1] = "ttl %#Number#" .. tab.ttl .. "%*"
   end
   local cmd = meta and meta.command or ""
   if cmd ~= "" then

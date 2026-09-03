@@ -54,8 +54,10 @@ function M.setup()
   link_if_empty("PosteRedisResultRowNum", "LineNr")
   link_if_empty("PosteRedisResultTab", "Title")
   -- Winbar key argument: fixed green (same green as the browser's string
-  -- icons) so the key stands out regardless of colorscheme.
+  -- icons) so the key stands out regardless of colorscheme. The command
+  -- keyword reuses the Function color.
   define_if_empty("PosteRedisResultWinbarKey", "#98C379")
+  link_if_empty("PosteRedisResultWinbarCmd", "Function")
 
   -- Table grid: current cell + search matches.
   local cell_target = vim.fn.hlexists("SearchCurrent") == 1 and "SearchCurrent" or "Visual"
@@ -108,7 +110,7 @@ function M.setup()
     "PosteRedisResultOk", "PosteRedisResultNull", "PosteRedisResultNumber",
     "PosteRedisResultString", "PosteRedisResultKey", "PosteRedisResultScore",
     "PosteRedisResultRowNum", "PosteRedisResultTab",
-    "PosteRedisResultWinbarKey",
+    "PosteRedisResultWinbarKey", "PosteRedisResultWinbarCmd",
     "PosteRedisResultCell", "PosteRedisResultSearchMatch", "PosteRedisResultSearchCurrent",
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
     "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
