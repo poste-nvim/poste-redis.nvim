@@ -89,30 +89,30 @@ describe("poste-redis runner indicators", function()
     assert.equals(src, vim.api.nvim_get_current_buf())
   end)
 
-  it("re-injects the file's SELECT above the cursor for single-line runs", function()
+  it("line runs show no indicator on the inherited SELECT line", function()
     vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE local", "SELECT 3", "GET session:abc" })
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
     exec_run.run_selection_async = function(_buf, _mode, _opts, callbacks)
       callbacks.on_start(1, 42)
       callbacks.on_done({
-        { seq = 1, command = "SELECT 3", status = "OK", latency_ms = 1, value = { type = "string", value = "OK" } },
-        { seq = 2, command = "GET session:abc", status = "\"v\"", latency_ms = 1, value = { type = "string", value = "v" } },
+        { seq = 1, command = "GET session:abc", status = "\"v\"", latency_ms = 1, value = { type = "string", value = "v" } },
       }, {})
     end
     runner.run_selection("cursor")
-    -- the injected SELECT's indicator lands on the file's own SELECT line;
-    -- the USE line gets none
-    assert.is_true(has_sign(src, 1, "PosteIndicatorSuccess"))
+    -- the inherited SELECT runs invisibly: the GET succeeds on its line,
+    -- the SELECT line keeps no sign at all
     assert.is_true(has_sign(src, 2, "PosteIndicatorSuccess"))
-    assert.is_false(has_sign(src, 0, "PosteIndicatorSuccess"))
+    assert.is_false(has_sign(src, 1, "PosteIndicatorSuccess"))
+    assert.is_false(has_sign(src, 1, "PosteSpin1"))
   end)
 
-  it("actually executes the injected SELECT through the real transport path", function()
+  it("the inherited SELECT runs invisibly: no phantom tab, result, or indicator", function()
     -- regression: the runner once injected into ITS entry list while
-    -- exec_run re-derived entries from the buffer — the SELECT never ran,
-    -- db stayed 0, and the GET's success indicator was stolen by the SELECT
+    -- exec_run re-derived entries from the buffer — the SELECT never ran
+    -- (db stayed 0) and its phantom result/indicator cluttered the run
     local cli = require("poste.cli")
     local session_conn = require("poste-redis.session_conn")
+    local buffer = require("poste-redis.buffer")
     local orig_run_async = cli.run_async
     local orig_execute = session_conn.execute
     cli.run_async = function(_cmd, opts)
@@ -139,11 +139,18 @@ describe("poste-redis runner indicators", function()
     vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE local", "SELECT 3", "GET session:abc" })
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
     runner.run_selection("cursor")
-    -- SELECT rebinds on its own line, GET succeeds on its own line
     assert.is_true(vim.wait(2000, function()
-      return has_sign(src, 1, "PosteIndicatorSuccess")
-        and has_sign(src, 2, "PosteIndicatorSuccess")
-    end, 10), "success indicators never landed")
+      return has_sign(src, 2, "PosteIndicatorSuccess")
+    end, 10), "GET indicator never landed")
+    -- no indicator on the SELECT line, and the panel shows exactly one tab
+    -- (the GET) — the SELECT's OK result is swallowed
+    assert.is_false(has_sign(src, 1, "PosteIndicatorSuccess"))
+    assert.is_false(has_sign(src, 1, "PosteSpin1"))
+    assert.equals(1, buffer.tab_count())
+    assert.equals("GET session:abc", buffer.active_tab().meta.command)
+    assert.equals(3, buffer.active_tab().meta.db)
+    local wb = vim.api.nvim_get_option_value("winbar", { win = buffer.win() })
+    assert.match("db3", wb)
     cli.run_async = orig_run_async
     session_conn.execute = orig_execute
     connections.resolve_redis_url = orig_resolve

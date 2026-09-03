@@ -114,23 +114,6 @@ function M.run_selection(mode, range)
     end
   end
 
-  -- Context inheritance, symmetric with USE: a selection run spawns a fresh
-  -- redis-exec connection (db 0), so the nearest SELECT above the selection
-  -- is re-injected as the batch's first command — results then carry (and
-  -- edit against) the db the file declared. Its indicator lands on the
-  -- file's own SELECT line.
-  if entries[1] and entries[1].start_line then
-    local db, db_line = exec_run._db_for(src, entries[1].start_line)
-    if db and db > 0 then
-      local sel = parser.extract_entries(("SELECT %d\n"):format(db))[1]
-      if sel then
-        sel.start_line = db_line
-        table.insert(entries, 1, sel)
-        table.insert(batch_lines, 1, db_line - 1)
-      end
-    end
-  end
-
   local ok, indicators = pcall(require, "poste.indicators")
   if ok then indicators.clear_all(src) end
 

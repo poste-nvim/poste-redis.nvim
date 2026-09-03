@@ -6,11 +6,11 @@ USE local              # 切换到 connections.toml 里的 local 连接
 SELECT 3               # 真·Redis 命令：切 db（M1 exec 模式，每次独立进程）
 
 set a:b:c "abc"
+get a:b:c
 set b:c "bc"
 set a:b "ab"
 set a:d "ad"
 set a:a_very_long_key:very_very_long "long long key"
-get a:b:c
 
 # ── String ──
 SET session:abc "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0" EX 3600

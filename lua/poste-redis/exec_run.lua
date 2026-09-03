@@ -85,6 +85,9 @@ end
 --- @param entries table[]  parser entries (kind == "command")
 --- @param opts table
 ---   - connection: string  redis:// URL (required)
+---   - db: number|nil  preselect a db by prepending `SELECT <db>` to the
+---     payload; that SELECT's result is swallowed and later result seqs are
+---     renumbered, so callers stay entry-aligned (no phantom tab/indicator)
 ---   - max_items: number|nil  `--max-items` (default from binary: 1000)
 ---   - max_bytes: number|nil  `--max-bytes` (default: config.preview_max_bytes)
 --- @param callbacks table
@@ -110,24 +113,33 @@ function M.run_async(entries, opts, callbacks)
   end
 
   local commands = {}
-  -- Per-command db tracking: every redis-exec invocation is a FRESH
-  -- connection (db 0), and SELECT rebinds inside the batch. The running db
-  -- is tracked as results stream (SELECT counts only on success — a failed
-  -- SELECT leaves the session db unchanged) and stamped onto each result so
-  -- the panel can show (and act with) the tab's real context.
-  local select_targets = {}
   for _, e in ipairs(entries or {}) do
     if e.kind == "command" then
-      local args = parser.entry_args(e)
-      commands[#commands + 1] = args
-      if args[1] == "SELECT" then select_targets[#commands] = tonumber(args[2]) end
+      commands[#commands + 1] = parser.entry_args(e)
     end
   end
-  local db = 0
   if #commands == 0 then
     guarded(my_seq, callbacks.on_error, "Nothing to execute", "")()
     return nil
   end
+
+  -- Preselected db: every fresh redis-exec connection starts on db 0, so a
+  -- batch runs on the file-declared db by prepending its SELECT. The
+  -- injected SELECT's own result is swallowed (see on_stdout below).
+  if opts.db then
+    table.insert(commands, 1, { "SELECT", tostring(opts.db) })
+  end
+
+  -- Per-command db tracking: SELECT rebinds inside the batch (only on
+  -- success — a failed SELECT leaves the session db unchanged) and the
+  -- running db is stamped onto each forwarded result so the panel can show
+  -- (and act with) the tab's real context.
+  local select_targets = {}
+  for i, args in ipairs(commands) do
+    if args[1] == "SELECT" then select_targets[i] = tonumber(args[2]) end
+  end
+  local db = 0
+  local payload_idx = 0
 
   local payload = vim.json.encode({
     connection = opts.connection,
@@ -158,11 +170,16 @@ function M.run_async(entries, opts, callbacks)
         if ev.type == "progress" then
           guarded(my_seq, callbacks.on_progress, ev.index, ev.total, ev.command)()
         elseif ev.type == "result" then
-          local idx = #results + 1
+          payload_idx = payload_idx + 1
+          local is_injected = opts.db and payload_idx == 1
           ev.db = db  -- the db this command ran on (rebind applies to the NEXT)
-          if select_targets[idx] and not (ev.status == "error" or ev.error) then
-            db = select_targets[idx]
+          if select_targets[payload_idx] and not (ev.status == "error" or ev.error) then
+            db = select_targets[payload_idx]
           end
+          if is_injected then
+            goto continue  -- swallowed: callers stay aligned with their entries
+          end
+          if opts.db then ev.seq = #results + 1 end  -- renumber past the SELECT
           results[#results + 1] = ev
           guarded(my_seq, callbacks.on_result, ev)()
         elseif ev.type == "summary" then
@@ -390,6 +407,16 @@ function M.run_selection_async(buf, mode, opts, callbacks)
   if #entries == 0 then
     guarded(my_seq, callbacks.on_error, "No command at cursor", "")()
     return nil
+  end
+  -- Context inheritance, symmetric with USE: a selection run spawns a fresh
+  -- redis-exec connection (db 0), so the nearest SELECT above the selection
+  -- is silently re-applied via opts.db (run_async prepends it and swallows
+  -- its result — no phantom tab or indicator).
+  if not opts.db and entries[1] and entries[1].start_line then
+    local db = M._db_for(buf, entries[1].start_line)
+    if db and db > 0 then
+      opts = vim.tbl_extend("keep", opts, { db = db })
+    end
   end
   if not opts.connection then
     -- fall back to the current context / the first USE in the file
