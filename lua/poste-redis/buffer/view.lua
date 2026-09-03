@@ -262,6 +262,22 @@ function M.update_winbar()
   if type(tab and tab.ttl) == "number" then
     bar_parts[#bar_parts + 1] = "ttl %#Number#" .. tab.ttl .. "%*"
   end
+  -- Where this result came from. The .redis path and the browser keep
+  -- separate contexts and both land in this panel, so every tab shows its
+  -- own: connection name (or credential-free host for raw URLs) + db.
+  local conn = meta and meta.connection
+  if conn and conn ~= "" then
+    local label = conn
+    if conn:sub(1, 8) == "redis://" or conn:sub(1, 9) == "rediss://" then
+      -- strip userinfo before deriving the host: credentials never render
+      local redacted = conn:gsub("//([^/@]+)@", "//***@")
+      label = redacted:match("@([^/]+)") or redacted:match("^%a+://([^/]+)") or redacted
+    end
+    if type(meta.db) == "number" then
+      label = label .. " db" .. meta.db
+    end
+    bar_parts[#bar_parts + 1] = esc(label)
+  end
   local cmd = meta and meta.command or ""
   if cmd ~= "" then
     bar_parts[#bar_parts + 1] = format_command(cmd)

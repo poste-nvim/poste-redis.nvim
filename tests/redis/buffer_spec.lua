@@ -127,6 +127,21 @@ describe("poste-redis result buffer", function()
     assert.truthy(reg:find("Alice"))
   end)
 
+  it("binds grid tabs to their key and stamps the exec db on meta", function()
+    buffer.render({
+      { seq = 1, command = "HGETALL user:42", status = "2 elements", latency_ms = 1, db = 3,
+        value = { type = "hash", entries = { { "name", "Alice" } }, len = 1 } },
+      { seq = 2, command = "CONFIG GET maxmemory", status = "OK", latency_ms = 1, db = 3,
+        value = { type = "unknown", value = "maxmemory 0" } },
+    }, { render = false })
+    local tabs = buffer._tabs()
+    assert.equals("user:42", tabs[1].meta.key)
+    assert.equals(3, tabs[1].meta.db)
+    -- non-grid tabs carry the db but no key binding
+    assert.equals(3, tabs[2].meta.db)
+    assert.is_nil(tabs[2].meta.key)
+  end)
+
   it("dangerous commands produce a tab and do not crash", function()
     local res = { { seq = 1, command = "FLUSHALL", status = "error", latency_ms = 1,
       error = "NOPERM", value = { type = "nil", value = nil } } }

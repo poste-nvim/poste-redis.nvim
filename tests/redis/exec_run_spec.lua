@@ -351,4 +351,41 @@ describe("poste-redis exec_run", function()
     assert.is_nil(r:find("secret"))
     assert.truthy(r:find("***"))
   end)
+
+  it("stamps each result with the db its command ran on (SELECT-aware)", function()
+    stub_emit({
+      vim.json.encode({ type = "result", seq = 1, command = "GET k", status = "\"v\"", latency_ms = 1, value = { type = "string", value = "v" } }),
+      vim.json.encode({ type = "result", seq = 2, command = "SELECT 3", status = "OK", latency_ms = 1, value = { type = "string", value = "OK" } }),
+      vim.json.encode({ type = "result", seq = 3, command = "GET k2", status = "\"w\"", latency_ms = 1, value = { type = "string", value = "w" } }),
+    })
+    local results, done = {}, {}
+    exec_run.run_async({ entry("GET k"), entry("SELECT 3"), entry("GET k2") },
+      { connection = "redis://h:6379/0" }, {
+        on_result = function(ev) results[#results + 1] = ev end,
+        on_done = function() done[#done + 1] = true end,
+      })
+    assert.equals(true, wait_for(done))
+    -- every redis-exec process starts on db 0; a successful SELECT rebinds
+    assert.equals(0, results[1].db)
+    assert.equals(0, results[2].db)  -- the SELECT itself ran on db 0
+    assert.equals(3, results[3].db)
+    exec_run.cancel()
+  end)
+
+  it("keeps the db when a SELECT fails", function()
+    stub_emit({
+      vim.json.encode({ type = "result", seq = 1, command = "SELECT 99", status = "error", error = "ERR DB index is out of range", latency_ms = 1 }),
+      vim.json.encode({ type = "result", seq = 2, command = "GET k", status = "nil", latency_ms = 1, value = { type = "nil", value = nil } }),
+    })
+    local results, done = {}, {}
+    exec_run.run_async({ entry("SELECT 99"), entry("GET k") },
+      { connection = "redis://h:6379/0" }, {
+        on_result = function(ev) results[#results + 1] = ev end,
+        on_done = function() done[#done + 1] = true end,
+      })
+    assert.equals(true, wait_for(done))
+    assert.equals(0, results[1].db)
+    assert.equals(0, results[2].db)
+    exec_run.cancel()
+  end)
 end)

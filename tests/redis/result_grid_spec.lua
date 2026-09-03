@@ -450,6 +450,25 @@ describe("poste-redis grid editing", function()
     assert.is_nil(wb:find("ttl", 1, true))
     ttl_reply = 60
   end)
+
+  it("shows the tab's origin context (connection + db) in the winbar", function()
+    buffer.render({ { seq = 1, command = "GET k", status = "", latency_ms = 1, db = 3,
+      value = { type = "string", value = "x" } } },
+      { render = true, connection = "stubconn" })
+    local wb = vim.api.nvim_get_option_value("winbar", { win = buffer.win() })
+    assert.match("stubconn db3", wb)
+    buffer.close()
+  end)
+
+  it("shows credential-free hosts for URL connections, never credentials", function()
+    buffer.render({ { seq = 1, command = "GET k", status = "", latency_ms = 1, db = 2,
+      value = { type = "string", value = "x" } } },
+      { render = true, connection = "redis://alice:s3cret@host:6379" })
+    local wb = vim.api.nvim_get_option_value("winbar", { win = buffer.win() })
+    assert.match("host:6379 db2", wb)
+    assert.is_nil(wb:find("s3cret", 1, true))
+    buffer.close()
+  end)
 end)
 
 describe("poste-redis result winbar", function()

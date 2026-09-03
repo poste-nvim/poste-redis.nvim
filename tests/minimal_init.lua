@@ -6,6 +6,10 @@
 vim.opt.runtimepath:append(".")
 vim.opt.runtimepath:append("../poste.nvim")
 
+-- Unit specs never need swap files; a crashed headless run used to leave
+-- E300 "swap file already exists" residue that broke the next run.
+vim.opt.swapfile = false
+
 -- Dev-loop convenience: prefer a locally built poste binary when present.
 if vim.g.poste_binary == nil then
   local release = "../poste.nvim/target/release/poste"

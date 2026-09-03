@@ -274,12 +274,21 @@ end
 ---   (name or URL) is stamped into every tab's meta so `r` can re-run it
 function M.render(results, opts)
   opts = opts or {}
+  local parser = require("poste-redis.parser")
   state.tabs = {}
   state.active = 1
   state.last_value = nil
   for _, ev in ipairs(results or {}) do
     local out = format.format_result(ev)
     if opts.connection then out.meta.connection = opts.connection end
+    -- Context travels with the result: the db the command ran on (stamped by
+    -- exec_run, SELECT-aware) and, for editable grid tabs, the key argument —
+    -- grid_edit needs both to write where the command actually was.
+    out.meta.db = ev.db or out.meta.db
+    if out.kind == "table" then
+      local tokens = parser.command_tokens(out.meta.command)
+      if tokens and #tokens >= 2 then out.meta.key = tokens[2] end
+    end
     if out.kind == "table" then
       out.page = 1
       out.page_size = state.PAGE_SIZE

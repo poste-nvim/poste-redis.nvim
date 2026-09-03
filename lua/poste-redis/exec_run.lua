@@ -110,11 +110,20 @@ function M.run_async(entries, opts, callbacks)
   end
 
   local commands = {}
+  -- Per-command db tracking: every redis-exec invocation is a FRESH
+  -- connection (db 0), and SELECT rebinds inside the batch. The running db
+  -- is tracked as results stream (SELECT counts only on success — a failed
+  -- SELECT leaves the session db unchanged) and stamped onto each result so
+  -- the panel can show (and act with) the tab's real context.
+  local select_targets = {}
   for _, e in ipairs(entries or {}) do
     if e.kind == "command" then
-      commands[#commands + 1] = parser.entry_args(e)
+      local args = parser.entry_args(e)
+      commands[#commands + 1] = args
+      if args[1] == "SELECT" then select_targets[#commands] = tonumber(args[2]) end
     end
   end
+  local db = 0
   if #commands == 0 then
     guarded(my_seq, callbacks.on_error, "Nothing to execute", "")()
     return nil
@@ -149,6 +158,11 @@ function M.run_async(entries, opts, callbacks)
         if ev.type == "progress" then
           guarded(my_seq, callbacks.on_progress, ev.index, ev.total, ev.command)()
         elseif ev.type == "result" then
+          local idx = #results + 1
+          ev.db = db  -- the db this command ran on (rebind applies to the NEXT)
+          if select_targets[idx] and not (ev.status == "error" or ev.error) then
+            db = select_targets[idx]
+          end
           results[#results + 1] = ev
           guarded(my_seq, callbacks.on_result, ev)()
         elseif ev.type == "summary" then

@@ -22,11 +22,11 @@ fallback — see `requirements.md`.
 | File | Role |
 |------|------|
 | `parser.lua` | **The only parser (D1)**: `extract_entries` (continuations joined, quote-aware comments, `USE`), `cursor_entry`, `visual_entries`, `file_entries`, `entry_args` |
-| `exec_run.lua` | `run_async` (stdin JSON → `poste redis-exec` → NDJSON events), `run_file_async` (USE grouping, sequential batches), `run_sync`, `run_selection_async`, stale-guard + busy bookkeeping |
+| `exec_run.lua` | `run_async` (stdin JSON → `poste redis-exec` → NDJSON events), `run_file_async` (USE grouping, sequential batches, SELECT-aware db stamped as `ev.db`), `run_sync`, `run_selection_async`, stale-guard + busy bookkeeping |
 | `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`list`; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests; `opts.db` auto-SELECTs on db change |
 | `runner.lua` | `<CR>` / `:PosteRedisRunFile` entry: connects exec_run → buffer → history, spinner indicators |
 | `format.lua` | `format_result` → `{kind}` — "text" for nil/int/string/binary/stream/unknown/error; "table" grid for list/set/hash/zset (`columns` + raw `rows`, `to_display`/`to_copy`); `format_error`, `preview_json`, `status_summary` |
-| `buffer.lua` | Result panel facade: `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`, panel keymaps, `r` refresh. Delegates to `buffer/*` |
+| `buffer.lua` | Result panel facade: `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`, panel keymaps, `r` refresh, TTL probe + countdown. Stamps each tab's origin context (connection / db / key) so grid editing writes where the command ran. Delegates to `buffer/*` |
 | `buffer/state.lua` | Shared mutable panel state (buf/win/tabs/active/last_value, PAGE_SIZE) — depended on by all `buffer/*` modules, no cycles |
 | `buffer/view.lua` | All drawing: grid page renderer, cell highlight + value colors + search extmarks, floating header, winbar |
 | `buffer/search.lua` | In-grid search state (search_text/matches/idx on the tab) + match navigation (page-flipping jumps) |
