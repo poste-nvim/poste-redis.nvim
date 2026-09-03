@@ -39,6 +39,17 @@ Never write `poste_redis_*` as a command name; commands are `:PosteRedis*`.
 - Secrets: passwords live only in the in-memory redis URL; logs redact
   (`util.redact_url`); never write passwords to history/files
 
+## Module Health (short rules — details in `docs/dev/agent-practices.md`)
+
+- One module, one job. A file past ~600 lines AND a second concern gets split
+  first; reuse the established shapes (facade + `dir/` submodules, shared
+  `state.lua` at the bottom, engine vs infra — see the practices doc)
+- DRY within this repo only: check `util.lua` / `format.lua` before writing a
+  helper; satellites stay decoupled (copy/vendor, never `require`)
+- Tests are part of the change: `tests/run.sh` + no new luacheck warnings
+  before every commit; new modules get a spec; internals exposed via `M._test`
+- File add/split/rename updates `docs/dev/file-index.md` in the same commit
+
 ## Lua Pitfalls
 
 ### `guarded(seq, cb, ...)()` — not `guarded(...)(...)`
