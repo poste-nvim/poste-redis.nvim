@@ -173,8 +173,8 @@ end
 
 --- Fetch the Redis type of key nodes via TYPE (persistent session, so the
 --- requests pipeline over one connection). Sets node.meta.type as each
---- resolves and renders once the whole batch is typed — the type suffix +
---- icon flip together in one re-render. Skipped for nodes already typed.
+--- resolves and renders once the whole batch is typed — the type icon + color
+--- flip together in one re-render. Skipped for nodes already typed.
 --- TYPE reports only string/hash/list/set/zset/stream, so bitmap/hyperloglog/
 --- geo still resolve as string/zset here (subtype probing is future work).
 ---

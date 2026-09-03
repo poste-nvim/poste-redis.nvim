@@ -17,7 +17,8 @@ describe("poste-redis browser tree", function()
     assert.match("3", lines[1])          -- db node shows the db number
     assert.match("user:1", lines[2])
     assert.match("user:2", lines[3])
-    assert.match("hash", lines[3])
+    -- no trailing type/size suffix on key rows (type is the icon + color)
+    assert.is_nil(lines[3]:match("hash"), "key rows must not carry a type suffix")
     assert.equals(3, #node_map)
     -- flat keys nested under a db are leaves: no marker (nerd-font glyphs,
     -- written as Lua escapes so the bytes stay reviewable: f105 collapsed,
@@ -749,6 +750,79 @@ describe("poste-redis browser window", function()
   end)
 end)
 
+describe("poste-redis browser auto-width", function()
+  local config = require("poste-redis.config")
+
+  it("render_tree records the longest visible data row in display cells", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {
+      tree.make_key_node("cache:this-is-a-long-key-name", "c", 0),
+      tree.make_key_node("x", "c", 0),
+    }
+    db.expanded = true
+    tree.display_root = db
+    tree.header_lines = { "", "[ db 0]", "----------------" }
+    tree.render_tree(buf, {}, { db })
+    tree.display_root = nil
+    local icons = require("poste-redis.icons")
+    local expected = vim.fn.strdisplaywidth(
+      "  " .. icons.KEY_ICON.string .. " cache:this-is-a-long-key-name")
+    assert.equals(expected, tree.last_content_width)
+    -- short trees do not dip below a sane floor (min width applies in the
+    -- browser; render_tree itself only measures — no clamping here)
+    local db2 = tree.make_db_node({ db = 0 }, "c")
+    db2.children = { tree.make_key_node("k", "c", 0) }
+    db2.expanded = true
+    tree.display_root = db2
+    tree.render_tree(buf, {}, { db2 })
+    tree.display_root = nil
+    assert.equals(vim.fn.strdisplaywidth("  " .. icons.KEY_ICON.string .. " k"),
+      tree.last_content_width)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("grows the split past the default 30 to fit a long expanded key", function()
+    local browser = require("poste-redis.browser.init")
+    local session_conn = require("poste-redis.session_conn")
+
+    local orig_load = async.load_connections
+    local orig_execute = session_conn.execute
+    async.load_connections = function(cb)
+      cb({ tree.make_connection_node({
+        name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis",
+      }) })
+    end
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        local keys = vim.tbl_contains(cmd, "MATCH")
+          and { "xx" }
+          or { "this-is-a-very-long-key-that-forces-a-wider-split", "small" }
+        cbs.on_response({ value = { value = keys, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    async.set_view_mode("flat")
+    local ok, err = pcall(function() browser.open() end)
+    assert.is_true(ok, tostring(err))
+    local win = browser.info().window
+    browser._test.select_db(0)
+    -- the long key renders unwrapped ⇒ the split must widen past the 30-col
+    -- default (flat view puts the key at depth 0)
+    local cap = math.floor(vim.o.columns * (config.config.browser_width_max_ratio or 0.7))
+    assert.is_true(vim.wait(3000, function()
+      return vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_width(win) > 30
+    end, 10), "auto-width did not grow the window past 30")
+    local w = vim.api.nvim_win_get_width(win)
+    assert.is_true(w <= cap, "auto-width must respect the editor cap (got " .. w .. " > " .. cap .. ")")
+
+    browser.close()
+    async.load_connections = orig_load
+    session_conn.execute = orig_execute
+  end)
+end)
+
 describe("poste-redis browser value page commands", function()
   it("maps each type to its first-page command", function()
     assert.same({ "GET", "k" }, value._test.page_command("k", "string"))
@@ -1350,27 +1424,19 @@ describe("poste-redis browser per-node render cap", function()
 end)
 
 
-describe("poste-redis browser gray text (types / hint / separator)", function()
-  it("highlights the type suffix after a key node in gray", function()
+describe("poste-redis browser gray text (hint / separator)", function()
+  it("renders key nodes WITHOUT a trailing type suffix", function()
     local db = tree.make_db_node({ db = 0 }, "c")
-    db.children = { tree.make_key_node("k", "c", 0, { type = "string" }) }
+    db.children = { tree.make_key_node("user:1", "c", 0, { type = "hash", size = "2" }) }
     db.expanded = true
     local lines, node_map = tree.flatten_tree({ db })
     local node = node_map[2]  -- [1] is the db wrapper, [2] the key node
-    assert.is_truthy(node._suffix_s)
-    assert.is_true(node._suffix_e > node._suffix_s)
-    -- suffix text really is the type suffix (key renders on line 2)
-    assert.equals("  string", lines[2]:sub(node._suffix_s + 1, node._suffix_e))
-    -- the suffix carries PosteRedisBrowserType when applied to a buffer
-    local buf = vim.api.nvim_create_buf(false, true)
-    -- apply_highlights offsets by the 3 header lines; mirror a real render
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "", "", lines[1], lines[2] })
-    tree.apply_highlights(buf, node_map, { 0, 0 })
-    local ns = vim.api.nvim_create_namespace("poste_redis_browser")
-    local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
-    local groups = {}
-    for _, m in ipairs(marks) do groups[m[4].hl_group] = true end
-    assert.is_truthy(groups["PosteRedisBrowserType"])
+    -- the type is conveyed by the icon glyph + color only — no text tail
+    assert.is_nil(node._suffix_s)
+    assert.is_nil(node._suffix_e)
+    assert.is_nil(lines[2]:match("hash"), "type text must not render after the key")
+    assert.is_nil(lines[2]:match("string"), "type text must not render after the key")
+    assert.match("user:1$", lines[2])
   end)
 
   it("decorates the db separator line in gray", function()

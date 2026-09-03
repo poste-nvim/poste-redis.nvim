@@ -33,6 +33,10 @@ local browser_win = nil
 local line_to_node = {}
 local source_buf = nil
 
+--- Width the browser was last opened at: the auto-width floor, so the split
+--- never auto-shrinks below what the user asked for on open.
+local opened_width = 30
+
 --- Current scope: one connection, one selected db. The db node is the hidden
 --- display root; its children render at the top of the tree.
 local current_conn = nil       -- { name, url } | nil
@@ -94,6 +98,38 @@ local function display_root_node()
   return current_db_node
 end
 
+--- Auto-width: resize the browser split to fit the longest rendered row so
+--- expanded key names never wrap. Grows and shrinks with the visible node set,
+--- floored at the width the browser last opened at (>= browser_min_width) and
+--- capped at browser_width_max_ratio of the editor columns. The separator's
+--- dash run is excluded from the measurement — it derives from the window
+--- width, so counting it would feed the width back into itself; anything that
+--- still exceeds the cap is clipped by nowrap instead of wrapping.
+local function update_browser_width()
+  if not config.config.browser_auto_width then return end
+  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
+  local win = browser_win
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    win = vim.fn.bufwinid(browser_buf)
+  end
+  if not win or win == -1 then return end
+
+  local content = tree.last_content_width or 0
+  -- header chrome to keep in view: the search bar + db select (separator is 3)
+  for i = 1, 2 do
+    content = math.max(content, vim.fn.strdisplaywidth(tree.header_lines[i] or ""))
+  end
+  local min_w = math.max(1, math.floor(tonumber(config.config.browser_min_width) or 30))
+  min_w = math.max(min_w, opened_width)
+  local ratio = tonumber(config.config.browser_width_max_ratio) or 0.7
+  local max_w = math.max(min_w, math.floor(vim.o.columns * ratio))
+  local target = math.max(min_w, math.min(content + 3, max_w))
+  local cur = vim.api.nvim_win_get_width(win)
+  if target ~= cur then
+    pcall(vim.api.nvim_win_set_width, win, target)
+  end
+end
+
 local function render_tree()
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
   local search_line = search_bar_text()
@@ -109,6 +145,7 @@ local function render_tree()
     tree.decorate_search_line(browser_buf, search_query)
   end
   tree.decorate_separator(browser_buf, tree.header_lines[3])
+  update_browser_width()
 end
 
 async.render_hook = render_tree
@@ -592,12 +629,19 @@ function M.open(opts)
   -- window number and must not be used here.
   local win = vim.fn.bufwinid(buf)
   if win == -1 then
-    local width = opts.width or 30
+    local width = math.max(
+      opts.width or 0,
+      math.floor(tonumber(config.config.browser_min_width) or 30)
+    )
     local pos = opts.split or "right"
     vim.cmd(split_command(pos, width))
+    opened_width = width
     browser_win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(browser_win, buf)
     vim.api.nvim_set_option_value("winfixwidth", true, { win = browser_win })
+    -- one row per key: rows clip right instead of wrapping (auto-width grows
+    -- the split to fit expanded content, nowrap clips anything past the cap)
+    vim.api.nvim_set_option_value("wrap", false, { win = browser_win })
   else
     browser_win = win
     vim.api.nvim_set_current_win(win)
@@ -702,6 +746,7 @@ M._test = {
   db_select_text = db_select_text,
   separator_text = separator_text,
   display_root_node = display_root_node,
+  update_browser_width = update_browser_width,
 }
 
 return M

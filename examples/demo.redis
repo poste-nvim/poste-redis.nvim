@@ -9,6 +9,7 @@ set a:b:c "abc"
 set b:c "bc"
 set a:b "ab"
 set a:d "ad"
+set a:a_very_long_key:very_very_long "long long key"
 get a:b:c
 
 # ── String ──

@@ -243,22 +243,10 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
           end
         end
 
-        local suffix = ""
-        node._suffix_s = nil
-        node._suffix_e = nil
-        if node.node_type == "connection" then
-          suffix = ""
-        elseif node.node_type == "db" then
-          suffix = ""
-        elseif node.node_type == "key" and node.meta and type(node.meta.type) == "string" then
-          suffix = "  " .. node.meta.type
-          if node.meta.size then suffix = suffix .. " (" .. node.meta.size .. ")" end
-          -- gray type suffix after the node name (highlight_line reads these)
-          node._suffix_s = #indent + #marker + #icon + 1 + #node.name
-          node._suffix_e = node._suffix_s + #suffix
-        end
-
-        local line = indent .. marker .. icon .. " " .. node.name .. suffix
+        -- No trailing type/size suffix: the key type is conveyed by the icon
+        -- glyph + color only, and rows must fit narrow splits unwrapped
+        -- (browser auto-width grows the split, nowrap clips past the cap).
+        local line = indent .. marker .. icon .. " " .. node.name
         -- Failed scans on visible nodes (group/db/connection) surface inline —
         -- silent errors made every failure look like "the tree is broken".
         if node.error then
@@ -337,11 +325,6 @@ local function highlight_line(buf, line, node, icon_col)
   end
   vim.api.nvim_buf_add_highlight(buf, hl_ns, hl, line, start, start + len)
 
-  if node._suffix_s and node._suffix_e and node._suffix_e > node._suffix_s then
-    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserType",
-      line, node._suffix_s, node._suffix_e)
-  end
-
   if node._err_s and node._err_e and node._err_e > node._err_s then
     vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserError",
       line, node._err_s, node._err_e)
@@ -364,6 +347,11 @@ end
 --- read this to stop paging keys that would never render anyway.
 M.last_truncated = 0
 
+--- Display width (cells) of the longest rendered data row — the browser's
+--- auto-width input (browser_auto_width). Set by render_tree before the
+--- header lines are prepended; the resize only happens on full renders.
+M.last_content_width = 0
+
 --- Write the flattened tree into the browser buffer, prepending the two
 --- header lines (search bar + db select) from M.header_lines.
 --- @param browser_buf number
@@ -384,11 +372,22 @@ function M.render_tree(browser_buf, line_to_node, root_nodes, multi_select)
     icon_cols[#icon_cols + 1] = 0
     lines[#lines + 1] = ("  … %d more not rendered — use <leader>/ search to narrow"):format(budget_skipped)
   end
+  -- Longest visible data row (cells): the browser's auto-width input. Must
+  -- run BEFORE the header prepend — the separator's dash run derives from the
+  -- window width, so counting it would feed the width back into itself.
+  local content_width = 0
+  for _, l in ipairs(lines) do
+    local w = vim.fn.strdisplaywidth(l)
+    if w > content_width then content_width = w end
+  end
+  M.last_content_width = content_width
+
   -- The search bar header line can legitimately be empty (query ""), so every
   -- header line is always written — skipping empties would drop the bar.
   for i = #M.header_lines, 1, -1 do
     table.insert(lines, 1, M.header_lines[i] or "")
   end
+
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
   -- Explicit end index, NOT -1: nvim 0.12's delete-to-end path races job
   -- stdout processing during streamed scans (browser froze mid-scan; set_lines

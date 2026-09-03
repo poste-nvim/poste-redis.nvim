@@ -15,10 +15,10 @@ M.defaults = {
   -- round-trips (10k keys ≈ 11 pages vs 200 at 500). Key lists under a group
   -- still page at scan_count.
   header_scan_count = 5000,
-  -- Cap on per-key TYPE lookups in the browser (key icons + type suffix).
-  -- Only the first N scanned keys get typed; a 100k-key group must never
-  -- turn into 100k pipelined session requests (that wedges the shared
-  -- redis-session process: every later SCAN queues behind the flood).
+  -- Cap on per-key TYPE lookups in the browser (key icons). Only the first N
+  -- scanned keys get typed; a 100k-key group must never turn into 100k
+  -- pipelined session requests (that wedges the shared redis-session process:
+  -- every later SCAN queues behind the flood).
   type_fetch_limit = 500,
   -- Max rows rendered in the key browser tree. A 100k-key group flattened
   -- into buffer lines makes every full re-render a 100k-line rewrite, which
@@ -40,6 +40,13 @@ M.defaults = {
   --               `a:b` sits in `a` alongside the `b` subfolder) — 方案B.
   -- No-arg `:PosteRedisBrowserView` toggles flatten <-> nested.
   browser_view_mode = "flat",
+  -- Key browser window auto-width: the split grows/shrinks to fit the longest
+  -- visible row (expanded group keys), floored at browser_min_width and capped
+  -- at browser_width_max_ratio of the editor columns. Rows never wrap — nowrap
+  -- clips anything past the cap.
+  browser_auto_width = true,
+  browser_min_width = 30,
+  browser_width_max_ratio = 0.7,
   -- Result panel split: share of the editor height.
   result_height_ratio = 0.4,
   -- Execute confirm heuristic: write commands always require a confirm
