@@ -26,7 +26,13 @@ fallback — see `requirements.md`.
 | `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`list`; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests; `opts.db` auto-SELECTs on db change |
 | `runner.lua` | `<CR>` / `:PosteRedisRunFile` entry: connects exec_run → buffer → history, spinner indicators |
 | `format.lua` | `format_result` → `{kind}` — "text" for nil/int/string/binary/stream/unknown/error; "table" grid for list/set/hash/zset (`columns` + raw `rows`, `to_display`/`to_copy`); `format_error`, `preview_json`, `status_summary` |
-| `buffer.lua` | Result panel: `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`. Text tabs keep the compact block; table tabs render the grid with floating header + cell/page navigation + search + yank |
+| `buffer.lua` | Result panel facade: `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`, panel keymaps, `r` refresh. Delegates to `buffer/*` |
+| `buffer/state.lua` | Shared mutable panel state (buf/win/tabs/active/last_value, PAGE_SIZE) — depended on by all `buffer/*` modules, no cycles |
+| `buffer/view.lua` | All drawing: grid page renderer, cell highlight + value colors + search extmarks, floating header, winbar |
+| `buffer/search.lua` | In-grid search state (search_text/matches/idx on the tab) + match navigation (page-flipping jumps) |
+| `buffer/pager.lua` | Grid page flipping (wrapping) for table tabs |
+| `buffer/preview.lua` | `K` float preview: raw JSON (text tabs) / current cell (table tabs) |
+| `buffer/yank.lua` | Yank whole tab / current cell / current column |
 | `result/grid.lua` | **Pure table-grid renderer**: `build_layout` (display widths + right-align), `render_page` (borderless `│` rows + col byte maps + pagination), `compute_matches` / `cell_match_range` (search). No vim ops — reusable in poste.nvim later |
 | `result/header.lua` | Floating fixed header for grid tabs (1-line float over the panel following horizontal scroll, per-char viewport slicing) |
 | `history.lua` | In-memory execution history + float list (j/k/CR/q) |
