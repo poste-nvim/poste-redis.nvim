@@ -285,6 +285,16 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
   return lines, node_map, icon_cols, skipped, budget_skipped
 end
 
+--- Direct-children count for a group row: loaded nodes count their rendered
+--- children; lazy headers carry the keys-under-prefix count stamped by the
+--- parent's scan (`_child_count`).
+--- @param node table
+--- @return number|nil
+local function child_count(node)
+  if type(node.children) == "table" then return #node.children end
+  return node._child_count
+end
+
 --- Highlight one node's line. Columns come from flatten_tree (icon byte
 --- start), so no buffer reads happen here.
 --- @param buf number
@@ -328,6 +338,19 @@ local function highlight_line(buf, line, node, icon_col)
   if node._err_s and node._err_e and node._err_e > node._err_s then
     vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisBrowserError",
       line, node._err_s, node._err_e)
+  end
+
+  -- Child count on group rows: gray digits as end-of-line virt text — never
+  -- buffer text, so it stays out of width math, searches, and copies.
+  -- Suppressed on failed scans: the inline error is the information there.
+  if node.node_type == "group" and not node.error then
+    local n = child_count(node)
+    if n then
+      vim.api.nvim_buf_set_extmark(buf, hl_ns, line, 0, {
+        virt_text = { { ("  %d"):format(n), "PosteRedisBrowserCount" } },
+        virt_text_pos = "eol",
+      })
+    end
   end
 end
 

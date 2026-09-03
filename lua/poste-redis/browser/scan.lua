@@ -101,6 +101,11 @@ local function build_group_headers(node, keys, conn_name, db, from)
         table.insert(node.children, g)
         table.insert(new_nodes, g)
       end
+      -- Keys-under-prefix seen by this scan, stamped on the lazy header so
+      -- the tree can show a child count before the group is expanded (exact
+      -- in flatten view, subtree total in nested view — after expansion the
+      -- rendered #children takes over).
+      g._child_count = (g._child_count or 0) + 1
     end
   end
   return new_nodes
@@ -353,6 +358,8 @@ local function build_group_nested(node, keys, conn_name, db, from)
         node._nsegs[seg] = g
         table.insert(new_nodes, g)
       end
+      -- Same stamp as build_group_headers: keys-under-prefix seen so far.
+      g._child_count = (g._child_count or 0) + 1
     else
       local kn = tree.make_key_node(k, conn_name, db)
       kn.parent = node

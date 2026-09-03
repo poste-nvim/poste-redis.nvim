@@ -80,6 +80,8 @@ function M.setup()
   define_if_empty("PosteRedisBrowserWinbarDb", "#D19A66")
   local sep_target = vim.fn.hlexists("@comment") == 1 and "@comment" or "Comment"
   link_if_empty("PosteRedisBrowserSep", sep_target)
+  -- Group rows: child count digits after the name (eol virt text).
+  define_if_empty("PosteRedisBrowserCount", "#808080")
 
   -- Key browser tree icons: gray expand/collapse markers, blue folder,
   -- green string, orange collections (zset/hash/list/set), purple everything
@@ -110,7 +112,7 @@ function M.setup()
     "PosteRedisResultCell", "PosteRedisResultSearchMatch", "PosteRedisResultSearchCurrent",
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
     "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
-    "PosteRedisBrowserWinbarDb", "PosteRedisBrowserSep",
+    "PosteRedisBrowserWinbarDb", "PosteRedisBrowserSep", "PosteRedisBrowserCount",
     "PosteRedisBrowserMarker", "PosteRedisBrowserConn", "PosteRedisBrowserDb",
     "PosteRedisBrowserGroup", "PosteRedisBrowserString",
     "PosteRedisBrowserCollection", "PosteRedisBrowserOther",

@@ -1647,3 +1647,58 @@ describe("poste-redis browser delete node + multi-select", function()
     session_conn.execute = orig_execute
   end)
 end)
+
+describe("poste-redis browser child counts", function()
+  it("stamps lazy group headers with their scanned key counts", function()
+    async.set_view_mode("flatten")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {}  -- scan_keys initializes children before scanning
+    -- page 1: two cache keys + one plain; page 2 adds a third cache key
+    scan._test.build_group_headers(db, { "cache:a", "cache:b", "plain" }, "c", 0, 1)
+    scan._test.build_group_headers(db, { "cache:a", "cache:b", "plain", "cache:c" }, "c", 0, 4)
+    assert.equals(2, #db.children)  -- one group header + one flat key
+    assert.equals("group", db.children[1].node_type)
+    assert.equals("cache", db.children[1].name)
+    assert.equals(3, db.children[1]._child_count)
+  end)
+
+  it("stamps nested subfolder headers with their scanned key counts", function()
+    async.set_view_mode("nested")
+    local group = tree.make_group_node("a", "c", 0)
+    -- build_group_nested returns the new nodes; scan_group splices them in
+    local new_nodes = scan._test.build_group_nested(
+      group, { "a:b:x", "a:b:y", "a:c", "a:d" }, "c", 0, 1)
+    assert.equals(3, #new_nodes)  -- lazy subfolder b + 2 leaves
+    assert.equals("group", new_nodes[1].node_type)
+    assert.equals("b", new_nodes[1].name)
+    assert.equals(2, new_nodes[1]._child_count)
+  end)
+
+  it("renders gray child counts as eol virt text on group rows only", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local lazy_group = tree.make_group_node("bench", "c", 0)
+    lazy_group._child_count = 10
+    local loaded = tree.make_group_node("cache", "c", 0)
+    loaded.children = { tree.make_key_node("cache:1", "c", 0) }
+    local failed = tree.make_group_node("err", "c", 0)
+    failed._child_count = 7
+    failed.error = "boom"
+    db.children = { lazy_group, loaded, failed, tree.make_key_node("plain", "c", 0) }
+    db.expanded = true
+    tree.display_root = db
+    tree.header_lines = { "", "----------------" }
+    tree.render_tree(buf, {}, { db })
+    tree.display_root = nil
+
+    local ns = vim.api.nvim_create_namespace("poste_redis_browser")
+    local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+    local counts = {}
+    for _, m in ipairs(marks) do
+      if m[4].virt_text then counts[#counts + 1] = m[4].virt_text[1][1] end
+    end
+    -- lazy stamp + loaded #children; failed scan and plain keys show none
+    assert.same({ "  10", "  1" }, counts)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)

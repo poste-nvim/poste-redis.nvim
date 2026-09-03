@@ -41,9 +41,9 @@ fallback — see `requirements.md`.
 
 | File | Role |
 |------|------|
-| `tree.lua` | Node model (connection → db → group → key), flatten + highlights, `get_node_at_line` |
+| `tree.lua` | Node model (connection → db → group → key), flatten + highlights, gray child counts on group rows (eol virt text), `get_node_at_line` |
 | `async.lua` | Browser async infrastructure: render/append hooks + uv-timer flush (buffer work never runs in job callbacks), view mode (flat/flatten/nested), bounded TYPE fetch, search-by-subpath, `load_connections`, `fetch_dbs` (DBSIZE probe) |
-| `scan.lua` | Cursor-driven SCAN loops + tree builders: `scan_keys` (lazy db group headers, `header_scan_count`), `scan_group` (MATCH prefix, nested subfolders, `scan_count`), `build_children` / `build_nested_children` (view rebuild), epoch stale guard. Depends on async's pacing — never the reverse |
+| `scan.lua` | Cursor-driven SCAN loops + tree builders: `scan_keys` (lazy db group headers, `header_scan_count`), `scan_group` (MATCH prefix, nested subfolders, `scan_count`), `build_children` / `build_nested_children` (view rebuild), keys-under-prefix stamps for lazy headers, epoch stale guard. Depends on async's pacing — never the reverse |
 | `value.lua` | TYPE-first paginated value viewer: HSCAN/SSCAN/ZSCAN pages, LRANGE windows, XRANGE, string GET (truncated + `F` full load); page tabs + loaded/total footer |
 | `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate |
 | `init.lua` | `poste://redis_browser` right-hand split, keymaps, `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
