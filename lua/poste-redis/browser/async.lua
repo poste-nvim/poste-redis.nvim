@@ -85,12 +85,58 @@ function flush()
   end
 end
 
---- Tree view: group keys by the first `:`-segment. Flat view: keys hang
---- directly under the db node.
-M.tree_view = true
+--- Tree view mode of the key browser:
+---   "flat"    → every key hangs directly under the db node (no folders)
+---   "flatten" → 方案A: one folder per first `:`-segment, keys flat inside
+---   "nested"  → 方案B: folders nest per `:`-segment (`a:b:c` → `a`/`b`/key)
+--- tree_view/nested_view are the two booleans powering these:
+---   tree_view=false            → "flat"
+---   tree_view=true,!nested     → "flatten"
+---   tree_view=true,nested=true → "nested"
+-- Default mode from config (`browser_view_mode`). Applied once at module
+-- load; the toggle commands (:PosteRedisBrowserView) change it at runtime.
+local _default_mode = config.config.browser_view_mode or "nested"
+M.tree_view = _default_mode ~= "flat"
+M.nested_view = _default_mode == "nested"
 
---- SPLIT_NEST is the max group nesting depth; deeper segments stay flat
---- within the group (prevents pathological trees from `a:b:c:d:...` keys).
+--- Set the tree view mode. Normalizes the two booleans so invalid
+--- combinations (e.g. flat + nested) collapse to a legal state.
+--- @param mode "flat" | "flatten" | "nested"
+--- @return string the applied mode
+function M.set_view_mode(mode)
+  if mode == "flat" then
+    M.tree_view = false
+    M.nested_view = false
+  elseif mode == "nested" then
+    M.tree_view = true
+    M.nested_view = true
+  else
+    M.tree_view = true
+    M.nested_view = false
+  end
+  return M.view_mode()
+end
+
+--- Current view mode string.
+--- @return "flat" | "flatten" | "nested"
+function M.view_mode()
+  if not M.tree_view then return "flat" end
+  return M.nested_view and "nested" or "flatten"
+end
+
+--- Toggle between flatten (方案A) and nested (方案B), the two folder modes.
+--- From "flat" it goes to nested (the richer layout).
+--- @return string the applied mode
+function M.toggle_view_mode()
+  if M.view_mode() == "nested" then
+    return M.set_view_mode("flatten")
+  end
+  return M.set_view_mode("nested")
+end
+
+--- SPLIT_NEST is the max folder nesting depth; keys that would land deeper
+--- stay flat inside the deepest folder (prevents pathological trees from
+--- `a:b:c:d:...` keys).
 local SPLIT_NEST = 2
 
 local function schedule_render()
@@ -190,8 +236,19 @@ function M.fetch_types(key_nodes, conn_url, db)
   pump()
 end
 
---- Reorder a node's children: flat keys first (arrival order), then group
---- nodes sorted by name — the stable layout for a db node.
+--- Number of `:`-separated segments in a folder prefix ("" → 0, "a" → 1,
+--- "a:b" → 2). Drives the nested-view nest cap.
+local function seg_count(prefix)
+  if not prefix or prefix == "" then return 0 end
+  local n = 1
+  for _ in prefix:gmatch(":") do n = n + 1 end
+  return n
+end
+
+--- Reorder a node's children. Flat/flatten view: flat keys first (arrival
+--- order), then group nodes sorted by name — the stable layout for a db
+--- node. Nested view: subfolders first (sorted), then direct keys (sorted),
+--- the filesystem reading order of 方案B.
 local function sort_children(node)
   local flat, groups = {}, {}
   for _, ch in ipairs(node.children or {}) do
@@ -200,8 +257,14 @@ local function sort_children(node)
   end
   table.sort(groups, function(a, b) return a.name < b.name end)
   node.children = {}
-  for _, f in ipairs(flat) do node.children[#node.children + 1] = f end
-  for _, g in ipairs(groups) do node.children[#node.children + 1] = g end
+  if M.nested_view then
+    table.sort(flat, function(a, b) return a.name < b.name end)
+    for _, g in ipairs(groups) do node.children[#node.children + 1] = g end
+    for _, f in ipairs(flat) do node.children[#node.children + 1] = f end
+  else
+    for _, f in ipairs(flat) do node.children[#node.children + 1] = f end
+    for _, g in ipairs(groups) do node.children[#node.children + 1] = g end
+  end
 end
 
 --- Build (or extend) a db node's child list from a stream of SCAN keys,
@@ -250,6 +313,53 @@ local function build_group_headers(node, keys, conn_name, db, from)
   return new_nodes
 end
 
+--- Recursively build a nested folder tree (方案B) from a flat key list: each
+--- `:`-segment nest is one folder level, keys hang as leaves in the folder of
+--- their longest proper prefix. A key equal to a folder prefix (e.g. `a:b`
+--- when `a:b:c` also exists) stays a leaf alongside the subfolder. Folders
+--- nest at most SPLIT_NEST deep; deeper segments stay flat inside the deepest
+--- folder. Used by toggle_view (rebuild) and tests.
+--- @param node table db/group node
+--- @param keys string[] full keys whose prefix equals node.meta.prefix
+--- @param conn_name string
+--- @param db number
+--- @param depth number current folder depth (db node → 0)
+local function build_nested_children(node, keys, conn_name, db, depth)
+  node.children = {}
+  local prefix = node.meta.prefix or ""
+  if depth >= SPLIT_NEST then
+    for _, k in ipairs(keys) do
+      table.insert(node.children, tree.make_key_node(k, conn_name, db))
+    end
+    return
+  end
+  local buckets, order, leaves = {}, {}, {}
+  for _, k in ipairs(keys) do
+    -- key minus the folder's own prefix ("a:b" under prefix "a" → "b")
+    local rest = k
+    if prefix ~= "" then rest = k:sub(#prefix + 2) end
+    local seg = rest:match("^([^:]+):(.+)$")
+    if seg then
+      if not buckets[seg] then buckets[seg] = {}; order[#order + 1] = seg end
+      table.insert(buckets[seg], k)
+    else
+      table.insert(leaves, k)
+    end
+  end
+  table.sort(leaves)
+  table.sort(order)
+  for _, seg in ipairs(order) do
+    local child_prefix = (prefix == "" and seg) or (prefix .. ":" .. seg)
+    local group = tree.make_group_node(child_prefix, conn_name, db, seg)
+    group.parent = node
+    table.insert(node.children, group)
+    build_nested_children(group, buckets[seg], conn_name, db, depth + 1)
+  end
+  for _, k in ipairs(leaves) do
+    table.insert(node.children, tree.make_key_node(k, conn_name, db))
+  end
+end
+
 --- Full eager build of a db node's children from a flat key list, grouping by
 --- `:` prefix when tree view is on. Used by toggle_view (rebuild) and tests.
 --- @param node table db node
@@ -262,6 +372,10 @@ local function build_children(node, keys, conn_name, db)
     for _, k in ipairs(keys) do
       table.insert(node.children, tree.make_key_node(k, conn_name, db))
     end
+    return
+  end
+  if M.nested_view then
+    build_nested_children(node, keys, conn_name, db, 0)
     return
   end
   local buckets, order = {}, {}
@@ -385,6 +499,47 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
   next_page("0")
 end
 
+--- Incremental nested build for a group node from a stream of scanned keys:
+--- keys whose remainder after the folder prefix has a further `:`-segment
+--- create a lazy subfolder header (children=nil, loaded on expand); keys that
+--- terminate at this folder become direct leaves. Mirrors the db-level
+--- build_group_headers but under the folder's own prefix. Folds stay lazy, so
+--- a deep prefix costs one header per distinct next segment per level.
+--- @param node table group node
+--- @param keys string[] full keys matching the folder's SCAN
+--- @param conn_name string
+--- @param db number
+--- @param from number 1-based index of the first unseen key
+--- @return table[] new_nodes
+local function build_group_nested(node, keys, conn_name, db, from)
+  local new_nodes = {}
+  local prefix = node.meta.prefix or ""
+  local depth = seg_count(prefix)
+  node._nsegs = node._nsegs or {}
+  for i = from, #keys do
+    local k = keys[i]
+    local rest = k
+    if prefix ~= "" then rest = k:sub(#prefix + 2) end
+    local seg = rest:match("^([^:]+)")
+    local has_more = seg and rest:sub(#seg + 1) ~= ""
+    if seg and has_more and depth < SPLIT_NEST then
+      local sub_prefix = (prefix == "" and seg) or (prefix .. ":" .. seg)
+      local g = node._nsegs[seg]
+      if not g then
+        g = tree.make_group_node(sub_prefix, conn_name, db, seg)
+        g.parent = node
+        node._nsegs[seg] = g
+        table.insert(new_nodes, g)
+      end
+    else
+      local kn = tree.make_key_node(k, conn_name, db)
+      kn.parent = node
+      table.insert(new_nodes, kn)
+    end
+  end
+  return new_nodes
+end
+
 --- SCAN-load a group node's keys in batches (lazy, SCAN MATCH <prefix>:*).
 --- Appends key nodes incrementally. `subpattern` narrows the match — this is
 --- the same primitive a future search-by-subpath (e.g. bench:a:b:c) needs:
@@ -400,6 +555,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
   node.loading = true
   node.error = nil
   node.children = {}
+  node._nsegs = {}
   node.expanded = true
   node.loaded = true
   render_now()
@@ -434,10 +590,14 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         local final_page = new_cursor == "0"
         if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
           local new_nodes = {}
-          for i = built + 1, #all_keys do
-            local kn = tree.make_key_node(all_keys[i], conn_name, db)
-            kn.parent = node
-            table.insert(new_nodes, kn)
+          if M.nested_view then
+            new_nodes = build_group_nested(node, all_keys, conn_name, db, built + 1)
+          else
+            for i = built + 1, #all_keys do
+              local kn = tree.make_key_node(all_keys[i], conn_name, db)
+              kn.parent = node
+              table.insert(new_nodes, kn)
+            end
           end
           built = #all_keys
           for _, n in ipairs(new_nodes) do table.insert(node.children, n) end
@@ -445,6 +605,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         end
         -- Render cap hit: stop paging — rows beyond it would never render.
         if not final_page and tree.last_truncated > 0 then
+          if M.nested_view then sort_children(node) end
           node.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           schedule_render()
@@ -452,6 +613,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         elseif not final_page then
           next_page(new_cursor)
         else
+          if M.nested_view then sort_children(node) end
           node.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           schedule_render()
@@ -639,9 +801,14 @@ end
 
 M._test = {
   build_children = build_children,
+  build_nested_children = build_nested_children,
   build_group_headers = build_group_headers,
+  build_group_nested = build_group_nested,
   fetch_types = M.fetch_types,
   SPLIT_NEST = SPLIT_NEST,
+  set_view_mode = M.set_view_mode,
+  view_mode = M.view_mode,
+  toggle_view_mode = M.toggle_view_mode,
 }
 
 return M

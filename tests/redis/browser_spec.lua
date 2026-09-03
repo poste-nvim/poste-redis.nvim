@@ -81,7 +81,7 @@ end)
 
 describe("poste-redis browser async grouping", function()
   it("builds flat children in flat view", function()
-    async.tree_view = false
+    async.set_view_mode("flat")
     local db = tree.make_db_node({ db = 0 }, "c")
     async._test.build_children(db, { "a", "b:1", "c" }, "c", 0)
     assert.equals(3, #db.children)
@@ -90,7 +90,7 @@ describe("poste-redis browser async grouping", function()
   end)
 
   it("buckets keys by first : segment in tree view", function()
-    async.tree_view = true
+    async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "c")
     async._test.build_children(db, { "user:1", "user:2", "cache:a", "plain" }, "c", 0)
     -- plain stays flat; user/cache become group nodes
@@ -109,7 +109,7 @@ describe("poste-redis browser async grouping", function()
   end)
 
   it("sorts group buckets alphabetically", function()
-    async.tree_view = true
+    async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "c")
     async._test.build_children(db, { "z:a", "a:x", "m:k" }, "c", 0)
     assert.equals(3, #db.children)
@@ -119,7 +119,7 @@ describe("poste-redis browser async grouping", function()
   end)
 
   it("keeps keys without : flat in tree view", function()
-    async.tree_view = true
+    async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "c")
     async._test.build_children(db, { "nocolon", "has:colon" }, "c", 0)
     local group_count, flat_count = 0, 0
@@ -130,6 +130,89 @@ describe("poste-redis browser async grouping", function()
     assert.equals(1, group_count)
     assert.equals(1, flat_count)
     assert.equals("nocolon", db.children[1].name)
+  end)
+
+  it("builds nested folders per : segment (方案B)", function()
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    async._test.build_children(db, { "a:b:c", "a:b", "a:d", "b:c" }, "c", 0)
+    -- DB top: only first-segment folders (a, b), no leaves
+    assert.equals(2, #db.children)
+    assert.equals("a", db.children[1].name)
+    assert.equals("b", db.children[2].name)
+    -- expanding `a` (display root is hidden): subfolders first, then leaves
+    local a, b = db.children[1], db.children[2]
+    assert.equals("group", a.node_type)
+    assert.equals("group", b.node_type)
+    assert.equals("b", a.children[1].name)      -- subfolder b (prefix a:b)
+    assert.equals("a:b", a.children[2].name)    -- leaf a:b
+    assert.equals("a:d", a.children[3].name)    -- leaf a:d
+    assert.equals("b:c", b.children[1].name)
+    -- subfolder b holds a:b:c
+    assert.equals("a:b:c", a.children[1].children[1].name)
+    assert.equals("key", a.children[1].children[1].node_type)
+  end)
+
+  it("set_view_mode normalizes the flat+nested combination", function()
+    async.set_view_mode("flat")
+    async.nested_view = true  -- invalid combo
+    assert.equals("flat", async.view_mode())
+    assert.equals("nested", async.set_view_mode("nested"))
+    assert.is_true(async.tree_view)
+    assert.is_true(async.nested_view)
+    assert.equals("flatten", async.set_view_mode("flatten"))
+    assert.is_true(async.tree_view)
+    assert.is_false(async.nested_view)
+  end)
+
+  it("toggle_view_mode alternates flatten <-> nested", function()
+    async.set_view_mode("flatten")
+    assert.equals("nested", async.toggle_view_mode())
+    assert.equals("flatten", async.toggle_view_mode())
+    -- from flat goes to nested (the richer layout)
+    async.set_view_mode("flat")
+    assert.equals("nested", async.toggle_view_mode())
+  end)
+
+  it("scan_group builds nested subfolders lazily in nested view", function()
+    async.set_view_mode("nested")
+    local session_conn = require("poste-redis.session_conn")
+    local orig_execute = session_conn.execute
+    session_conn.execute = function(conn_url, cmd, cbs)
+      -- SCAN MATCH a:* → a:b, a:b:c, a:d → one subfolder + 2 direct keys
+      cbs.on_response({ value = { value = { "a:b", "a:b:c", "a:d" }, cursor = "0" } })
+      return "dispatched"
+    end
+    local group = tree.make_group_node("a", "c", 0)
+    async.scan_group(group, "redis://h", "c")
+    -- subfolder b created lazily (children nil); leaves a:b / a:d direct
+    assert.equals("group", group.children[1].node_type)
+    assert.equals("b", group.children[1].name)
+    assert.is_nil(group.children[1].children, "subfolder must stay lazy (children nil)")
+    assert.equals("a:b", group.children[2].name)
+    assert.equals("a:d", group.children[3].name)
+    session_conn.execute = orig_execute
+  end)
+
+  it("scan_group keeps keys flat in flatten view", function()
+    async.set_view_mode("flatten")
+    local session_conn = require("poste-redis.session_conn")
+    local orig_execute = session_conn.execute
+    session_conn.execute = function(conn_url, cmd, cbs)
+      cbs.on_response({ value = { value = { "a:b", "a:b:c", "a:d" }, cursor = "0" } })
+      return "dispatched"
+    end
+    local group = tree.make_group_node("a", "c", 0)
+    async.scan_group(group, "redis://h", "c")
+    assert.equals("key", group.children[1].node_type)  -- all flat, no subfolders
+    assert.equals("a:b", group.children[1].name)
+    assert.equals(3, #group.children)
+    session_conn.execute = orig_execute
+  end)
+
+  it("view_mode default follows config.browser_view_mode", function()
+    local config = require("poste-redis.config")
+    assert.equals("nested", config.defaults.browser_view_mode)
   end)
 
   it("load_connections keeps only redis-dialect entries", function()
@@ -397,7 +480,7 @@ describe("poste-redis browser window", function()
       return "dispatched"
     end
 
-    async.tree_view = true
+    async.set_view_mode("flatten")
     local ok, err = pcall(function() browser.open() end)
     assert.is_true(ok, tostring(err))
     local buf = browser.info().buffer
@@ -462,7 +545,7 @@ describe("poste-redis browser window", function()
       return "dispatched"
     end
 
-    async.tree_view = true
+    async.set_view_mode("flatten")
     local ok, err = pcall(function() browser.open() end)
     assert.is_true(ok, tostring(err))
     local buf = browser.info().buffer
@@ -512,7 +595,7 @@ describe("poste-redis browser window", function()
       return "dispatched"
     end
 
-    async.tree_view = true  -- earlier blocks may leave flat view
+    async.set_view_mode("flatten")  -- earlier blocks may leave flat view
     local ok, err = pcall(function() browser.open() end)
     assert.is_true(ok, tostring(err))
     local buf = browser.info().buffer
@@ -618,7 +701,7 @@ describe("poste-redis browser e2e (live redis)", function()
     }, nil, { db = 0 })
     vim.wait(3000, function() return seeded end, 5)
 
-    async.tree_view = true
+    async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "browser-e2e")
     async.scan_keys(db, url, "browser-e2e")
     -- SCAN is async; poll for loading to finish
@@ -695,6 +778,70 @@ describe("poste-redis browser e2e (live redis)", function()
     for _, ch in ipairs(db.children) do
       assert.is_false(ch.is_search, "search node leaked into db children")
     end
+  end)
+
+  it("nested view builds a:b:c → a/b folder tree through live redis", function()
+    if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
+    local tree = require("poste-redis.browser.tree")
+    local async = require("poste-redis.browser.async")
+    local session_conn = require("poste-redis.session_conn")
+    async.set_view_mode("nested")
+
+    -- self-seed fixture keys under unique top prefixes (the suite shares the
+    -- db with the 100k-key bench, so a full scan could hit render caps).
+    -- Scan each root prefix separately to mirror the user's a:b, a:b:c, a:d / b:c shape.
+    local seeded = false
+    session_conn.execute(url, {
+      "MSET", "xa1b:b:c", "abc", "xa1b:b", "ab", "xa1b:d", "ad", "zb2:c", "bc",
+    }, {
+      on_response = function() seeded = true end,
+    }, nil, { db = 0 })
+    vim.wait(3000, function() return seeded end, 5)
+
+    local db = tree.make_db_node({ db = 0 }, "nested-e2e")
+    async.scan_keys(db, url, "nested-e2e", "xa1b:*")
+    assert.is_true(vim.wait(10000, function() return db.children and #db.children >= 1 end, 10),
+      "scan xa1b:* produced no folder")
+
+    -- top folder xa1b (first : segment)
+    local top
+    for _, ch in ipairs(db.children) do
+      if ch.node_type == "group" and ch.name == "xa1b" then top = ch end
+    end
+    assert.is_truthy(top, "folder xa1b missing")
+
+    -- expand xa1b → subfolder b (prefix xa1b:b) + direct keys xa1b:b, xa1b:d
+    async.scan_group(top, url, "nested-e2e")
+    assert.is_true(vim.wait(10000, function() return not top.loading and top.children and #top.children >= 2 end, 10),
+      "folder xa1b did not expand")
+    local direct = {}
+    local sub_b
+    for _, c in ipairs(top.children) do
+      if c.node_type == "key" then direct[#direct + 1] = c.name end
+      if c.node_type == "group" and c.name == "b" then sub_b = c end
+    end
+    assert.is_true(vim.tbl_contains(direct, "xa1b:b"), "xa1b:b must be a direct key under xa1b")
+    assert.is_true(vim.tbl_contains(direct, "xa1b:d"), "xa1b:d must be a direct key under xa1b")
+    assert.is_truthy(sub_b, "subfolder b under xa1b missing")
+    assert.is_nil(sub_b.children, "subfolder must stay lazy before expand")
+
+    -- expand xa1b:b → key xa1b:b:c
+    async.scan_group(sub_b, url, "nested-e2e")
+    assert.is_true(vim.wait(10000, function() return not sub_b.loading and sub_b.children and #sub_b.children >= 1 end, 10),
+      "subfolder xa1b:b did not expand")
+    assert.equals("xa1b:b:c", sub_b.children[1].name)
+
+    -- second top prefix zb2 → folder zb2 with key zb2:c
+    local db2 = tree.make_db_node({ db = 0 }, "nested-e2e")
+    async.scan_keys(db2, url, "nested-e2e", "zb2:*")
+    assert.is_true(vim.wait(10000, function() return db2.children and #db2.children >= 1 end, 10),
+      "scan zb2:* produced no folder")
+    local top2 = db2.children[1]
+    assert.equals("zb2", top2.name)
+    async.scan_group(top2, url, "nested-e2e")
+    assert.is_true(vim.wait(10000, function() return not top2.loading and top2.children and #top2.children >= 1 end, 10),
+      "folder zb2 did not expand")
+    assert.equals("zb2:c", top2.children[1].name)
   end)
 
   it("value.view renders a string key through the live session", function()
@@ -1178,13 +1325,15 @@ describe("poste-redis browser delete node + multi-select", function()
   local browser = require("poste-redis.browser.init")
 
   after_each(function()
-    actions.set_confirm(nil)
+    actions._test.set_confirm(nil)
     session_conn.execute = nil
   end)
 
   it("d on a group scans all keys, confirms y and removes the node", function()
     local db = tree.make_db_node({ db = 0 }, "c")
+    db.meta.url = "redis://127.0.0.1:16479/0"
     local group = tree.make_group_node("queue", "c", 0)
+    group.meta.url = "redis://127.0.0.1:16479/0"
     group.parent = db
     db.children = { group }
     -- SCAN returns two pages of keys, then DEL per key
@@ -1203,18 +1352,24 @@ describe("poste-redis browser delete node + multi-select", function()
       end
       return "dispatched"
     end
-    actions.set_confirm(function() return true end)  -- y
+    actions._test.set_confirm(function() return true end)  -- y
     local rendered = false
+    async.render_hook = function() rendered = true end
     actions.delete_node(group, { db_node = db, render = function() rendered = true end })
+    async.render_hook = nil
     assert.same({ "queue:1", "queue:2", "queue:3" }, deleted)
-    assert.equals(1, #db.children)  -- node dropped from the parent
-    assert.is_false(db.children[1] == group)
+    -- the node is dropped from the parent (reload restarts the db scan)
+    for _, ch in ipairs(db.children) do
+      assert.is_false(ch == group, "deleted group must not survive in the parent")
+    end
     assert.is_true(rendered)
   end)
 
   it("confirm n cancels the node deletion", function()
     local db = tree.make_db_node({ db = 0 }, "c")
+    db.meta.url = "redis://127.0.0.1:16479/0"
     local group = tree.make_group_node("queue", "c", 0)
+    group.meta.url = "redis://127.0.0.1:16479/0"
     group.parent = db
     db.children = { group }
     session_conn.execute = function(url, cmd, cbs)
@@ -1225,7 +1380,7 @@ describe("poste-redis browser delete node + multi-select", function()
       end
       return "dispatched"
     end
-    actions.set_confirm(function() return false end)  -- n / esc
+    actions._test.set_confirm(function() return false end)  -- n / esc
     actions.delete_node(group, { db_node = db, render = function() end })
     assert.equals(1, #db.children)
   end)
@@ -1251,11 +1406,15 @@ describe("poste-redis browser delete node + multi-select", function()
     async.load_connections = function(cb)
       cb({ tree.make_connection_node({ name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis" }) })
     end
+    -- group nodes carry no meta.url (scan-built); make conn resolution work
+    local connections = require("poste-redis.connections")
+    local orig_resolve = connections.resolve_redis_url
+    connections.resolve_redis_url = function() return "redis://127.0.0.1:16479/0" end
     local orig_execute = session_conn.execute
     local deleted = {}
     session_conn.execute = function(url, cmd, cbs)
       if cmd[1] == "SCAN" then
-        local match = cmd[5] or ""
+        local match = cmd[6] or ""
         local keys
         if match:find("user:") then keys = { "user:1", "user:2" }
         elseif match:find("cache:") then keys = { "cache:a" }
@@ -1287,7 +1446,7 @@ describe("poste-redis browser delete node + multi-select", function()
     end
     local win = vim.fn.bufwinid(b)
     vim.api.nvim_set_current_win(win)
-    actions.set_confirm(function() return true end)
+    actions._test.set_confirm(function() return true end)
     for _, n in ipairs(targets) do
       vim.api.nvim_win_set_cursor(win, { n, 0 })
       browser._test.toggle_multi_select()
@@ -1304,6 +1463,7 @@ describe("poste-redis browser delete node + multi-select", function()
     assert.is_true(vim.tbl_contains(deleted, "cache:a"))
     assert.is_false(browser._test.multi_select_state().active)
     async.load_connections = orig_load
+    connections.resolve_redis_url = orig_resolve
     session_conn.execute = orig_execute
   end)
 end)

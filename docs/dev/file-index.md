@@ -36,7 +36,7 @@ fallback — see `requirements.md`.
 | File | Role |
 |------|------|
 | `tree.lua` | Node model (connection → db → group → key), flatten + highlights, `get_node_at_line` |
-| `async.lua` | SCAN cursor batching (`config.scan_count`), MATCH filter, `:`-prefix grouping (tree view) / flat view, epoch stale guard; `load_connections`, `fetch_dbs` (DBSIZE probe) |
+| `async.lua` | SCAN cursor batching (`config.scan_count`), MATCH filter, `:`-prefix grouping (flatten vs nested view, `browser_view_mode`), epoch stale guard; `load_connections`, `fetch_dbs` (DBSIZE probe) |
 | `value.lua` | TYPE-first paginated value viewer: HSCAN/SSCAN/ZSCAN pages, LRANGE windows, XRANGE, string GET (truncated + `F` full load); page tabs + loaded/total footer |
 | `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate |
 | `init.lua` | `poste://redis_browser` right-hand split, keymaps, `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
@@ -88,7 +88,7 @@ fallback — see `requirements.md`.
 | `redis/result_grid_spec.lua` | grid: layout widths, render_page + pagination, panel cell navigation, page flip, search, yank cell/column, preview, header slicing |
 | `redis/exec_run_spec.lua` | transport contract (stubbed `poste.cli`), stale-guard, USE grouping |
 | `redis/session_conn_spec.lua` | M2 session pool (stubbed jobstart): start args, reuse, seq pairing, error routing, exit drops session, cleanup_buf, db auto-SELECT, chunk-split stdout |
-| `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/tree toggle, value page commands + live-redis e2e (SCAN groups, string/hash value render, TTL/DEL/RENAME) |
+| `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/flatten/nested view modes, value page commands + live-redis e2e (SCAN groups, string/hash value render, TTL/DEL/RENAME) |
 | `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close, grid tab render |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |

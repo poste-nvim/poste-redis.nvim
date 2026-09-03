@@ -10,7 +10,7 @@ local KNOWLEDGE = [[You are running inside poste-redis.nvim, a Redis execution p
 
 ## What the user's environment provides
 - Redis connections live in a project `connections.toml` (`dialect = "redis"`, url or host/port/password via {{vars}} from .env).
-- The key browser (`:PosteRedisBrowser`) shows connections → dbs → `:`-prefix groups → keys, with type icons, node info (`i`), delete (`d`), multi-select (`<Tab>` then `D`) and search (`<leader>/`).
+- The key browser (`:PosteRedisBrowser`) shows connections → dbs → keys, with type icons, node info (`i`), delete (`d`), multi-select (`<Tab>` then `D`) and search (`<leader>/`). Three view modes via `:PosteRedisBrowserView [flat|flatten|nested]`: `flatten` groups keys by the first `:`-segment (方案A), `nested` builds folders per every `:`-segment (方案B), `flat` lists keys directly.
 - The result panel renders GET/HGETALL/LRANGE/SMEMBERS/ZRANGE replies as a navigable grid; `i`/`o`/`dd` edit cells, `r` refreshes.
 - Execution context: the current connection is the one selected with `:PosteRedisContext`; a `USE <name>` line in a .redis buffer also switches connection.
 - Completion suggests keys via SCAN MATCH `prefix*` while typing arguments.

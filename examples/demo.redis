@@ -5,6 +5,12 @@
 USE local              # 切换到 connections.toml 里的 local 连接
 SELECT 3               # 真·Redis 命令：切 db（M1 exec 模式，每次独立进程）
 
+set a:b:c "abc"
+set b:c "bc"
+set a:b "ab"
+set a:d "ad"
+get a:b:c
+
 # ── String ──
 SET session:abc "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0" EX 3600
 GET session:abc
@@ -48,3 +54,15 @@ GET plain
 
 # ── 清理：危险命令（M1 提示黄色警告，不拦截） ──
 DEL user:42 queue:jobs tags:dev board counter:hits note plain queue:email
+
+-- @connection local
+ZADD leaderboard:test:demo 920 "player_a"
+ZADD leaderboard:test:demo 850 "player_b"
+ZADD leaderboard:test:demo 780 "player_c"
+ZADD leaderboard:test:demo 640 "player_d"
+ZADD leaderboard:test:demo 510 "player_e"
+ZREVRANGE leaderboard:test:demo 0 4 WITHSCORES
+ZREVRANK leaderboard:test:demo "player_c"
+ZSCORE leaderboard:test:demo "player_b"
+ZINCRBY leaderboard:test:demo 120 "player_c"
+ZREVRANGE leaderboard:test:demo 0 4 WITHSCORES

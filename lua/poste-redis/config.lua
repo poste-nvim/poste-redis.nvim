@@ -33,6 +33,13 @@ M.defaults = {
   -- follows): a 100k-key group must not crowd its sibling groups out of the
   -- tree entirely.
   render_max_per_node = 500,
+  -- Key browser tree view:
+  --   "nested"  → folders nest per `:`-segment (`a:b:c` → `a`/`b`/key,
+  --               `a:b` sits in `a` alongside the `b` subfolder) — 方案B.
+  --   "flatten" → one folder per first `:`-segment, keys flat inside — 方案A.
+  --   "flat"    → every key hangs directly under the db node.
+  -- No-arg `:PosteRedisBrowserView` toggles flatten <-> nested.
+  browser_view_mode = "nested",
   -- Result panel split: share of the editor height.
   result_height_ratio = 0.4,
   -- Execute confirm heuristic: write commands always require a confirm

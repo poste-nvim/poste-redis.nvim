@@ -173,7 +173,9 @@ end
 ----------------------------------------------------------------------
 
 --- Expand a group node's children (lazy scan_group). Keys are leaves; the db
---- lives in the header select, not the tree.
+--- lives in the header select, not the tree. In nested view the subfolders
+--- created by scan_group recurse here the same way — each is its own lazy
+--- scan_group until the SPLIT_NEST cap turns further keys into flat leaves.
 --- @param node table group node
 --- @param conn_url string
 local function expand_node(node, conn_url)
@@ -544,8 +546,10 @@ local function setup_browser_buffer()
         "  i     node info (count / memory / ttl)",
         "  t     show/edit TTL (secs, -1 = PERSIST)",
         "  R     rename key (conflict-checked)",
-        "  i     node info (count / memory / ttl)",
         "  q     close browser",
+        "  :PosteRedisBrowserView [flat|flatten|nested]  switch view mode",
+        "          flatten = one folder per first : segment (方案A)",
+        "          nested  = folders nest per : segment (方案B)",
         "  (/ stays nvim's own buffer search)",
       }
       vim.api.nvim_echo(lines, true, {})
@@ -624,10 +628,19 @@ function M.close()
   end
 end
 
---- Toggle between tree view (default) and flat key view. Any active search
---- is cleared first — the rebuild walks the db node's unfiltered children.
-function M.toggle_view()
-  async.tree_view = not async.tree_view
+--- Toggle between flatten (方案A: one folder per first `:`-segment, keys flat
+--- underneath) and nested (方案B: folders nest per segment). Any active search
+--- is cleared first — the rebuild walks the db node's collected keys. Use
+--- :PosteRedisBrowserView with an argument (flat|flatten|nested) for a
+--- specific mode.
+--- @param mode? string|nil "flat" | "flatten" | "nested" (nil = toggle)
+function M.toggle_view(mode)
+  local applied
+  if mode and (mode == "flat" or mode == "flatten" or mode == "nested") then
+    applied = async.set_view_mode(mode)
+  else
+    applied = async.toggle_view_mode()
+  end
   M.search_clear()
   if current_db_node and current_db_node.children then
     local keys = {}
@@ -645,8 +658,10 @@ function M.toggle_view()
     current_db_node.expanded = true
   end
   render_tree()
-  vim.notify(async.tree_view and "Tree view" or "Flat view",
-    vim.log.levels.INFO, { title = redis_state.TITLE })
+  local label = applied == "nested" and "Nested folders (方案B) — :PosteRedisBrowserView flattens"
+    or (applied == "flatten" and "Flatten folders (方案A) — :PosteRedisBrowserView nests"
+    or "Flat view — :PosteRedisBrowserView [flatten|nested] for folders")
+  vim.notify(label, vim.log.levels.INFO, { title = redis_state.TITLE })
 end
 
 --- Clear any active search results and restore the tree (public, for the
@@ -666,7 +681,7 @@ function M.info()
     connection = current_conn and current_conn.name,
     db = current_db,
     sessions = session_conn.list(),
-    tree_view = async.tree_view,
+    view_mode = async.view_mode(),
   }
 end
 

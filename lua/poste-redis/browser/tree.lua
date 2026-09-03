@@ -73,10 +73,12 @@ function M.make_db_node(item, conn_name)
   }
 end
 
-function M.make_group_node(prefix, conn_name, db)
+function M.make_group_node(prefix, conn_name, db, name)
   return {
     node_type = "group",
-    name = prefix,
+    -- In nested view a folder shows its local segment (e.g. the `b` of
+    -- prefix `a:b`); flatten view passes no name → display = full prefix.
+    name = name or prefix,
     full_name = conn_name .. "/" .. tostring(db) .. "/" .. prefix,
     children = nil,        -- nil until scan_group loads it (lazy, M2+)
     expanded = false,

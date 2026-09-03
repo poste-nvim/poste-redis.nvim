@@ -30,10 +30,18 @@ function M.setup()
     require("poste-redis.browser.init").open()
   end, { desc = "Open the redis key browser" })
 
-  vim.api.nvim_create_user_command("PosteRedisBrowserView", function()
+  vim.api.nvim_create_user_command("PosteRedisBrowserView", function(args)
     local browser = require("poste-redis.browser.init")
-    browser.toggle_view()
-  end, { desc = "Toggle browser tree/flat view" })
+    if args.args and args.args ~= "" then
+      browser.toggle_view(args.args)
+    else
+      browser.toggle_view()
+    end
+  end, {
+    nargs = "?",
+    complete = function() return { "flat", "flatten", "nested" } end,
+    desc = "Toggle browser view; or set one: flat (no folders), flatten (方案A), nested (方案B)",
+  })
 
   vim.api.nvim_create_user_command("PosteRedisInfo", function()
     local state = require("poste.state")

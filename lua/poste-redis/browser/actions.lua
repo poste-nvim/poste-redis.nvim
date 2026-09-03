@@ -241,38 +241,10 @@ function M.delete_nodes(nodes, ctx)
     end
   end
   local pending_scans = 0
-  local confirm_and_run  -- forward declaration: scan callbacks call it
-  for _, job in ipairs(jobs) do
-    if job.node.node_type == "group" then
-      pending_scans = pending_scans + 1
-      local match = (job.node.meta.prefix or "") .. ":*"
-      local db = job.node.meta and job.node.meta.db
-      local function scan_next(cursor)
-        session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", match }, {
-          on_response = function(ev)
-            for _, k in ipairs(ev.value and ev.value.value or {}) do
-              if type(k) == "string" then job.keys[#job.keys + 1] = k end
-            end
-            local cursor2 = (ev.value and ev.value.cursor) or "0"
-            if cursor2 == "0" then
-              pending_scans = pending_scans - 1
-              if pending_scans == 0 then confirm_and_run() end
-            else
-              scan_next(cursor2)
-            end
-          end,
-          on_error = function(msg)
-            notify("SCAN failed: " .. tostring(msg), vim.log.levels.ERROR)
-            pending_scans = pending_scans - 1
-            if pending_scans == 0 then confirm_and_run() end
-          end,
-        }, nil, { db = db })
-      end
-      scan_next("0")
-    end
-  end
-
-  function confirm_and_run()
+  -- Batch delete helper. Defined BEFORE the group-scan loop: scan callbacks
+  -- (which may fire synchronously in tests) call confirm_and_run, so it must
+  -- be bound before any group's scan_next dispatches.
+  local function confirm_and_run()
     if pending_scans > 0 then return end
     local total = 0
     for _, job in ipairs(jobs) do total = total + #job.keys end
@@ -310,6 +282,36 @@ function M.delete_nodes(nodes, ctx)
       }, nil, { db = nodes[1].meta and nodes[1].meta.db })
     end
     del_next(1)
+  end
+
+  for _, job in ipairs(jobs) do
+    if job.node.node_type == "group" then
+      pending_scans = pending_scans + 1
+      local match = (job.node.meta.prefix or "") .. ":*"
+      local db = job.node.meta and job.node.meta.db
+      local function scan_next(cursor)
+        session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", match }, {
+          on_response = function(ev)
+            for _, k in ipairs(ev.value and ev.value.value or {}) do
+              if type(k) == "string" then job.keys[#job.keys + 1] = k end
+            end
+            local cursor2 = (ev.value and ev.value.cursor) or "0"
+            if cursor2 == "0" then
+              pending_scans = pending_scans - 1
+              if pending_scans == 0 then confirm_and_run() end
+            else
+              scan_next(cursor2)
+            end
+          end,
+          on_error = function(msg)
+            notify("SCAN failed: " .. tostring(msg), vim.log.levels.ERROR)
+            pending_scans = pending_scans - 1
+            if pending_scans == 0 then confirm_and_run() end
+          end,
+        }, nil, { db = db })
+      end
+      scan_next("0")
+    end
   end
 
   if pending_scans == 0 then confirm_and_run() end
