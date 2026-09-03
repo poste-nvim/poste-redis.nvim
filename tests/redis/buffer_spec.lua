@@ -140,6 +140,11 @@ describe("poste-redis result buffer", function()
     -- non-grid tabs carry the db but no key binding
     assert.equals(3, tabs[2].meta.db)
     assert.is_nil(tabs[2].meta.key)
+    -- named USE groups win over the run-level URL fallback (winbar context)
+    buffer.render({ { seq = 3, command = "GET k", status = "", latency_ms = 1, db = 1,
+      connection_name = "local", value = { type = "string", value = "x" } } },
+      { render = false, connection = "redis://h:6379/0" })
+    assert.equals("local", buffer._tabs()[1].meta.connection)
   end)
 
   it("dangerous commands produce a tab and do not crash", function()

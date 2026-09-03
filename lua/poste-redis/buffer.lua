@@ -280,7 +280,9 @@ function M.render(results, opts)
   state.last_value = nil
   for _, ev in ipairs(results or {}) do
     local out = format.format_result(ev)
-    if opts.connection then out.meta.connection = opts.connection end
+    -- named USE groups win over the run-level fallback (URL) so the winbar
+    -- shows "local db3", not a host
+    out.meta.connection = ev.connection_name or opts.connection or out.meta.connection
     -- Context travels with the result: the db the command ran on (stamped by
     -- exec_run, SELECT-aware) and, for editable grid tabs, the key argument —
     -- grid_edit needs both to write where the command actually was.

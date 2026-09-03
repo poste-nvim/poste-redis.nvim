@@ -80,6 +80,24 @@ describe("poste-redis runner indicators", function()
     assert.equals(src, vim.api.nvim_get_current_buf())
   end)
 
+  it("re-injects the file's SELECT above the cursor for single-line runs", function()
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE local", "SELECT 3", "GET session:abc" })
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    exec_run.run_selection_async = function(_buf, _mode, _opts, callbacks)
+      callbacks.on_start(1, 42)
+      callbacks.on_done({
+        { seq = 1, command = "SELECT 3", status = "OK", latency_ms = 1, value = { type = "string", value = "OK" } },
+        { seq = 2, command = "GET session:abc", status = "\"v\"", latency_ms = 1, value = { type = "string", value = "v" } },
+      }, {})
+    end
+    runner.run_selection("cursor")
+    -- the injected SELECT's indicator lands on the file's own SELECT line;
+    -- the USE line gets none
+    assert.is_true(has_sign(src, 1, "PosteIndicatorSuccess"))
+    assert.is_true(has_sign(src, 2, "PosteIndicatorSuccess"))
+    assert.is_false(has_sign(src, 0, "PosteIndicatorSuccess"))
+  end)
+
   it("places success on the source buffer when running the file", function()
     exec_run.run_file_async = function(buf, opts, callbacks)
       callbacks.on_done({

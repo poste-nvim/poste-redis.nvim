@@ -114,6 +114,23 @@ function M.run_selection(mode, range)
     end
   end
 
+  -- Context inheritance, symmetric with USE: a selection run spawns a fresh
+  -- redis-exec connection (db 0), so the nearest SELECT above the selection
+  -- is re-injected as the batch's first command — results then carry (and
+  -- edit against) the db the file declared. Its indicator lands on the
+  -- file's own SELECT line.
+  if entries[1] and entries[1].start_line then
+    local db, db_line = exec_run._db_for(src, entries[1].start_line)
+    if db and db > 0 then
+      local sel = parser.extract_entries(("SELECT %d\n"):format(db))[1]
+      if sel then
+        sel.start_line = db_line
+        table.insert(entries, 1, sel)
+        table.insert(batch_lines, 1, db_line - 1)
+      end
+    end
+  end
+
   local ok, indicators = pcall(require, "poste.indicators")
   if ok then indicators.clear_all(src) end
 
@@ -130,8 +147,8 @@ function M.run_selection(mode, range)
       vim.notify(msg, vim.log.levels.ERROR, { title = constants.TITLE })
     end,
     on_done = function(results, summaries)
-      local conn = exec_run._connection_for(src)
-      present(results, summaries, { connection = conn, src = src, batch_lines = batch_lines })
+      local url, name = exec_run._connection_for(src)
+      present(results, summaries, { connection = name or url, src = src, batch_lines = batch_lines })
     end,
   })
 end
@@ -167,16 +184,24 @@ function M.run_file()
   end
 
   local all_results = {}
+  local last_conn_name = nil  -- last USE group's name (multi-USE files)
   exec_run.run_file_async(src, {}, {
     on_result = function(ev)
       all_results[#all_results + 1] = ev
+    end,
+    on_group = function(g)
+      last_conn_name = g.connection_name or last_conn_name
     end,
     on_error = function(msg, _stderr)
       vim.notify(msg, vim.log.levels.ERROR, { title = constants.TITLE })
     end,
     on_done = function(results, summaries)
-      local conn = exec_run._connection_for(src)
-      present(results, summaries, { connection = conn, src = src, batch_lines = batch_lines })
+      local url, name = exec_run._connection_for(src)
+      present(results, summaries, {
+        connection = last_conn_name or name or url,
+        src = src,
+        batch_lines = batch_lines,
+      })
     end,
   })
 end

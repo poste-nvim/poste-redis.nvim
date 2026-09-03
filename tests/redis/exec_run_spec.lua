@@ -388,4 +388,19 @@ describe("poste-redis exec_run", function()
     assert.equals(0, results[2].db)
     exec_run.cancel()
   end)
+
+  it("_db_for finds the nearest SELECT above a line, scoped to its USE section", function()
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, {
+      "USE a", "SELECT 3", "GET x", "USE b", "GET y",
+    })
+    local db, line = exec_run._db_for(src, 3)
+    assert.equals(3, db)
+    assert.equals(2, line)
+    -- USE b starts a new section: the old SELECT no longer applies
+    assert.is_nil(exec_run._db_for(src, 5))
+    -- before the SELECT there is nothing to inherit
+    assert.is_nil(exec_run._db_for(src, 2))
+    vim.api.nvim_buf_delete(src, { force = true })
+  end)
 end)

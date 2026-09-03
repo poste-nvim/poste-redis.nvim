@@ -328,6 +328,9 @@ local function dispatch_group(groups, index, opts, callbacks, all_results, all_s
     on_start = callbacks.on_start,
     on_progress = callbacks.on_progress,
     on_result = function(ev)
+      -- which USE group produced this result (nil for the default URL) —
+      -- the panel stamps it per tab so multi-USE files show real contexts
+      ev.connection_name = g.connection_name
       all_results[#all_results + 1] = ev
       guarded(exec_seq, callbacks.on_result, ev)()
     end,
@@ -420,12 +423,41 @@ function M._connection_for(buf)
   return nil, nil
 end
 
+--- The db a statement at `before_line` (1-based) would run on: the nearest
+--- SELECT above it within the current USE section. Single-statement runs
+--- spawn a fresh redis-exec connection (db 0), so the file's own SELECT is
+--- the only thing that can rebind it — the runner re-injects it.
+--- @param buf number
+--- @param before_line number  1-based line the scan stops at (exclusive)
+--- @return number|nil db, number|nil line_1  1-based line of that SELECT
+function M._db_for(buf, before_line)
+  local entries = parser.buffer_entries(buf)
+  local last_use_line = 0
+  for _, e in ipairs(entries) do
+    if before_line and e.start_line and e.start_line >= before_line then break end
+    if e.kind == "use" and e.start_line then last_use_line = e.start_line end
+  end
+  local db, db_line
+  for _, e in ipairs(entries) do
+    if before_line and e.start_line and e.start_line >= before_line then break end
+    if e.kind == "command" and e.start_line and e.start_line > last_use_line then
+      local args = parser.entry_args(e)
+      if args[1] == "SELECT" and tonumber(args[2]) then
+        db = tonumber(args[2])
+        db_line = e.start_line
+      end
+    end
+  end
+  return db, db_line
+end
+
 M._test = {
   decode_line = decode_line,
   guarded = guarded,
   seq_of = M.seq_of,
   is_busy = M.is_busy,
   cancel = M.cancel,
+  _db_for = M._db_for,
 }
 
 return M
