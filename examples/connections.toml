@@ -5,10 +5,12 @@
 [local]
 dialect = "redis"
 url = "redis://127.0.0.1:16479/0"
+color = "MiniStatuslineModeReplace"
 
 [local-db2]
 dialect = "redis"
 url = "redis://127.0.0.1:16479/1"
+color = "MiniStatuslineModeOther"
 
 # 分字段形式（url 缺省时拼接）—— 取消注释启用
 # [local-fields]

@@ -400,7 +400,7 @@ function M.select_context()
           end
           local hl = statusline.get_ctx_color(c.name)
           vim.notify(("Context: %s%s"):format(c.name,
-            hl and (" (%s)" % hl) or ""),
+            hl and (" (%s)"):format(hl) or ""),
             vim.log.levels.INFO, { title = redis_state.TITLE })
           pcall(function() require("poste-redis.browser.init").open({ source_buf = vim.api.nvim_get_current_buf() }) end)
           break
