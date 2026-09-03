@@ -1701,4 +1701,30 @@ describe("poste-redis browser child counts", function()
     assert.same({ "  10", "  1" }, counts)
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  it("keeps the stamped count while the group's own scan is in flight", function()
+    -- scan_group resets children to {} and renders before the first SCAN
+    -- page lands: the display must not flash 0 over a valid stamp
+    local buf = vim.api.nvim_create_buf(false, true)
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local loading = tree.make_group_node("bench", "c", 0)
+    loading.children = {}
+    loading.loading = true
+    loading._child_count = 10
+    db.children = { loading }
+    db.expanded = true
+    tree.display_root = db
+    tree.header_lines = { "", "----------------" }
+    tree.render_tree(buf, {}, { db })
+    tree.display_root = nil
+
+    local ns = vim.api.nvim_create_namespace("poste_redis_browser")
+    local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+    local counts = {}
+    for _, m in ipairs(marks) do
+      if m[4].virt_text then counts[#counts + 1] = m[4].virt_text[1][1] end
+    end
+    assert.same({ "  10" }, counts)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
 end)

@@ -287,10 +287,13 @@ end
 
 --- Direct-children count for a group row: loaded nodes count their rendered
 --- children; lazy headers carry the keys-under-prefix count stamped by the
---- parent's scan (`_child_count`).
+--- parent's scan (`_child_count`). While the group's own scan is in flight,
+--- children was just reset to an empty table — keep showing the stamp there,
+--- or every expansion would flash 0 before the first SCAN page lands.
 --- @param node table
 --- @return number|nil
 local function child_count(node)
+  if node.loading and node._child_count then return node._child_count end
   if type(node.children) == "table" then return #node.children end
   return node._child_count
 end
