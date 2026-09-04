@@ -69,19 +69,27 @@ describe("poste-redis browser header bar overlay", function()
     local cfg = vim.api.nvim_win_get_config(fwin)
     assert.equals("win", cfg.relative)
     assert.equals(win, cfg.win, "overlay must be anchored to the browser window")
-    -- the browser window always paints a winbar: its first screen row is the
-    -- winbar, the overlay pins to the first TEXT row below it
-    assert.equals(1, cfg.row, "overlay must pin below the winbar row")
+    -- relative="win" row 0 is the window's first TEXT row (the winbar is
+    -- excluded from float anchoring): row 1 would land the overlay one row
+    -- low — the bar duplicates on screen and real rows hide under it
+    assert.equals(0, cfg.row, "overlay must pin to the first text row")
     assert.equals(0, cfg.col, "the browser window has no gutter: col 0 is text")
     assert.equals(tree.HEADER_LINES, cfg.height, "overlay mirrors the two header lines")
     assert.equals(vim.api.nvim_win_get_width(win), cfg.width)
     assert.is_false(cfg.focusable, "overlay must not steal focus")
 
-    -- mirror: buffer lines 1-2 (search bar + separator) are the source of truth
+    -- alignment on screen: the overlay's rows sit exactly on the buffer's
+    -- header lines 1-2 (a 1-row offset here is the duplicated-bar bug)
     local fbuf = header_bar._test.state().buf
-    local src = vim.api.nvim_buf_get_lines(buf, 0, tree.HEADER_LINES, false)
-    local dst = vim.api.nvim_buf_get_lines(fbuf, 0, -1, false)
-    assert.same(src, dst)
+    for i = 1, tree.HEADER_LINES do
+      local t = vim.fn.screenpos(win, i, 1)
+      local f = vim.fn.screenpos(fwin, i, 1)
+      assert.equals(t.row, f.row, "overlay row " .. i .. " not on buffer line " .. i)
+      assert.equals(t.col, f.col, "overlay row " .. i .. " column misaligned")
+    end
+    -- mirror: buffer lines 1-2 (search bar + separator) are the source of truth
+    assert.same(vim.api.nvim_buf_get_lines(buf, 0, tree.HEADER_LINES, false),
+      vim.api.nvim_buf_get_lines(fbuf, 0, -1, false))
     -- the idle bar carries its icon as inline virt text (ghost hint with no
     -- query), and the separator row is grayed — both re-applied on the mirror
     local marks = vim.api.nvim_buf_get_extmarks(fbuf, tree._test.search_ns, 0, -1, {})

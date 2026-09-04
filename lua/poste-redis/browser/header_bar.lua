@@ -38,19 +38,18 @@ local function ensure_anchor_guard()
   })
 end
 
---- Overlay geometry for the browser window: the window's first two TEXT rows
---- (below its winbar row), full window width. The browser window carries no
---- gutter (number/sign/fold/status columns are cleared on open), so window
---- col 0 is the first text column.
+--- Overlay geometry for the browser window: the window's first two TEXT rows,
+--- full window width. relative="win" row 0 is the first text row — the
+--- anchor's winbar is EXCLUDED from float anchoring (compensating +1 for it
+--- put the overlay one row low: the bar duplicated on screen and real rows
+--- hid under it). The browser window carries no gutter (number/sign/fold/
+--- status columns are cleared on open), so window col 0 is the first text
+--- column.
 --- @param win number browser window
 --- @return table { row, col, width, height } (nvim_open_win config fields)
 local function geometry(win)
-  local row = 0
-  if vim.api.nvim_get_option_value("winbar", { win = win }) ~= "" then
-    row = 1  -- winbar occupies the window's first screen row
-  end
   return {
-    row = row,
+    row = 0,
     col = 0,
     width = vim.api.nvim_win_get_width(win),
     height = tree.HEADER_LINES,
