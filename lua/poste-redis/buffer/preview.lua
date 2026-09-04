@@ -19,6 +19,18 @@ local function is_json_string(s)
   return ok
 end
 
+--- Try to pretty-print a JSON string; returns original on failure.
+--- @param s string
+--- @return string
+local function pretty_print_json(s)
+  local trimmed = s:match("^%s*(.-)%s*$")
+  if not trimmed then return s end
+  local ok, decoded = pcall(vim.json.decode, trimmed)
+  if not ok then return s end
+  local encoded = vim.json.encode(decoded, { indent = "  " })
+  return encoded or s
+end
+
 local function float(lines, title, filetype)
   local width = math.min(
     constants.FLOAT_MAX_WIDTH,
@@ -87,6 +99,7 @@ function M.cell(tab, last_value)
   else
     text = tostring(raw)
     if is_json_string(text) then
+      text = pretty_print_json(text)
       filetype = "json"
     end
   end
