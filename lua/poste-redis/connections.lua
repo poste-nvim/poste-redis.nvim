@@ -359,8 +359,13 @@ function M.select_connection()
         if string.format("%s  %s", c.name, redis_util.redact_url(c.url or "")) == selected then
           M.apply_connection(c.name, c.url)
           vim.notify("Redis connection: " .. c.name, vim.log.levels.INFO, { title = redis_state.TITLE })
-          -- the open browser follows the new context immediately
-          pcall(function() require("poste-redis.browser.init").open({ source_buf = vim.api.nvim_get_current_buf() }) end)
+          -- the open browser follows the new context immediately (no picker)
+          pcall(function()
+            require("poste-redis.browser.init").open({
+              source_buf = vim.api.nvim_get_current_buf(),
+              connection = { name = c.name, url = c.url },
+            })
+          end)
           break
         end
       end
@@ -402,7 +407,12 @@ function M.select_context()
           vim.notify(("Context: %s%s"):format(c.name,
             hl and (" (%s)"):format(hl) or ""),
             vim.log.levels.INFO, { title = redis_state.TITLE })
-          pcall(function() require("poste-redis.browser.init").open({ source_buf = vim.api.nvim_get_current_buf() }) end)
+          pcall(function()
+            require("poste-redis.browser.init").open({
+              source_buf = vim.api.nvim_get_current_buf(),
+              connection = { name = c.name, url = c.url },
+            })
+          end)
           break
         end
       end

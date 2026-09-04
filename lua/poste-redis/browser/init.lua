@@ -17,6 +17,10 @@
 ---                          display root instead: matched keys REPLACE the
 ---                          tree; <Esc> (search_clear) restores it.
 ---
+--- First open (no connection chosen yet): the window lists the connections.toml
+--- entries INSTEAD of the tree. Nothing is auto-picked — <CR> on a row makes
+--- it the context, lands on db 0, and swaps the list for the layout above.
+---
 --- All I/O goes through browser/async.lua on the persistent redis-session
 --- transport. The browser is scoped to ONE connection + ONE db at a time.
 
@@ -26,6 +30,7 @@ local async = require("poste-redis.browser.async")
 local scan = require("poste-redis.browser.scan")
 local session_conn = require("poste-redis.session_conn")
 local redis_state = require("poste-redis.state")
+local connections = require("poste-redis.connections")
 
 local M = {}
 
@@ -48,6 +53,12 @@ local current_db_node = nil    -- tree.make_db_node(...)
 --- being edited on line 1.
 local search_active = false
 local search_query = ""
+
+--- Connections picker (first open): the browser buffer lists the redis
+--- connections from connections.toml instead of the tree. <CR> on a row
+--- connects it as the context and lands on db 0 — never an automatic pick,
+--- so the context is always an explicit user choice.
+local conn_picker = { active = false, nodes = {} }
 
 --- Multi-select (poste-db db-browser pattern): <Tab> toggles a node into the
 --- selection (restricted to nodes under the current db), <Esc> exits, D
@@ -75,13 +86,18 @@ local function update_winbar()
   end
   if not win or win == -1 then return end
   local parts = {}
-  if current_conn and current_conn.name then
-    local ok_st, statusline = pcall(require, "poste-redis.statusline")
-    local left_hl = ok_st and statusline.get_ctx_color(current_conn.name) or nil
-    parts[#parts + 1] = left_hl and ("%#" .. left_hl .. "# " .. current_conn.name .. " %*")
-      or current_conn.name
+  if conn_picker.active then
+    -- no scope yet: the right side names the pending choice instead of a db
+    parts[#parts + 1] = "%=%#PosteRedisBrowserWinbarDb#select connection %*"
+  else
+    if current_conn and current_conn.name then
+      local ok_st, statusline = pcall(require, "poste-redis.statusline")
+      local left_hl = ok_st and statusline.get_ctx_color(current_conn.name) or nil
+      parts[#parts + 1] = left_hl and ("%#" .. left_hl .. "# " .. current_conn.name .. " %*")
+        or current_conn.name
+    end
+    parts[#parts + 1] = "%=%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. " %*"
   end
-  parts[#parts + 1] = "%=%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. " %*"
   vim.api.nvim_set_option_value("winbar", table.concat(parts), { win = win })
 end
 
@@ -91,6 +107,17 @@ end
 --- render_tree keeps it when a render fires mid-edit.
 local function search_bar_text()
   return search_query
+end
+
+--- Header line 1 while the connections picker is up: a status cue instead of
+--- the search bar (the bar takes the line back once a connection is chosen).
+--- With no redis connections at all the line carries the reason.
+--- @return string
+local function picker_hint_text()
+  if #conn_picker.nodes == 0 then
+    return "No redis connections in connections.toml"
+  end
+  return "Select a connection  (<CR> connect)"
 end
 
 --- Header text for line 3 (separator rule): dashes spanning the browser
@@ -157,6 +184,18 @@ end
 
 local function render_tree()
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
+  if conn_picker.active then
+    -- picker mode: connection rows instead of the tree; line 1 is the
+    -- picker cue (any stale search-bar icon extmark must go with it)
+    tree.header_lines = { picker_hint_text(), separator_text() }
+    tree.display_root = nil
+    line_to_node = tree.render_tree(browser_buf, line_to_node, conn_picker.nodes, nil)
+    tree.clear_search_decoration(browser_buf)
+    tree.decorate_separator(browser_buf, tree.header_lines[2])
+    update_winbar()
+    update_browser_width()
+    return
+  end
   local search_line = search_bar_text()
   if search_active then
     -- a render fired mid-edit (paced SCAN batch): keep the in-progress text
@@ -187,22 +226,6 @@ async.append_hook = function(node, new_nodes)
   return true
 end
 
---- Resolve the preferred connection from the current context (poste.state
---- USE / selector), falling back to the first redis connection.
---- @param nodes table[] connection nodes from async.load_connections
---- @return table|nil
-local function pick_connection(nodes)
-  nodes = nodes or {}
-  local ok, poste_state = pcall(require, "poste.state")
-  local preferred = ok and poste_state.connection
-  if preferred then
-    for _, n in ipairs(nodes) do
-      if n.name == preferred then return n end
-    end
-  end
-  return nodes[1]
-end
-
 --- (Re)select a db: build its node, make it the display root, and scan_keys.
 --- @param db number
 local function select_db(db)
@@ -213,6 +236,79 @@ local function select_db(db)
   search_query = ""
   scan.scan_keys(current_db_node, current_conn.url, current_conn.name)
   render_tree()
+end
+
+----------------------------------------------------------------------
+-- Connections picker (first open): the window lists connections.toml
+-- entries instead of the tree until the user picks one.
+----------------------------------------------------------------------
+
+--- Sort the picker rows by name: list_connections walks the toml table with
+--- pairs(), so the raw order flips between runs — the list must be stable.
+local function sort_picker_nodes(nodes)
+  table.sort(nodes, function(a, b) return (a.name or "") < (b.name or "") end)
+  return nodes
+end
+
+--- Park the cursor on the picker's starting row: the current context's
+--- connection when one is already set (USE / :PosteRedisConnection), else the
+--- first row. Positioning is a hint, not a choice — connecting takes <CR>.
+local function focus_picker_row()
+  local win = browser_win
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    win = browser_buf and vim.api.nvim_buf_is_valid(browser_buf)
+      and vim.fn.bufwinid(browser_buf) or nil
+  end
+  if not win or win == -1 then return end
+  local row = 1
+  local ok, poste_state = pcall(require, "poste.state")
+  local preferred = ok and poste_state.connection
+  if preferred then
+    for i, n in ipairs(conn_picker.nodes) do
+      if n.name == preferred then row = i; break end
+    end
+  end
+  vim.api.nvim_win_set_cursor(win, { tree.HEADER_LINES + row, 0 })
+end
+
+--- Show the connections list in place of the tree (first open, no context
+--- chosen yet). Rendered in the browser window itself so the choice happens
+--- where the tree will live.
+local function show_conn_picker()
+  async.load_connections(function(nodes)
+    conn_picker.active = true
+    conn_picker.nodes = sort_picker_nodes(nodes or {})
+    render_tree()
+    if #conn_picker.nodes == 0 then
+      vim.notify("No redis connections in connections.toml",
+        vim.log.levels.WARN, { title = redis_state.TITLE })
+      return
+    end
+    focus_picker_row()
+  end)
+end
+
+--- Make a connection the browser's context AND the global one (statusline
+--- segment, result-panel stamping, file execution all follow), then land on
+--- db 0 — select_db swaps the picker for the filter bar + separator + tree.
+--- @param name string
+--- @param url string
+local function connect_connection(name, url)
+  if not name or not url then return end
+  current_conn = { name = name, url = url }
+  conn_picker.active = false
+  conn_picker.nodes = {}
+  connections.apply_connection(name, url)
+  select_db(0)
+end
+
+--- <CR> on a picker row: connect that connection. `node` may be nil (test
+--- hook) to take the first listed connection.
+--- @param node table|nil connection node
+local function choose_connection(node)
+  if not node then node = conn_picker.nodes[1] end
+  if not node or node.node_type ~= "connection" then return end
+  connect_connection(node.name, node.meta and node.meta.url)
 end
 
 --- <Space>: pop a dropdown listing dbs of the current connection; picking one
@@ -292,6 +388,7 @@ end
 --- D with an active selection: batch-delete every selected node's keys after
 --- one confirm; without a selection D keeps the single-prefix delete.
 local function delete_selected_or_prefix()
+  if conn_picker.active then return end  -- nothing to delete before a context exists
   if multi_select.active and next(multi_select.selected) then
     local nodes = {}
     for node in pairs(multi_select.selected) do nodes[#nodes + 1] = node end
@@ -328,6 +425,11 @@ end
 local function toggle_node()
   local node = current_node()
   if not node then return end
+  if conn_picker.active then
+    -- picker rows: <CR> (and l, via expand_or_child) connects the connection
+    if node.node_type == "connection" then choose_connection(node) end
+    return
+  end
   if node.node_type == "key" then
     require("poste-redis.browser.value").view(node, { current_db_node }, render_tree)
     return
@@ -406,6 +508,7 @@ local search_commit  -- forward declarations (AGENTS.md: local fn hoisting)
 local search_cancel
 local function search_enter()
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
+  if conn_picker.active then return end  -- the search bar does not exist before a context is chosen
   local win = vim.fn.bufwinid(browser_buf)
   if win ~= -1 then vim.api.nvim_set_current_win(win) end
 
@@ -612,6 +715,7 @@ local function setup_browser_buffer()
       local lines = {
         "poste-redis key browser",
         "",
+        "  (first open: pick a connection from the list, <CR> connects; db 0)",
         "  <CR>  open/close node, view key value",
         "  h     collapse / parent",
         "  l     expand / first child",
@@ -653,9 +757,13 @@ local function split_command(split, width)
   return pos .. " " .. tostring(width) .. "vsplit"
 end
 
---- Open the browser in a side split (default right, 30 cols). Scopes to the
---- preferred redis connection (poste.state.connection, else first) and db 0.
---- @param opts? table { source_buf = number|nil, split = "left"|"right", width = number }
+--- Open the browser in a side split (default right, 30 cols). On the first
+--- open (no connection chosen yet) the window lists the connections.toml
+--- entries and waits for <CR> — nothing is auto-picked; `opts.connection`
+--- ({ name, url }, from the :PosteRedisConnection / context selectors)
+--- connects directly. After a choice the browser lands on db 0 and renders
+--- the filter bar + separator + keys tree.
+--- @param opts? table { source_buf = number|nil, split = "left"|"right", width = number, connection = { name, url }|nil }
 function M.open(opts)
   opts = opts or {}
   source_buf = opts.source_buf or vim.api.nvim_get_current_buf()
@@ -686,17 +794,14 @@ function M.open(opts)
   end
 
   if not current_conn then
-    async.load_connections(function(nodes)
-      local conn = pick_connection(nodes)
-      if not conn then
-        render_tree()
-        vim.notify("No redis connections in connections.toml",
-          vim.log.levels.WARN, { title = redis_state.TITLE })
-        return
-      end
-      current_conn = { name = conn.name, url = conn.meta.url }
-      select_db(0)
-    end)
+    -- a context handed in by a selector connects directly; otherwise show
+    -- the in-window connections list and wait for the user's <CR>
+    local c = opts.connection
+    if c and c.name and c.url then
+      connect_connection(c.name, c.url)
+    else
+      show_conn_picker()
+    end
   else
     render_tree()
   end
@@ -726,6 +831,7 @@ end
 --- the tree looked empty until a manual refresh.
 --- @param mode? string|nil "flat" | "flatten" | "nested" (nil = toggle)
 function M.toggle_view(mode)
+  if conn_picker.active then return end  -- no db to re-scan before a connection is chosen
   local applied
   if mode and (mode == "flat" or mode == "flatten" or mode == "nested") then
     applied = async.set_view_mode(mode)
@@ -754,12 +860,13 @@ end
 
 --- The browser's current scope: one connection + one selected db. Used by
 --- the window-scoped context resolver (poste-redis.context) so the statusline
---- mirrors the browser while its window is focused.
+--- mirrors the browser while its window is focused. db is nil while the
+--- connections picker is up (no context chosen yet).
 --- @return { connection = string|nil, db = number|nil }
 function M.current_scope()
   return {
     connection = current_conn and current_conn.name,
-    db = current_db,
+    db = current_conn and current_db or nil,
   }
 end
 
@@ -770,6 +877,7 @@ function M.info()
     window = browser_win,
     connection = current_conn and current_conn.name,
     db = current_db,
+    picking_connection = conn_picker.active,
     sessions = session_conn.list(),
     view_mode = async.view_mode(),
   }
@@ -787,6 +895,25 @@ M._test = {
   search_cancel = search_cancel,
   pick_db = pick_db,
   select_db = select_db,
+  choose_connection = choose_connection,
+  connect_connection = connect_connection,
+  show_conn_picker = show_conn_picker,
+  picker_hint_text = picker_hint_text,
+  conn_picker_state = function() return conn_picker end,
+  --- Test hook: forget the chosen context so the first-open picker path can
+  --- be exercised again (browser state is module-global and persists across
+  --- open/close).
+  reset_scope = function()
+    current_conn = nil
+    current_db = 0
+    current_db_node = nil
+    search_active = false
+    search_query = ""
+    multi_select.active = false
+    multi_select.selected = {}
+    conn_picker.active = false
+    conn_picker.nodes = {}
+  end,
   toggle_multi_select = toggle_multi_select,
   exit_multi_select = exit_multi_select,
   multi_select_state = function() return multi_select end,

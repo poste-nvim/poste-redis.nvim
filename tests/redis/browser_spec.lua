@@ -616,6 +616,13 @@ describe("poste-redis browser window", function()
     local ok, err = pcall(function() browser.open() end)
     assert.is_true(ok, tostring(err))
     local buf = browser.info().buffer
+    -- first open shows the in-window connections picker (no auto-pick);
+    -- choosing the stub row connects it and lands on db 0
+    assert.is_true(vim.wait(2000, function()
+      local l = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      return #l > 2 and l[1]:find("Select a connection", 1, true) ~= nil
+    end, 5), "connections picker did not render")
+    browser._test.choose_connection()
     assert.is_true(vim.wait(2000, function()
       return #vim.api.nvim_buf_get_lines(buf, 0, -1, false) > 3
     end, 5), "db scan did not render")
@@ -2023,5 +2030,143 @@ describe("poste-redis browser lazy spine pre-fold (nested view)", function()
     end
     assert.same({ "  2" }, counts)  -- direct children, not the subtree total
     vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)
+
+describe("poste-redis browser connections picker (first open)", function()
+  local browser = require("poste-redis.browser.init")
+  local session_conn = require("poste-redis.session_conn")
+  local redis_state = require("poste-redis.state")
+
+  local orig_load, orig_execute
+  before_each(function()
+    orig_load = async.load_connections
+    orig_execute = session_conn.execute
+    -- module-global browser state persists across open/close: forget the
+    -- inherited context so every test starts at the true first-open state
+    browser._test.reset_scope()
+  end)
+  after_each(function()
+    async.load_connections = orig_load
+    session_conn.execute = orig_execute
+    redis_state.context.connection = nil
+    redis_state.current_url = nil
+    require("poste.state").connection = nil
+    browser.close()
+  end)
+
+  local function stub_connections(nodes)
+    async.load_connections = function(cb) cb(nodes) end
+  end
+
+  local function wait_picker(buf)
+    return vim.wait(2000, function()
+      local l = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      return #l > 2 and l[1]:find("Select a connection", 1, true) ~= nil
+    end, 5)
+  end
+
+  it("first open lists connections in-window instead of auto-picking one", function()
+    stub_connections({
+      tree.make_connection_node({ name = "beta", url = "redis://b:6380/0", dialect = "redis" }),
+      tree.make_connection_node({ name = "alpha", url = "redis://a:6379/0", dialect = "redis" }),
+    })
+    local scanned = false
+    session_conn.execute = function()
+      scanned = true
+      return "dispatched"
+    end
+
+    browser.open()
+    local buf = browser.info().buffer
+    assert.is_true(wait_picker(buf), "connections picker did not render")
+
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert.match("^%-+$", lines[2])
+    -- sorted by name: pairs() order from the toml walk must not leak through
+    assert.truthy(lines[3]:find("alpha", 1, true))
+    assert.truthy(lines[4]:find("beta", 1, true))
+    -- rows carry the redacted URL so same-name hosts are distinguishable
+    assert.truthy(lines[3]:find("redis://a:6379/0", 1, true))
+    assert.match("select connection",
+      vim.api.nvim_get_option_value("winbar", { win = browser.info().window }))
+    -- nothing was scanned and no context was chosen before <CR>
+    assert.is_false(scanned, "a scan ran before a connection was chosen")
+    assert.is_nil(browser.current_scope().connection)
+    assert.is_nil(browser.current_scope().db)
+  end)
+
+  it("<CR> on a row connects it, lands on db 0, and restores the tree layout", function()
+    stub_connections({
+      tree.make_connection_node({ name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis" }),
+    })
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        cbs.on_response({ value = { value = { "user:1", "plain" }, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+    async.set_view_mode("flatten")
+
+    browser.open()
+    local buf = browser.info().buffer
+    assert.is_true(wait_picker(buf), "connections picker did not render")
+
+    -- put the caret on the connection row and press <CR> (toggle_node path)
+    local win = vim.fn.bufwinid(buf)
+    vim.api.nvim_set_current_win(win)
+    vim.api.nvim_win_set_cursor(win, { 3, 0 })
+    browser._test.toggle_node()
+
+    local scope = browser.current_scope()
+    assert.equals("stub", scope.connection, "the chosen connection is the scope")
+    assert.equals(0, scope.db, "choosing lands on db 0")
+    assert.is_false(browser.info().picking_connection)
+    -- the global context follows the explicit choice (statusline, file runs)
+    assert.equals("stub", redis_state.context.connection)
+
+    -- filter bar + separator + keys tree replace the list ("plain" is a flat
+    -- key; the user: group stays lazy — its row shows the prefix only)
+    assert.is_true(vim.wait(2000, function()
+      local l = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      return #l > 3 and l[1] == "" and l[2]:find("^%-+$") ~= nil
+        and table.concat(l, "\n"):find("plain", 1, true) ~= nil
+    end, 5), "tree layout did not render after choosing")
+    assert.match("db 0", vim.api.nvim_get_option_value("winbar", { win = win }))
+  end)
+
+  it("parks the cursor on the current context's connection row", function()
+    local poste_state = require("poste.state")
+    poste_state.connection = "beta"  -- set by USE / :PosteRedisConnection
+    stub_connections({
+      tree.make_connection_node({ name = "beta", url = "redis://b:6380/0", dialect = "redis" }),
+      tree.make_connection_node({ name = "alpha", url = "redis://a:6379/0", dialect = "redis" }),
+    })
+
+    browser.open()
+    local buf = browser.info().buffer
+    assert.is_true(wait_picker(buf), "connections picker did not render")
+    -- pre-position only: connecting still requires <CR> (previous test)
+    local win = vim.fn.bufwinid(buf)
+    assert.equals(4, vim.api.nvim_win_get_cursor(win)[1],
+      "cursor should start on beta (row 3 = alpha, row 4 = beta)")
+    assert.is_nil(browser.current_scope().connection)
+  end)
+
+  it("renders the no-connections hint when connections.toml has no redis entries", function()
+    stub_connections({})
+    local notified
+    local orig_notify = vim.notify
+    vim.notify = function(msg) notified = msg end
+
+    browser.open()
+    local buf = browser.info().buffer
+    assert.is_true(vim.wait(2000, function()
+      local l = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      return #l >= 2 and l[1]:find("No redis connections", 1, true) ~= nil
+    end, 5), "empty-state hint did not render")
+    vim.notify = orig_notify
+    assert.match("No redis connections in connections.toml", notified or "")
+    assert.is_nil(browser.current_scope().connection)
   end)
 end)

@@ -14,6 +14,7 @@
 local M = {}
 
 local config = require("poste-redis.config")
+local util = require("poste-redis.util")
 -- Nested-view flag. Owned HERE (not browser/async.lua): flatten_tree reads it
 -- on every render, and tree must not require async (async → tree is the only
 -- legal edge; tree → async would be a require cycle). async re-exposes the
@@ -312,6 +313,11 @@ function M.flatten_tree(nodes, depth, multi_select, budget, ctx)
         -- node.name / meta.key keep the canonical full name, so copy/delete/
         -- TYPE always operate on the real key.
         local disp = node.name
+        if node.node_type == "connection" and node.meta and node.meta.url then
+          -- connections-picker rows: the redacted URL disambiguates same-name
+          -- hosts (credentials never render — util.redact_url)
+          disp = disp .. "  " .. util.redact_url(node.meta.url)
+        end
         if nested then
           if node.node_type == "key" then
             disp = rel_name(node.name, ctx)

@@ -46,7 +46,7 @@ fallback — see `requirements.md`.
 | `scan.lua` | Cursor-driven SCAN loops + tree builders: `scan_keys` (lazy db group headers, `header_scan_count`), `scan_group` (MATCH prefix, nested subfolders, `scan_count`), `build_children` / `build_nested_children` (view rebuild), lazy-header stamps — nested view pre-folds each header to its single-spine branch point (`spine_fold`/`respine_headers`) with a direct-children count, flatten view keeps keys-under-prefix totals — epoch stale guard. Depends on async's pacing — never the reverse |
 | `value.lua` | TYPE-first paginated value viewer: HSCAN/SSCAN/ZSCAN pages, LRANGE windows, XRANGE, string GET (truncated + `F` full load); page tabs + loaded/total footer |
 | `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate |
-| `init.lua` | `poste://redis_browser` right-hand split, keymaps, `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
+| `init.lua` | `poste://redis_browser` right-hand split, keymaps, first-open connections picker (in-window list → <CR> connects, db 0), `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 
 ### Configuration & connections
 
