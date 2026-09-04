@@ -7,9 +7,11 @@ SELECT 0               # 真·Redis 命令：切 db（M1 exec 模式，每次独
 
 set a:b:c:d "abcd"
 set a:d "ad"
+set a:c:d:e "ad"
 set 1:2:3:4:5:6 "deep"
 set 1:2:3:4:5:51 "deep"
 set 1:2:3:4:41 "deep"
+set 2:3:4:5:6 "deep"
 
 set a:b:c "abc"
 get a:b:c
@@ -54,6 +56,7 @@ EXISTS session:abc       # 1 / 0
 
 # ── 引号规则：双引号（JSON 兼容转义）、单引号、裸词；引号内 # 不算注释 ──
 LPUSH queue:email '{"to":"a@b.c","tpl":"welcome"}'   # 单引号字面量
+LRANGE queue:email 0 -1
 SET note "this # is inside quotes"
 SET plain bareword
 GET note
