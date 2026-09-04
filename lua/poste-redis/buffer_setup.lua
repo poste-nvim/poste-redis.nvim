@@ -10,6 +10,7 @@ local function show_help(buf)
   local items = {
     "poste-redis source keymaps:",
     "  " .. config.format_keymap("redis_source", "run") .. "   run command under cursor / selection",
+    "  " .. config.format_keymap("redis_source", "reveal_key") .. "   reveal the command's key in the browser tree",
     "  " .. config.format_keymap("redis_source", "history") .. "   open request history",
     "  " .. config.format_keymap("redis_source", "show_doc") .. "   show command documentation (K again focuses)",
     "  " .. config.format_keymap("redis_source", "trigger_completion") .. "   trigger completion",
@@ -88,6 +89,29 @@ function M.setup_buffer_keymaps(buf)
   if k then
     vim.keymap.set("n", k, function()
       require("poste-redis.doc").show_command_doc()
+    end, km)
+  end
+  -- gd: reveal the command's key in the browser tree. The jump is scoped by
+  -- the command's own context — the nearest USE above + SELECT at/above the
+  -- cursor (context.file_context), never the global context.
+  k = config.get_keymap("redis_source", "reveal_key", "gd")
+  if k then
+    vim.keymap.set("n", k, function()
+      local parser = require("poste-redis.parser")
+      local lnum = vim.fn.line(".")
+      local line = vim.api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1] or ""
+      local tokens = parser.command_tokens(line)
+      if not tokens or #tokens < 2 or tokens[1]:upper() == "USE" or tokens[1]:upper() == "SELECT" then
+        vim.notify("No key to reveal on this line", vim.log.levels.INFO,
+          { title = "PosteRedis" })
+        return
+      end
+      local ctx = require("poste-redis.context").file_context(buf, lnum)
+      require("poste-redis.browser.init").reveal({
+        key = tokens[2],
+        connection = ctx.connection,
+        db = ctx.db or 0,
+      })
     end, km)
   end
 end

@@ -48,7 +48,7 @@ fallback — see `requirements.md`.
 | `value.lua` | TYPE-first paginated value viewer: HSCAN/SSCAN/ZSCAN pages, LRANGE windows, XRANGE, string GET (truncated + `F` full load); page tabs + loaded/total footer |
 | `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate |
 | `header_bar.lua` | Pinned header chrome: mirrors the browser buffer's header lines 1-2 (filter bar + separator) into a borderless float anchored to the window's top rows (result/header.lua pattern), so the bar stays visible while the tree scrolls; hidden while the bar is edited, dies with the window (WinClosed) |
-| `init.lua` | `poste://redis_browser` right-hand split (gutter-free), keymaps, first-open connections picker (in-window list → <CR> connects, db 0), `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
+| `init.lua` | `poste://redis_browser` right-hand split (gutter-free), keymaps, first-open connections picker (in-window list → <CR> connects, db 0), `reveal(key, connection, db)` (render-driven walk: expands the folder path, parks the cursor on the key), `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 
 ### Configuration & connections
 
@@ -67,11 +67,11 @@ fallback — see `requirements.md`.
 
 | File | Role |
 |------|------|
-| `buffer_setup.lua` | Source-buffer keymaps (run n+v, history, K docs, help float) |
+| `buffer_setup.lua` | Source-buffer keymaps (run n+v, `gd` reveal into the browser tree, history, K docs, help float) |
 | `docs.lua` | Redis command doc data (~190 commands: category, syntax, desc, examples) + `lookup` — feeds the `K` hover |
 | `doc.lua` | `K` hover provider: vendored `open_doc_preview` (markdown float, track_key re-focus = second `K` focuses the popup) + `show_command_doc`/`build_lines` |
 | `autocmds.lua` | `FileType poste_redis` wiring + `setup_existing_buffers` |
-| `commands.lua` | `:PosteRedisConnection` / `:PosteRedisRunFile` / `:PosteRedisHistory` / `:PosteRedisInfo` / `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
+| `commands.lua` | `:PosteRedisConnection` / `:PosteRedisRunFile` / `:PosteRedisHistory` / `:PosteRedisInfo` / `:PosteRedisBrowser` / `:PosteRedisBrowserView` / `:PosteRedisReveal [key]` |
 | `health.lua` | `:checkhealth poste-redis` |
 | `highlights.lua` | `PosteRedis*` groups (source + result panel + history) |
 | `treesitter.lua` | parser availability probe, enable tree-sitter highlighting, keep regex fallback |

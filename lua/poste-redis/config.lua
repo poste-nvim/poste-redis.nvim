@@ -74,6 +74,8 @@ M.defaults = {
       help = "g?",
       trigger_completion = "<C-Space>",
       show_doc = "K",
+      -- reveal the key of the command at the cursor in the browser tree
+      reveal_key = "gd",
     },
     redis_result = {
       close = "q",
@@ -101,6 +103,8 @@ M.defaults = {
       refresh = "r",
       -- sort by the column under the cursor: none → desc → asc → none
       sort_column = "s",
+      -- reveal this tab's key in the browser tree (jumps to the node)
+      reveal_key = "gd",
       -- grid editing (poste-db dataset pattern)
       edit_cell = "i",
       add_row = "o",

@@ -43,6 +43,30 @@ function M.setup()
     desc = "Toggle browser view; or set one: flat (no folders), flatten (方案A), nested (方案B)",
   })
 
+  vim.api.nvim_create_user_command("PosteRedisReveal", function(args)
+    local browser = require("poste-redis.browser.init")
+    local key = args.args and args.args ~= "" and args.args or nil
+    if key then
+      -- explicit key: scope by the current global context
+      local redis_state = require("poste-redis.state")
+      local accepted = browser.reveal({
+        key = key,
+        connection = redis_state.context.connection,
+        db = redis_state.context.db,
+      })
+      if not accepted then
+        vim.notify("Cannot reveal " .. key .. " (no connection context)",
+          vim.log.levels.WARN, { title = "PosteRedis" })
+      end
+      return
+    end
+    -- no argument: reveal the active result tab's key
+    if not browser.reveal_current() then
+      vim.notify("No key to reveal (open a result tab or pass a key)",
+        vim.log.levels.INFO, { title = "PosteRedis" })
+    end
+  end, { nargs = "?", desc = "Reveal a key in the browser tree (default: the active result tab's key)" })
+
   vim.api.nvim_create_user_command("PosteRedisInfo", function()
     local state = require("poste.state")
     local redis_state = require("poste-redis.state")

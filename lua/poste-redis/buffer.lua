@@ -279,6 +279,24 @@ function M.sort_column()
   view.position_cursor(tab)
 end
 
+--- `gd` on a result tab: open the browser tree at this tab's key (the tab's
+--- stamped connection + db scope the jump).
+--- @return boolean accepted
+function M.reveal_current()
+  local tab = state.tabs[state.active]
+  local meta = tab and tab.meta or {}
+  if not meta.key or meta.key == "" then
+    vim.notify("This tab has no key to reveal", vim.log.levels.INFO,
+      { title = constants.TITLE })
+    return false
+  end
+  return require("poste-redis.browser.init").reveal({
+    key = meta.key,
+    connection = meta.connection,
+    db = meta.db,
+  })
+end
+
 ------------------------------------------------------------------------
 -- Render entry points
 ------------------------------------------------------------------------
@@ -510,6 +528,8 @@ function setup_keymaps()
   if k then vim.keymap.set("n", k, function() M.refresh() end, km) end
   k = config.get_keymap("redis_result", "sort_column", "s")
   if k then vim.keymap.set("n", k, function() M.sort_column() end, km) end
+  k = config.get_keymap("redis_result", "reveal_key", "gd")
+  if k then vim.keymap.set("n", k, function() M.reveal_current() end, km) end
 
   -- Grid editing (poste-db dataset pattern): i edit cell, o add row, dd delete
   local grid_edit = require("poste-redis.browser.grid_edit")

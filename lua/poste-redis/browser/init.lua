@@ -63,9 +63,13 @@ local search_query = ""
 
 --- Connections picker (first open): the browser buffer lists the redis
 --- connections from connections.toml instead of the tree. <CR> on a row
---- connects it as the context and lands on db 0 — never an automatic pick,
+--- makes it the context and lands on db 0 — never an automatic pick,
 --- so the context is always an explicit user choice.
 local conn_picker = { active = false, nodes = {} }
+
+--- Pending key reveal (see the "Reveal" section; driven from render_tree).
+local reveal_state = nil
+local try_reveal  -- forward decl (AGENTS.md: local fn hoisting)
 
 --- Multi-select (poste-db db-browser pattern): <Tab> toggles a node into the
 --- selection (restricted to nodes under the current db), <Esc> exits, D
@@ -227,6 +231,9 @@ local function render_tree()
   else
     header_bar.sync(browser_buf)
   end
+  -- a pending key reveal resumes here: expand_node → render → walk (last,
+  -- so a re-entrant render from an expand finishes before the outer one)
+  if reveal_state then try_reveal() end
 end
 
 async.render_hook = render_tree
@@ -801,6 +808,126 @@ local function setup_browser_buffer()
 end
 
 ----------------------------------------------------------------------
+-- Reveal: open the tree at a specific key (dataset `gd`,
+-- :PosteRedisReveal, .redis `gd`). The walk is render-driven: folders on
+-- the key's path expand lazily, and each scan-end render resumes the walk
+-- until the key's row can be focused.
+----------------------------------------------------------------------
+
+--- The child of `node` that leads to `key`: the key leaf itself, or the
+--- group whose prefix the key lives under (lazy headers carry their
+--- branch-point prefix, so folded spines match in one hop).
+local function reveal_child(node, key)
+  for _, ch in ipairs(node.children or {}) do
+    if ch.node_type == "key" and ch.meta.key == key then return ch end
+  end
+  for _, ch in ipairs(node.children or {}) do
+    if ch.node_type == "group" and ch.meta.prefix then
+      local p = ch.meta.prefix .. ":"
+      if key:sub(1, #p) == p then return ch end
+    end
+  end
+  return nil
+end
+
+--- Park the browser cursor on a node's row.
+local function reveal_focus(node)
+  for i, n in ipairs(line_to_node) do
+    if n == node then
+      local win = vim.fn.bufwinid(browser_buf)
+      if win ~= -1 then
+        vim.api.nvim_win_set_cursor(win, { i + tree.HEADER_LINES, 0 })
+      end
+      return true
+    end
+  end
+  return false
+end
+
+-- NOTE: reveal_state / try_reveal are forward-declared at the top of the
+-- file — render_tree drives the walk.
+try_reveal = function()
+  local st = reveal_state
+  if not st then return end
+  local root = current_db_node
+  if not root or not current_conn or root.loading then return end
+  local node = st.node or root
+  if node ~= root and node.loading then return end  -- a scan on the path streams
+
+  if node.children == nil then
+    expand_node(node, current_conn.url)  -- lazy folder: scan; walk resumes on render
+    return
+  end
+
+  local child = reveal_child(node, st.key)
+  if not child then
+    reveal_state = nil
+    vim.notify("Key not found in the browser tree: " .. st.key,
+      vim.log.levels.INFO, { title = redis_state.TITLE })
+    return
+  end
+  if child.node_type == "key" then
+    -- focus only lands when the key's row is rendered; until the flush
+    -- paints the expanded folder, keep the walk pending (render_tree retries)
+    if reveal_focus(child) then
+      reveal_state = nil
+      vim.notify("Revealed " .. st.key, vim.log.levels.INFO, { title = redis_state.TITLE })
+    end
+    return
+  end
+  -- a folder on the path: open it, then descend (expand renders → resume)
+  if not child.expanded or child.children == nil then
+    expand_node(child, current_conn.url)
+  end
+  st.node = child
+  try_reveal()
+end
+
+--- Open the browser tree at `opts.key`, scoped to `opts.connection` (name)
+--- / `opts.url` + `opts.db`. Re-scopes the browser when the request points
+--- somewhere it is not already looking (browser-local scope only — the
+--- global context is not clobbered).
+--- @param opts table { key, connection, url?, db? }
+--- @return boolean accepted
+function M.reveal(opts)
+  opts = opts or {}
+  local key = opts.key
+  if not key or key == "" then return false end
+  local conn_name = opts.connection
+  local url = opts.url
+  if not url and conn_name then
+    local err
+    url, err = connections.resolve_redis_url(conn_name)
+    if not url then
+      vim.notify("Cannot resolve connection: " .. tostring(err or conn_name),
+        vim.log.levels.ERROR, { title = redis_state.TITLE })
+      return false
+    end
+  end
+  if not url then
+    vim.notify("No connection to reveal against", vim.log.levels.WARN,
+      { title = redis_state.TITLE })
+    return false
+  end
+  conn_name = conn_name or url
+
+  reveal_state = { key = key, node = nil }
+  M.search_clear()
+  local db = opts.db or 0
+  if not current_conn or current_conn.url ~= url or current_db ~= db then
+    current_conn = { name = conn_name, url = url }
+    conn_picker.active = false
+    conn_picker.nodes = {}
+    select_db(db)
+  else
+    render_tree()
+  end
+  M.open()
+  try_reveal()
+  return true
+end
+
+----------------------------------------------------------------------
 -- Public API
 ----------------------------------------------------------------------
 
@@ -991,6 +1118,9 @@ M._test = {
   separator_text = separator_text,
   display_root_node = display_root_node,
   update_browser_width = update_browser_width,
+  line_to_node = function() return line_to_node end,
+  reveal_state = function() return reveal_state end,
+  reveal_focus = reveal_focus,
 }
 
 return M
