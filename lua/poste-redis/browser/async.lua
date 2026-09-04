@@ -7,7 +7,7 @@
 --- This module owns what every async loader shares: the render hooks set by
 --- browser/init.lua, the flush machinery that defers buffer work off
 --- job-response callbacks, the tree view mode (flat/flatten/nested), TYPE
---- fetching, the search-by-subpath scan, and connection/db loading. The
+--- fetching, the fuzzy substring search scan, and connection/db loading. The
 --- cursor-driven SCAN loops + tree builders live in browser/scan.lua, which
 --- depends on this module's pacing helpers — never the reverse.
 ---
@@ -258,10 +258,22 @@ function M.fetch_types(key_nodes, conn_url, db, guard_node)
   pump()
 end
 
---- Search-by-subpath: SCAN MATCH <subpath>* and render matching keys under a
---- dedicated hidden `<subpath>` results node. Same cursor/pacing/append
---- machinery as browser/scan.scan_group; the search bar in browser/init.lua
---- drives it on <leader>/ + <CR>.
+--- Build the SCAN MATCH pattern for a search query: glob-escape the raw
+--- query (`*`, `?`, `[`, `]`, `\` match literally — a query can never inject
+--- wildcards) and wrap it in leading/trailing `*` for substring matching,
+--- so `ser` matches `user:1` anywhere in the key, not just `ser*` prefixes.
+--- @param query string raw committed search query (non-empty)
+--- @return string
+local function fuzzy_match_pattern(query)
+  local esc = query:gsub("([%*%?%[%]\\])", "\\%1")
+  return "*" .. esc .. "*"
+end
+
+--- Fuzzy search: SCAN MATCH *<query>* — the query matches anywhere in the key
+--- (substring; glob metacharacters are escaped so they match literally), so
+--- typing `ser` finds `user:1` and `session:r`, not just `ser*` prefixes.
+--- Same cursor/pacing/append machinery as browser/scan.scan_group; the
+--- search bar in browser/init.lua drives it on <leader>/ + <CR>.
 ---
 --- The results node is NOT attached to db_node.children: while it exists,
 --- init.render_tree makes it the hidden display root, so matched keys
@@ -272,7 +284,7 @@ end
 --- @param db_node table db node
 --- @param conn_url string
 --- @param conn_name string
---- @param subpath string e.g. "bench:a:b:c" (empty → clear)
+--- @param subpath string the raw committed query (empty → clear)
 function M.search(db_node, conn_url, conn_name, subpath)
   if subpath == nil or subpath == "" then
     M.search_clear(db_node)
@@ -304,7 +316,7 @@ function M.search(db_node, conn_url, conn_name, subpath)
   local built = 0
   local RENDER_EVERY_PAGES = 8
   local page = 0
-  local match = subpath .. "*"
+  local match = fuzzy_match_pattern(subpath)
 
   local function next_page(cursor)
     if db_node.epoch ~= epoch then return end
@@ -430,6 +442,7 @@ M._test = {
   set_view_mode = M.set_view_mode,
   view_mode = M.view_mode,
   toggle_view_mode = M.toggle_view_mode,
+  fuzzy_match_pattern = fuzzy_match_pattern,
 }
 
 return M

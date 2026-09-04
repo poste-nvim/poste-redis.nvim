@@ -430,6 +430,40 @@ describe("poste-redis browser async grouping", function()
 
     session_conn.execute = orig_execute
   end)
+
+  it("search matches the query anywhere in the key (fuzzy substring)", function()
+    local issued
+    local session_conn = require("poste-redis.session_conn")
+    local orig_execute = session_conn.execute
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cmd[1] == "SCAN" then issued = cmd end  -- later TYPE batches also call execute
+      if cbs and cbs.on_response then
+        cbs.on_response({ value = { value = { "user:1", "session:r" }, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    local db = tree.make_db_node({ db = 0 }, "c")
+    async.search(db, "redis://h", "c", "ser")
+    -- `ser` no longer means the `ser*` prefix: the MATCH wraps it in `*…*`
+    assert.equals("SCAN", issued[1])
+    assert.equals("MATCH", issued[5])
+    assert.equals("*ser*", issued[6])
+    assert.equals(2, #db._search_results.children)
+
+    session_conn.execute = orig_execute
+  end)
+
+  it("fuzzy_match_pattern escapes glob metacharacters in the query", function()
+    -- plain queries wrap in wildcards; `*`, `?`, `[`, `]`, `\` in a query can
+    -- never act (or inject) as glob wildcards — they match literally
+    assert.equals("*ser*", async._test.fuzzy_match_pattern("ser"))
+    assert.equals("*cache:a*", async._test.fuzzy_match_pattern("cache:a"))
+    assert.equals("*a\\*b*", async._test.fuzzy_match_pattern("a*b"))
+    assert.equals("*user:1\\?*", async._test.fuzzy_match_pattern("user:1?"))
+    assert.equals("*\\[tmp\\]*", async._test.fuzzy_match_pattern("[tmp]"))
+    assert.equals("*a\\\\b*", async._test.fuzzy_match_pattern("a\\b"))
+  end)
 end)
 
 describe("poste-redis browser search bar", function()
