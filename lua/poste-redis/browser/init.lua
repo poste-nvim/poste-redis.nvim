@@ -61,19 +61,28 @@ local function db_select_text()
   return "\239\135\128 db " .. tostring(current_db)
 end
 
---- Paint the db scope into the browser window's winbar, right-aligned
---- (`%=` splits the winbar into left/right halves). The window handle is
+--- Paint the connection + db scope into the browser window's winbar: the
+--- connection name left of the `%=` split (colored with its connections.toml
+--- color when one is configured, plain otherwise), the orange db scope right
+--- (the same PosteRedisBrowserWinbarDb used before). The window handle is
 --- re-resolved the same way separator_text does — browser_win can be stale
---- after :q / split churn. db text is plugin-generated (icon + number), no
---- %-escaping needed.
+--- after :q / split churn. All text is plugin-generated, no %-escaping
+--- needed.
 local function update_winbar()
   local win = browser_win
   if not win or not vim.api.nvim_win_is_valid(win) then
     win = browser_buf and vim.api.nvim_buf_is_valid(browser_buf) and vim.fn.bufwinid(browser_buf) or nil
   end
   if not win or win == -1 then return end
-  vim.api.nvim_set_option_value("winbar",
-    "%=%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. " %*", { win = win })
+  local parts = {}
+  if current_conn and current_conn.name then
+    local ok_st, statusline = pcall(require, "poste-redis.statusline")
+    local left_hl = ok_st and statusline.get_ctx_color(current_conn.name) or nil
+    parts[#parts + 1] = left_hl and ("%#" .. left_hl .. "# " .. current_conn.name .. " %*")
+      or current_conn.name
+  end
+  parts[#parts + 1] = "%=%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. " %*"
+  vim.api.nvim_set_option_value("winbar", table.concat(parts), { win = win })
 end
 
 --- Header text for line 1 (search bar): the committed query only — the icon
@@ -729,6 +738,17 @@ function M.search_clear()
   search_query = ""
   if current_db_node then async.search_clear(current_db_node) end
   render_tree()
+end
+
+--- The browser's current scope: one connection + one selected db. Used by
+--- the window-scoped context resolver (poste-redis.context) so the statusline
+--- mirrors the browser while its window is focused.
+--- @return { connection = string|nil, db = number|nil }
+function M.current_scope()
+  return {
+    connection = current_conn and current_conn.name,
+    db = current_db,
+  }
 end
 
 --- Debug info for :PosteRedisInfo.

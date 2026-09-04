@@ -57,6 +57,9 @@ fallback — see `requirements.md`.
 | `constants.lua` | URL prefix detection, panel/float dims, `MAX_PREVIEW_BYTES`, dangerous-command blacklist |
 | `connections.lua` | `find_connections_toml` (walk-up + mtime cache), `resolve_redis_url` (url form / field form / `{{var}}`), `use_connection`, `select_connection` |
 | `toml.lua` | **Vendored** from poste-db (`lua/poste-db/toml.lua`) — see file header for sync instructions |
+| `context.lua` | **Window-scoped context resolution** — what connection+db a window is about: result panel (active tab's stamped meta) > browser (current scope) > `.redis` file (effective USE/SELECT at the cursor, mirrors what `<CR>` resolves) > global context. `entries_context` pure per-file walk, `display` ("local db3" / credential-free host) |
+| `statusline.lua` | Statusline context segment — window-scoped via `context.resolve()`, colored by connections.toml `color`/`link`/`bg` (`get_ctx_color`), auto-wired into mini.statusline / lualine (`setup({ statusline = false })` opts out) |
+| `winbar.lua` | **Source-buffer context winbar** — `.redis` buffer top bar showing the cursor's effective context, repainted on CursorMoved/WinEnter; gated behind `config.source_winbar` |
 
 ### UI wiring
 
@@ -100,6 +103,7 @@ fallback — see `requirements.md`.
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close, grid tab render |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/completion_spec.lua` | P2-4: ctx detection, command table, conn names, SCAN key-prefix fetch+cache (stubbed session), orchestrator dispatch |
+| `redis/context_spec.lua` | window-scoped context: `entries_context` USE/SELECT walk, `display` formatting (host redaction), `resolve` priority chain (panel/browser/.redis/global) |
 | `redis/docs_spec.lua` | docs data parity with COMMANDS + entry shape, `build_lines` markdown, `resolve_command`, float track_key re-focus, show_doc keymap |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |
 | `scaffold_spec.lua` | harness smoke |

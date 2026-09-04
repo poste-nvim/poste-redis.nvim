@@ -49,6 +49,7 @@ end
 --- Bind source-buffer keymaps.
 --- @param buf number
 function M.setup_buffer_keymaps(buf)
+  require("poste-redis.winbar").attach(buf)
   local runner = require("poste-redis.runner")
   local km = { buffer = buf, noremap = true, silent = true }
 

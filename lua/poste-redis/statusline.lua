@@ -1,6 +1,6 @@
 --- Context statusline integration (poste-db statusline pattern).
---- Shows the current redis connection in the statusline, highlighted with
---- the color configured for that connection in connections.toml:
+--- Shows the context of the window under the cursor — connection (+ db when
+--- known) — highlighted with the color configured for that connection:
 ---
 ---   [connections.local]
 ---   dialect = "redis"
@@ -9,6 +9,9 @@
 ---   link = "Statement"  -- optional: link instead of fg
 ---   bg = "#1b1f27"      -- optional background (hex or group name)
 ---
+--- The context is window-scoped (poste-redis.context): a .redis buffer shows
+--- its cursor's effective USE/SELECT context, the result panel shows the
+--- active tab's origin context, everything else shows the global context.
 --- Manual use: statusline = "%{lua:print('')}" style users can call
 --- require("poste-redis.statusline").get_context() — it returns the context
 --- with %#PosteRedisCtx<name># highlight markers, or "" when no context.
@@ -16,6 +19,16 @@
 local M = {}
 
 local redis_state = require("poste-redis.state")
+
+--- Context of the window under the cursor (window-scoped): the result panel
+--- shows its active tab's context, a .redis file shows its USE/SELECT context
+--- at the cursor, everything else shows the global context. See
+--- `poste-redis.context`.
+local function window_ctx()
+  local ok, context = pcall(require, "poste-redis.context")
+  if ok then return context.resolve() end
+  return { connection = redis_state.context.connection, db = redis_state.context.db }
+end
 
 --- Build (once) + return the highlight group for a connection name, based
 --- on its connections.toml entry (color / link / bg).
@@ -71,17 +84,26 @@ function M.get_ctx_color(conn_name)
   return hl_name
 end
 
---- Plain context text for statusline components: the current connection
---- (e.g. "local" / "test" / "prod"), or "" when no context is set.
+--- Resolve the window's context into display text ("local" / "local db3" /
+--- "host db0" for raw URLs), or "" when no context applies. The result is
+--- window-scoped, so the statusline always mirrors what that window is
+--- about — a .redis buffer shows its cursor's effective USE/SELECT context,
+--- the result panel shows the active tab's origin context.
 --- @return string
 function M.get_context_text()
-  return redis_state.context.connection or ""
+  local ctx = window_ctx()
+  local ok, context = pcall(require, "poste-redis.context")
+  if ok then return context.display(ctx) end
+  return ctx.connection or ""
 end
 
---- Highlight group for the current context (nil → statusline falls back).
+--- Highlight group for the current window's context (nil → statusline
+--- falls back).
 --- @return string|nil
 function M.get_context_hl()
-  return M.get_ctx_color(redis_state.context.connection)
+  local ctx = window_ctx()
+  if not ctx.connection then return nil end
+  return M.get_ctx_color(ctx.connection)
 end
 
 --- Fully formatted context segment with %#/highlight# markers, or "".
@@ -89,7 +111,7 @@ end
 function M.get_context()
   local ctx = M.get_context_text()
   if ctx == "" then return "" end
-  local hl_name = M.get_ctx_color(ctx)
+  local hl_name = M.get_context_hl()
   if hl_name then
     return "%#" .. hl_name .. "# " .. ctx .. " "
   end
@@ -117,7 +139,7 @@ function M.setup()
 
       statusline.config.content.active = function()
         local ctx = M.get_context_text()
-        local ctx_hl = ctx ~= "" and M.get_ctx_color(ctx) or nil
+        local ctx_hl = ctx ~= "" and M.get_context_hl() or nil
 
         local mode, mode_hl = statusline.section_mode({ trunc_width = 120 })
         local git = statusline.section_git({ trunc_width = 40 })

@@ -49,6 +49,11 @@ M.defaults = {
   browser_width_max_ratio = 0.7,
   -- Result panel split: share of the editor height.
   result_height_ratio = 0.4,
+  -- Context winbar on .redis source buffers: shows the effective USE/SELECT
+  -- context at the cursor (connection + db), repainted on cursor move. The
+  -- same info rides the statusline via poste-redis.statusline; this is the
+  -- always-on chrome at the top of the edit window. False disables.
+  source_winbar = true,
   -- Execute confirm heuristic: write commands always require a confirm
   -- dialog before hitting the server (P2-1). Reserved for M3; constants are
   -- defined in constants.lua.
