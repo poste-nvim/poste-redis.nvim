@@ -392,7 +392,9 @@ describe("poste-redis browser async grouping", function()
 
   it("search results REPLACE the tree: kept outside the db node's children", function()
     local session_conn = require("poste-redis.session_conn")
+    async.results_build = scan.build_search_results  -- normally wired by init
     local orig_execute = session_conn.execute
+    async.set_view_mode("flatten")
     session_conn.execute = function(conn_url, cmd, cbs)
       if cbs and cbs.on_response then
         cbs.on_response({ value = { value = { "cache:a", "cache:b" }, cursor = "0" } })
@@ -408,20 +410,28 @@ describe("poste-redis browser async grouping", function()
     assert.is_truthy(db._search_results)
     local results = db._search_results
     assert.equals("cache", results.name)
-    assert.equals(2, #results.children)
-    assert.equals("cache:a", results.children[1].name)
-    assert.equals("cache:b", results.children[2].name)
+    -- bucketed under the real folder: one group holding the matched keys
+    assert.equals(1, #results.children)
+    local folder = results.children[1]
+    assert.equals("group", folder.node_type)
+    assert.equals("cache", folder.name)
+    assert.equals(2, #folder.children)
+    assert.equals("cache:a", folder.children[1].name)
+    assert.equals("cache:b", folder.children[2].name)
     assert.equals(1, #db.children)
     assert.equals("user", db.children[1].name)
 
-    -- as display root the results render at the top with no extra header line
+    -- as display root the results render as the folder with its keys under
+    -- it (flatten keeps full key names inside folders)
     tree.display_root = results
     local lines, node_map = tree.flatten_tree({ results })
     tree.display_root = nil
-    assert.equals(2, #lines)
-    assert.match("cache:a", lines[1])
-    assert.match("cache:b", lines[2])
+    assert.equals(3, #lines)
+    assert.match("cache", lines[1])
+    assert.match("cache:a$", lines[2])
+    assert.match("cache:b$", lines[3])
     assert.equals(results, node_map[1].parent)
+    assert.is_true(folder.expanded, "result folders must render open")
 
     async.search_clear(db)
     assert.is_nil(db._search_results)
@@ -431,10 +441,43 @@ describe("poste-redis browser async grouping", function()
     session_conn.execute = orig_execute
   end)
 
+  it("search results nest under real folders in nested view", function()
+    local session_conn = require("poste-redis.session_conn")
+    async.results_build = scan.build_search_results  -- normally wired by init
+    local orig_execute = session_conn.execute
+    async.set_view_mode("nested")
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cbs and cbs.on_response then
+        cbs.on_response({ value = { value = { "cache:a:1", "cache:b", "user:9" }, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+
+    local db = tree.make_db_node({ db = 0 }, "c")
+    async.search(db, "redis://h", "c", ":")
+
+    local results = db._search_results
+    -- nested: folder chain cache → a (key 1), cache sibling b, top-level user
+    assert.equals(2, #results.children)
+    local cache = results.children[1]
+    assert.equals("cache", cache.name)
+    assert.is_true(cache.expanded)
+    assert.equals(2, #cache.children)  -- folder a + leaf b
+    local a = cache.children[1]
+    assert.equals("a", a.name)
+    assert.is_true(a.expanded)
+    assert.equals("cache:a:1", a.children[1].name)
+
+    async.search_clear(db)
+    session_conn.execute = orig_execute
+  end)
+
   it("search matches the query anywhere in the key (fuzzy substring)", function()
     local issued
     local session_conn = require("poste-redis.session_conn")
+    async.results_build = scan.build_search_results  -- normally wired by init
     local orig_execute = session_conn.execute
+    async.set_view_mode("flatten")
     session_conn.execute = function(conn_url, cmd, cbs)
       if cmd[1] == "SCAN" then issued = cmd end  -- later TYPE batches also call execute
       if cbs and cbs.on_response then
@@ -449,7 +492,12 @@ describe("poste-redis browser async grouping", function()
     assert.equals("SCAN", issued[1])
     assert.equals("MATCH", issued[5])
     assert.equals("*ser*", issued[6])
-    assert.equals(2, #db._search_results.children)
+    -- bucketed under each match's real folder
+    local results = db._search_results
+    assert.equals(2, #results.children)
+    assert.equals("session", results.children[1].name)
+    assert.equals("user", results.children[2].name)
+    assert.equals("session:r", results.children[1].children[1].name)
 
     session_conn.execute = orig_execute
   end)
@@ -650,13 +698,15 @@ describe("poste-redis browser window", function()
     vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "user" })
     browser._test.search_commit()
 
-    -- matched keys REPLACE the tree — no unfiltered rows survive
+    -- matched keys REPLACE the tree — bucketed under their real folder
+    -- (flatten keeps full key names inside folders; nested renders relative)
     lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     joined = table.concat(lines, "\n")
-    assert.is_true(joined:find("user:1", 1, true) ~= nil, "match missing")
-    assert.is_true(joined:find("user:2", 1, true) ~= nil, "match missing")
     assert.is_nil(joined:find("plain", 1, true), "search appended instead of replacing")
     assert.equals("user", lines[1], "committed query must stay on the bar")
+    assert.truthy(lines[3]:find("user", 1, true), "folder row missing from the results")
+    assert.match("user:1$", lines[4])
+    assert.match("user:2$", lines[5])
 
     -- clear restores the unfiltered tree
     browser.search_clear()
@@ -726,8 +776,12 @@ describe("poste-redis browser window", function()
     assert.equals("que", browser._test.parse_search_line(committed),
       "the icon must never leak into the committed query")
     local joined = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-    assert.is_true(joined:find("user:1", 1, true) ~= nil, "search with 'que' missing matches")
     assert.is_nil(joined:find("plain", 1, true), "unfiltered rows survived the search")
+    -- matches render bucketed under their real folder (flatten: full names)
+    assert.truthy(joined:find("user", 1, true), "folder row missing from the results")
+    local result_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert.match("user:1$", result_lines[4])
+    assert.match("user:2$", result_lines[5])
 
     browser.close()
     async.load_connections = orig_load

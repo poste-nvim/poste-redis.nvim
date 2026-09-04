@@ -341,6 +341,40 @@ local function build_children(node, keys, conn_name, db)
   end
 end
 
+--- Link parents + mark every group in a built subtree expanded: search
+--- results must show their folders OPEN — the whole point is seeing the
+--- matches in context, and a collapsed folder row would hide them again.
+local function adopt_and_expand(node, nodes)
+  for _, n in ipairs(nodes or {}) do
+    n.parent = node
+    if n.node_type == "group" then
+      n.expanded = true
+      adopt_and_expand(n, n.children)
+    end
+  end
+end
+
+--- Eager build of the SEARCH RESULTS subtree (async.search's hidden display
+--- root; init wires this as async.results_build — scan cannot be required
+--- from async). The matches render as a REAL bucketed tree, folders
+--- preserved, exactly like the unfiltered view (flatten: one folder per
+--- first `:` segment; nested: full nesting; flat: bare leaves) — a flat
+--- results list stripped the folder away and left keys like `2` that no one
+--- could place. Replaces node.children wholesale; the results node carries
+--- the QUERY as its name, which is not a real key prefix, so its meta.prefix
+--- is cleared to keep it out of the display-context stripping.
+--- @param node table results group node (hidden display root)
+--- @param keys string[] matched keys accumulated so far
+--- @param conn_name string
+--- @param db number
+function M.build_search_results(node, keys, conn_name, db)
+  node.meta.prefix = ""
+  build_children(node, keys, conn_name, db)
+  adopt_and_expand(node, node.children)
+end
+
+M.build_children = build_children
+
 --- SCAN-load a db node's group headers in batches (LAZY: groups are created
 --- but not populated; each loads on expand via scan_group). This keeps db
 --- expand O(distinct prefixes) instead of O(all keys) — a 100k-key db shows

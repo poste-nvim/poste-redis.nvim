@@ -14,8 +14,9 @@
 ---   tree                <- the selected db's groups + flat keys as top level
 ---                          (the db node itself is the hidden display_root).
 ---                          While a search is active the results node is the
----                          display root instead: matched keys REPLACE the
----                          tree; <Esc> (search_clear) restores it.
+---                          display root instead: the matched keys REPLACE
+---                          the tree, bucketed under their real folders;
+---                          <Esc> (search_clear) restores it.
 ---   [pinned overlay]    <- header lines 1-2 are mirrored into a borderless
 ---                          float pinned to the window's top rows
 ---                          (browser/header_bar), so the filter bar + separator
@@ -229,6 +230,11 @@ local function render_tree()
 end
 
 async.render_hook = render_tree
+
+--- Search results build through scan's eager tree builders (see
+--- async.results_build): matched keys land in their real folders instead of
+--- a flat list that stripped the folder away.
+async.results_build = scan.build_search_results
 
 --- Incremental append: insert newly-arrived nodes under `node` without a
 --- full re-render. Falls back to render_tree if the node isn't rendered yet.

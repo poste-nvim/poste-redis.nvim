@@ -46,6 +46,13 @@ M.render_hook = nil
 --- @return boolean handled
 M.append_hook = nil
 
+--- Search-results builder, wired by init to scan.build_search_results
+--- (scan → async is the only legal require edge, so the eager tree builders
+--- cannot be required here). Called as fn(results_node, all_keys,
+--- conn_name, db) at the search's render points; it must REPLACE
+--- results_node.children so re-searches rebuild cleanly.
+M.results_build = nil
+
 --- Buffer work (renders + incremental appends) NEVER runs inside a
 --- job-response callback: nvim 0.12 can permanently starve a job channel's
 --- stdout reads when a buffer mutation overlaps responses arriving on
@@ -269,17 +276,32 @@ local function fuzzy_match_pattern(query)
   return "*" .. esc .. "*"
 end
 
+--- Every key leaf in a results subtree (bucketed: keys hide under group
+--- nodes) — the TYPE batch must type them all, not just the top level.
+--- @param nodes table[]|nil
+--- @param out table[]
+--- @return table[] out
+local function collect_key_nodes(nodes, out)
+  out = out or {}
+  for _, n in ipairs(nodes or {}) do
+    if n.node_type == "key" then out[#out + 1] = n
+    else collect_key_nodes(n.children, out) end
+  end
+  return out
+end
+
 --- Fuzzy search: SCAN MATCH *<query>* — the query matches anywhere in the key
 --- (substring; glob metacharacters are escaped so they match literally), so
 --- typing `ser` finds `user:1` and `session:r`, not just `ser*` prefixes.
---- Same cursor/pacing/append machinery as browser/scan.scan_group; the
---- search bar in browser/init.lua drives it on <leader>/ + <CR>.
+--- The bar in browser/init.lua drives it on <leader>/ + <CR>.
 ---
---- The results node is NOT attached to db_node.children: while it exists,
---- init.render_tree makes it the hidden display root, so matched keys
---- REPLACE the rendered tree instead of appending a results subtree after
---- the unfiltered one. Reuses (or re-seeds) db_node._search_results so
---- re-searching replaces the previous results. Epoch is bumped on the db
+--- Matches render as a REAL bucketed tree (results_build → scan's eager
+--- builders), folders preserved — a flat results list left bare keys like
+--- `2` under no folder, which read as noise. The results node is NOT
+--- attached to db_node.children: while it exists, init.render_tree makes it
+--- the hidden display root, so the matched subtree REPLACEs the tree; on
+--- clear the db node comes back. Reuses (or re-seeds) db_node._search_results
+--- so re-searching replaces the previous results. Epoch is bumped on the db
 --- node so a stale search (or a stale group scan on the same db) is dropped.
 --- @param db_node table db node
 --- @param conn_url string
@@ -313,7 +335,6 @@ function M.search(db_node, conn_url, conn_name, subpath)
 
   local scan_count = config.config.scan_count or 500
   local all_keys = {}
-  local built = 0
   local RENDER_EVERY_PAGES = 8
   local page = 0
   local match = fuzzy_match_pattern(subpath)
@@ -333,29 +354,25 @@ function M.search(db_node, conn_url, conn_name, subpath)
         end
         local final_page = new_cursor == "0"
         if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
-          local new_nodes = {}
-          for i = built + 1, #all_keys do
-            local kn = tree.make_key_node(all_keys[i], conn_name, db)
-            kn.parent = results
-            table.insert(new_nodes, kn)
-          end
-          built = #all_keys
-          for _, n in ipairs(new_nodes) do table.insert(results.children, n) end
-          M.schedule_append(results, new_nodes)
+          -- rebuild the whole bucketed subtree from every match so far (the
+          -- bucketing can move keys between folders as more pages land, so
+          -- appends cannot express it — same pacing as before, full renders)
+          if M.results_build then M.results_build(results, all_keys, conn_name, db) end
+          M.schedule_render()
         end
         if not final_page and tree.last_truncated > 0 then
           -- render cap hit: stop paging, the remaining matches would never show
           results.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           M.schedule_render()
-          M.fetch_types(results.children, conn_url, db, db_node)
+          M.fetch_types(collect_key_nodes(results.children), conn_url, db, db_node)
         elseif not final_page then
           next_page(new_cursor)
         else
           results.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           M.schedule_render()
-          M.fetch_types(results.children, conn_url, db, db_node)
+          M.fetch_types(collect_key_nodes(results.children), conn_url, db, db_node)
         end
       end,
       on_error = function(msg)
