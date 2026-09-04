@@ -34,7 +34,7 @@ local function page_command(key, type, cursor)
   cursor = cursor or 0
   if type == "hash" then return { "HSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
   if type == "set" then return { "SSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
-  if type == "zset" then return { "ZREVRANGE", key, "0", "-1", "WITHSCORES" } end
+  if type == "zset" then return { "ZSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
   if type == "list" then
     local from = tonumber(cursor) or 0
     return { "LRANGE", key, tostring(from), tostring(from + PAGE - 1) }
@@ -146,7 +146,6 @@ function M.next_page()
       v.cursor = (ev.value and ev.value.cursor) or "0"
       v.loaded = v.loaded + #items
       v.total = ev.value and ev.value.len or nil
-      if v.type == "zset" then v.done = true end
       add_page(ev, ("%s [%s · page %d]"):format(v.key, v.type, #v.pages + 1))
     elseif v.type == "list" then
       local items = ev.value and ev.value.value or {}
