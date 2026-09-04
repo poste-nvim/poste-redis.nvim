@@ -3,7 +3,7 @@
 
 # ── 连接与库 ──────────────────────────────
 USE local              # 切换到 connections.toml 里的 local 连接
-SELECT 3               # 真·Redis 命令：切 db（M1 exec 模式，每次独立进程）
+SELECT 0               # 真·Redis 命令：切 db（M1 exec 模式，每次独立进程）
 
 set a:b:c:d "abcd"
 set a:d "ad"
