@@ -1,4 +1,4 @@
---- Redis key browser window (M2, P1-1/P1-2).
+--- Redis key browser window (M2, P1-1/P1-2) — the FACADE.
 ---
 --- Layout (v5):
 ---   winbar              <- db scope (orange), display-only chrome; <Space>
@@ -27,6 +27,14 @@
 --- entries INSTEAD of the tree. Nothing is auto-picked — <CR> on a row makes
 --- it the context, lands on db 0, and swaps the list for the layout above.
 ---
+--- This file owns the window/buffer lifecycle, the render pipeline, the
+--- keymaps and the public API. The mutable state lives in browser/state.lua
+--- (shared with the submodules); concerns extracted from the old monolith:
+---   browser/searchbar.lua  search editing + cursor clamp
+---   browser/picker.lua     first-open connections list
+---   browser/reveal.lua     jump-to-key walker
+---   browser/header_bar.lua pinned header overlay
+---
 --- All I/O goes through browser/async.lua on the persistent redis-session
 --- transport. The browser is scoped to ONE connection + ONE db at a time.
 
@@ -36,113 +44,55 @@ local async = require("poste-redis.browser.async")
 local scan = require("poste-redis.browser.scan")
 local session_conn = require("poste-redis.session_conn")
 local redis_state = require("poste-redis.state")
-local connections = require("poste-redis.connections")
 local header_bar = require("poste-redis.browser.header_bar")
+local state = require("poste-redis.browser.state")
+local searchbar = require("poste-redis.browser.searchbar")
+local picker = require("poste-redis.browser.picker")
+local reveal = require("poste-redis.browser.reveal")
 
 local M = {}
-
-local browser_buf = nil
-local browser_win = nil
-local line_to_node = {}
-
---- Width the browser was last opened at: the auto-width floor, so the split
---- never auto-shrinks below what the user asked for on open.
-local opened_width = 30
-
---- Current scope: one connection, one selected db. The db node is the hidden
---- display root; its children render at the top of the tree.
-local current_conn = nil       -- { name, url } | nil
-local current_db = 0
-local current_db_node = nil    -- tree.make_db_node(...)
-
---- Search state (header line 1). search_active is true while the input is
---- being edited on line 1.
-local search_active = false
-local search_query = ""
-
---- Connections picker (first open): the browser buffer lists the redis
---- connections from connections.toml instead of the tree. <CR> on a row
---- makes it the context and lands on db 0 — never an automatic pick,
---- so the context is always an explicit user choice.
-local conn_picker = { active = false, nodes = {} }
-
---- Pending key reveal (see the "Reveal" section; driven from render_tree).
-local reveal_state = nil
-local try_reveal  -- forward decl (AGENTS.md: local fn hoisting)
-
---- Multi-select (poste-db db-browser pattern): <Tab> toggles a node into the
---- selection (restricted to nodes under the current db), <Esc> exits, D
---- batch-deletes the selection. Selected nodes render with a ✓ marker.
-local multi_select = { active = false, selected = {} }
 
 --- Winbar text (db scope, orange). Display-only chrome: <Space> anywhere in
 --- the buffer pops the picker; picking a db re-scans it and repaints this.
 local function db_select_text()
   -- \239\135\128 = db icon U+F1C0 (explicit escape: reviewable bytes)
-  return "\239\135\128 db " .. tostring(current_db)
+  return "\239\135\128 db " .. tostring(state.current_db)
 end
 
 --- Paint the connection + db scope into the browser window's winbar: the
 --- connection name left of the `%=` split (colored with its connections.toml
 --- color when one is configured, plain otherwise), the orange db scope right
 --- (the same PosteRedisBrowserWinbarDb used before). The window handle is
---- re-resolved the same way separator_text does — browser_win can be stale
---- after :q / split churn. All text is plugin-generated, no %-escaping
---- needed.
+--- re-resolved via state.window() — browser_win can be stale after :q /
+--- split churn. All text is plugin-generated, no %-escaping needed.
 local function update_winbar()
-  local win = browser_win
-  if not win or not vim.api.nvim_win_is_valid(win) then
-    win = browser_buf and vim.api.nvim_buf_is_valid(browser_buf) and vim.fn.bufwinid(browser_buf) or nil
-  end
-  if not win or win == -1 then return end
+  local win = state.window()
+  if not win then return end
   local parts = {}
-  if conn_picker.active then
+  if state.conn_picker.active then
     -- no scope yet: the right side names the pending choice instead of a db
     parts[#parts + 1] = "%=%#PosteRedisBrowserWinbarDb#select connection %*"
   else
-    if current_conn and current_conn.name then
+    if state.current_conn and state.current_conn.name then
       local ok_st, statusline = pcall(require, "poste-redis.statusline")
-      local left_hl = ok_st and statusline.get_ctx_color(current_conn.name) or nil
-      parts[#parts + 1] = left_hl and ("%#" .. left_hl .. "# " .. current_conn.name .. " %*")
-        or current_conn.name
+      local left_hl = ok_st and statusline.get_ctx_color(state.current_conn.name) or nil
+      parts[#parts + 1] = left_hl and ("%#" .. left_hl .. "# " .. state.current_conn.name .. " %*")
+        or state.current_conn.name
     end
     parts[#parts + 1] = "%=%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. " %*"
   end
   vim.api.nvim_set_option_value("winbar", table.concat(parts), { win = win })
 end
 
---- Header text for line 1 (search bar): the committed query only — the icon
---- is virt text added by tree.decorate_search_line, never buffer text. While
---- the user is editing the line the buffer text is whatever they typed;
---- render_tree keeps it when a render fires mid-edit.
-local function search_bar_text()
-  return search_query
-end
-
---- Header line 1 while the connections picker is up: a status cue instead of
---- the search bar (the bar takes the line back once a connection is chosen).
---- With no redis connections at all the line carries the reason.
---- @return string
-local function picker_hint_text()
-  if #conn_picker.nodes == 0 then
-    return "No redis connections in connections.toml"
-  end
-  return "Select a connection  (<CR> connect)"
-end
-
---- Header text for line 3 (separator rule): dashes spanning the browser
+--- Header text for line 2 (separator rule): dashes spanning the browser
 --- window so the key rows below read as a separate area. The dash count is
 --- width-derived, and the run is clamped so it always fits ONE screen line —
 --- a run reaching the window's last column wraps onto a second line, which
---- is what made the rule look doubled in narrow splits. browser_win can be a
---- stale handle after :q / split churn, so re-resolve from the buffer.
+--- is what made the rule look doubled in narrow splits.
 --- @return string
 local function separator_text()
-  local win = browser_win
-  if not win or not vim.api.nvim_win_is_valid(win) then
-    win = browser_buf and vim.api.nvim_buf_is_valid(browser_buf) and vim.fn.bufwinid(browser_buf) or nil
-  end
-  if not win or win == -1 then return string.rep("-", 20) end
+  local win = state.window()
+  if not win then return string.rep("-", 20) end
 
   -- width - 6 spans the split with a margin; the floor of 8 applies only
   -- when the window is wide enough — never let the run reach width (wrap).
@@ -155,10 +105,10 @@ end
 --- results node takes over — matched keys REPLACE the tree; on clear the db
 --- node comes back with its children untouched.
 local function display_root_node()
-  if current_db_node and current_db_node._search_results then
-    return current_db_node._search_results
+  if state.current_db_node and state.current_db_node._search_results then
+    return state.current_db_node._search_results
   end
-  return current_db_node
+  return state.current_db_node
 end
 
 --- Auto-width: resize the browser split to fit the longest rendered row so
@@ -170,19 +120,15 @@ end
 --- still exceeds the cap is clipped by nowrap instead of wrapping.
 local function update_browser_width()
   if not config.config.browser_auto_width then return end
-  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
-  local win = browser_win
-  if not win or not vim.api.nvim_win_is_valid(win) then
-    win = vim.fn.bufwinid(browser_buf)
-  end
-  if not win or win == -1 then return end
+  local win = state.window()
+  if not win then return end
 
   local content = tree.last_content_width or 0
   -- header chrome to keep in view: the search bar only (the separator is
   -- width-derived and excluded; the db scope lives in the winbar)
   content = math.max(content, vim.fn.strdisplaywidth(tree.header_lines[1] or ""))
   local min_w = math.max(1, math.floor(tonumber(config.config.browser_min_width) or 30))
-  min_w = math.max(min_w, opened_width)
+  min_w = math.max(min_w, state.opened_width)
   local ratio = tonumber(config.config.browser_width_max_ratio) or 0.7
   local max_w = math.max(min_w, math.floor(vim.o.columns * ratio))
   local target = math.max(min_w, math.min(content + 3, max_w))
@@ -193,49 +139,51 @@ local function update_browser_width()
 end
 
 local function render_tree()
-  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
-  if conn_picker.active then
+  local buf = state.browser_buf
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  if state.conn_picker.active then
     -- picker mode: connection rows instead of the tree; line 1 is the
     -- picker cue (any stale search-bar icon extmark must go with it)
-    tree.header_lines = { picker_hint_text(), separator_text() }
+    tree.header_lines = { picker.hint_text(), separator_text() }
     tree.display_root = nil
-    line_to_node = tree.render_tree(browser_buf, line_to_node, conn_picker.nodes, nil)
-    tree.clear_search_decoration(browser_buf)
-    tree.decorate_separator(browser_buf, tree.header_lines[2])
+    state.line_to_node = tree.render_tree(buf, state.line_to_node, state.conn_picker.nodes, nil)
+    tree.clear_search_decoration(buf)
+    tree.decorate_separator(buf, tree.header_lines[2])
     update_winbar()
     update_browser_width()
-    header_bar.sync(browser_buf, { plain = true })
+    header_bar.sync(buf, { plain = true })
     return
   end
-  local search_line = search_bar_text()
-  if search_active then
+  local search_line = state.search_query
+  if state.search_active then
     -- a render fired mid-edit (paced SCAN batch): keep the in-progress text
-    search_line = vim.api.nvim_buf_get_lines(browser_buf, 0, 1, false)[1] or search_line
+    search_line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or search_line
   end
   tree.header_lines = { search_line, separator_text() }
   tree.display_root = display_root_node()
-  line_to_node = tree.render_tree(browser_buf, line_to_node, { tree.display_root },
-    multi_select.active and multi_select or nil)
-  if not search_active then
-    tree.decorate_search_line(browser_buf, search_query)
+  state.line_to_node = tree.render_tree(buf, state.line_to_node, { tree.display_root },
+    state.multi_select.active and state.multi_select or nil)
+  if not state.search_active then
+    tree.decorate_search_line(buf, state.search_query)
   end
-  tree.decorate_separator(browser_buf, tree.header_lines[2])
+  tree.decorate_separator(buf, tree.header_lines[2])
   update_winbar()
   update_browser_width()
   -- Pin the header chrome over the scrolling tree (browser/header_bar). While
   -- the bar is being edited the caret sits on line 1, under where the overlay
   -- would be — hide it until commit/cancel re-render.
-  if search_active then
+  if state.search_active then
     header_bar.hide()
   else
-    header_bar.sync(browser_buf)
+    header_bar.sync(buf)
   end
-  -- a pending key reveal resumes here: expand_node → render → walk (last,
-  -- so a re-entrant render from an expand finishes before the outer one)
-  if reveal_state then try_reveal() end
+  -- a pending key reveal resumes here: expand → render → walk (last, so a
+  -- re-entrant render from an expand finishes before the outer one)
+  if state.reveal_state then reveal.resume() end
 end
 
 async.render_hook = render_tree
+state.render = render_tree
 
 --- Search results build through scan's eager tree builders (see
 --- async.results_build): matched keys land in their real folders instead of
@@ -245,112 +193,28 @@ async.results_build = scan.build_search_results
 --- Incremental append: insert newly-arrived nodes under `node` without a
 --- full re-render. Falls back to render_tree if the node isn't rendered yet.
 async.append_hook = function(node, new_nodes)
-  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return false end
-  local ok = tree.append_children(browser_buf, line_to_node, node, new_nodes)
+  local buf = state.browser_buf
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return false end
+  local ok = tree.append_children(buf, state.line_to_node, node, new_nodes)
   if not ok then
     render_tree()
   end
   return true
 end
 
---- (Re)select a db: build its node, make it the display root, and scan_keys.
---- @param db number
-local function select_db(db)
-  if not current_conn then return end
-  current_db = db
-  current_db_node = tree.make_db_node({ db = db }, current_conn.name)
-  tree.display_root = current_db_node
-  search_query = ""
-  scan.scan_keys(current_db_node, current_conn.url, current_conn.name)
-  render_tree()
-end
-
-----------------------------------------------------------------------
--- Connections picker (first open): the window lists connections.toml
--- entries instead of the tree until the user picks one.
-----------------------------------------------------------------------
-
---- Sort the picker rows by name: list_connections walks the toml table with
---- pairs(), so the raw order flips between runs — the list must be stable.
-local function sort_picker_nodes(nodes)
-  table.sort(nodes, function(a, b) return (a.name or "") < (b.name or "") end)
-  return nodes
-end
-
---- Park the cursor on the picker's starting row: the current context's
---- connection when one is already set (USE / :PosteRedisConnection), else the
---- first row. Positioning is a hint, not a choice — connecting takes <CR>.
-local function focus_picker_row()
-  local win = browser_win
-  if not win or not vim.api.nvim_win_is_valid(win) then
-    win = browser_buf and vim.api.nvim_buf_is_valid(browser_buf)
-      and vim.fn.bufwinid(browser_buf) or nil
-  end
-  if not win or win == -1 then return end
-  local row = 1
-  local ok, poste_state = pcall(require, "poste.state")
-  local preferred = ok and poste_state.connection
-  if preferred then
-    for i, n in ipairs(conn_picker.nodes) do
-      if n.name == preferred then row = i; break end
-    end
-  end
-  vim.api.nvim_win_set_cursor(win, { tree.HEADER_LINES + row, 0 })
-end
-
---- Show the connections list in place of the tree (first open, no context
---- chosen yet). Rendered in the browser window itself so the choice happens
---- where the tree will live.
-local function show_conn_picker()
-  async.load_connections(function(nodes)
-    conn_picker.active = true
-    conn_picker.nodes = sort_picker_nodes(nodes or {})
-    render_tree()
-    if #conn_picker.nodes == 0 then
-      vim.notify("No redis connections in connections.toml",
-        vim.log.levels.WARN, { title = redis_state.TITLE })
-      return
-    end
-    focus_picker_row()
-  end)
-end
-
---- Make a connection the browser's context AND the global one (statusline
---- segment, result-panel stamping, file execution all follow), then land on
---- db 0 — select_db swaps the picker for the filter bar + separator + tree.
---- @param name string
---- @param url string
-local function connect_connection(name, url)
-  if not name or not url then return end
-  current_conn = { name = name, url = url }
-  conn_picker.active = false
-  conn_picker.nodes = {}
-  connections.apply_connection(name, url)
-  select_db(0)
-end
-
---- <CR> on a picker row: connect that connection. `node` may be nil (test
---- hook) to take the first listed connection.
---- @param node table|nil connection node
-local function choose_connection(node)
-  if not node then node = conn_picker.nodes[1] end
-  if not node or node.node_type ~= "connection" then return end
-  connect_connection(node.name, node.meta and node.meta.url)
-end
-
 --- <Space>: pop a dropdown listing dbs of the current connection; picking one
 --- re-scans it and repaints the winbar scope.
 local function pick_db()
-  if not current_conn then return end
+  if not state.current_conn then return end
   local items = {}
   for db = 0, 15 do
     items[#items + 1] = { db = db, label = ("db %d"):format(db) }
   end
   vim.ui.select(items, {
-    prompt = "Select database (" .. current_conn.name .. ")",
+    prompt = "Select database (" .. state.current_conn.name .. ")",
     format_item = function(i) return i.label end,
   }, function(choice)
-    if choice then select_db(choice.db) end
+    if choice then state.select_db(choice.db) end
   end)
 end
 
@@ -371,7 +235,7 @@ local current_node  -- forward decl (defined in "Keymap handlers")
 --- @param conn_url string
 local function expand_node(node, conn_url)
   if node.node_type == "group" and not node.children then
-    scan.scan_group(node, conn_url, current_conn and current_conn.name)
+    scan.scan_group(node, conn_url, state.current_conn and state.current_conn.name)
     node.expanded = true
     return
   end
@@ -390,37 +254,37 @@ end
 --- Selection is restricted to nodes under the current db (single folder).
 local function toggle_multi_select()
   local node = current_node()
-  if not node or not current_db_node then return end
+  if not node or not state.current_db_node then return end
   if node.node_type ~= "key" and node.node_type ~= "group" then return end
-  if not multi_select.active then
-    multi_select.active = true
-    multi_select.selected = {}
+  if not state.multi_select.active then
+    state.multi_select.active = true
+    state.multi_select.selected = {}
   end
-  if multi_select.selected[node] then
-    multi_select.selected[node] = nil
+  if state.multi_select.selected[node] then
+    state.multi_select.selected[node] = nil
   else
-    multi_select.selected[node] = true
+    state.multi_select.selected[node] = true
   end
   render_tree()
 end
 
 --- Leave multi-select mode (Esc while active, or after a batch delete).
 local function exit_multi_select()
-  if not multi_select.active then return end
-  multi_select.active = false
-  multi_select.selected = {}
+  if not state.multi_select.active then return end
+  state.multi_select.active = false
+  state.multi_select.selected = {}
   render_tree()
 end
 
 --- D with an active selection: batch-delete every selected node's keys after
 --- one confirm; without a selection D keeps the single-prefix delete.
 local function delete_selected_or_prefix()
-  if conn_picker.active then return end  -- nothing to delete before a context exists
-  if multi_select.active and next(multi_select.selected) then
+  if state.conn_picker.active then return end  -- nothing to delete before a context exists
+  if state.multi_select.active and next(state.multi_select.selected) then
     local nodes = {}
-    for node in pairs(multi_select.selected) do nodes[#nodes + 1] = node end
+    for node in pairs(state.multi_select.selected) do nodes[#nodes + 1] = node end
     require("poste-redis.browser.actions").delete_nodes(nodes, {
-      db_node = current_db_node,
+      db_node = state.current_db_node,
       render = render_tree,
       on_done = exit_multi_select,
     })
@@ -433,7 +297,7 @@ local function delete_selected_or_prefix()
     return
   end
   require("poste-redis.browser.actions").delete_prefix(node, {
-    db_node = current_db_node,
+    db_node = state.current_db_node,
     render = render_tree,
   })
 end
@@ -446,25 +310,25 @@ end
 -- local at the top of "Node actions" — a second `local` would shadow it with
 -- nil (AGENTS.md local-fn hoisting pitfall).
 function current_node()
-  return tree.get_node_at_line(line_to_node, vim.fn.line("."))
+  return tree.get_node_at_line(state.line_to_node, vim.fn.line("."))
 end
 
 local function toggle_node()
   local node = current_node()
   if not node then return end
-  if conn_picker.active then
+  if state.conn_picker.active then
     -- picker rows: <CR> (and l, via expand_or_child) connects the connection
-    if node.node_type == "connection" then choose_connection(node) end
+    if node.node_type == "connection" then picker.choose(node) end
     return
   end
   if node.node_type == "key" then
-    require("poste-redis.browser.value").view(node, { current_db_node }, render_tree)
+    require("poste-redis.browser.value").view(node, { state.current_db_node }, render_tree)
     return
   end
   if node.expanded then
     collapse_node(node)
   else
-    expand_node(node, current_conn and current_conn.url)
+    expand_node(node, state.current_conn and state.current_conn.url)
   end
 end
 
@@ -476,7 +340,7 @@ local function collapse_or_parent()
   if not is_leaf and node.expanded then
     node.expanded = false
     render_tree()
-    for i, n in ipairs(line_to_node) do
+    for i, n in ipairs(state.line_to_node) do
       if n == node then
         -- i is a slot in line_to_node; the buffer line is offset by the
         -- header lines (parity with get_node_at_line). Without the offset
@@ -487,11 +351,11 @@ local function collapse_or_parent()
     end
   else
     local buf_line = vim.fn.line(".")
-    local text = vim.api.nvim_buf_get_lines(browser_buf, buf_line - 1, buf_line, false)[1] or ""
+    local text = vim.api.nvim_buf_get_lines(state.browser_buf, buf_line - 1, buf_line, false)[1] or ""
     local depth = math.floor((text:match("^%s*") or ""):len() / 2)
     -- never treat the two header lines as a parent
     for line = buf_line - 1, tree.HEADER_LINES + 1, -1 do
-      local t = vim.api.nvim_buf_get_lines(browser_buf, line - 1, line, false)[1] or ""
+      local t = vim.api.nvim_buf_get_lines(state.browser_buf, line - 1, line, false)[1] or ""
       local d = math.floor((t:match("^%s*") or ""):len() / 2)
       if d < depth then
         vim.api.nvim_win_set_cursor(0, { line, 0 })
@@ -510,7 +374,7 @@ local function expand_or_child()
     toggle_node()
   else
     local buf_line = vim.fn.line(".")
-    local total = vim.api.nvim_buf_line_count(browser_buf)
+    local total = vim.api.nvim_buf_line_count(state.browser_buf)
     if buf_line < total then
       vim.api.nvim_win_set_cursor(0, { buf_line + 1, 0 })
     end
@@ -520,122 +384,10 @@ end
 --- r: reload the current db's keys. Any active search is cleared — the fresh
 --- scan rebuilds the unfiltered tree.
 local function refresh_node()
-  if not current_db_node or not current_conn then return end
-  M.search_clear()
-  current_db_node.children = nil
-  scan.scan_keys(current_db_node, current_conn.url, current_conn.name)
-end
-
---- <leader>/: enter search state — focus the search bar on line 1, insert
---- mode (typed text lands after the fixed icon prefix, NOT the command
---- line). <CR> runs async.search on the current db and loses focus; empty +
---- <CR> clears the search; <Esc> cancels. `/` is untouched so nvim's own
---- buffer search keeps working.
-local search_commit  -- forward declarations (AGENTS.md: local fn hoisting)
-local search_cancel
-
---- Keep the cursor off the two pinned header rows (filter bar + separator):
---- they render under the overlay float, so a cursor there is invisible and
---- can do nothing. Normal navigation bottoms out at the first tree row; the
---- bar itself is only reachable through <leader>/ (search_enter), which is
---- why the clamp skips while search_active.
-local function clamp_cursor()
-  if search_active then return end
-  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
-  local win = vim.fn.bufwinid(browser_buf)
-  if not win or win == -1 then return end
-  local cur = vim.api.nvim_win_get_cursor(win)
-  local first_row = tree.HEADER_LINES + 1
-  if cur[1] >= first_row then return end
-  -- clamp only onto an EXISTING tree row: an empty db renders just the two
-  -- header lines, and there is no tree row to park the cursor on
-  if vim.api.nvim_buf_line_count(browser_buf) < first_row then return end
-  local line_text = vim.api.nvim_buf_get_lines(browser_buf, tree.HEADER_LINES, first_row, false)[1] or ""
-  vim.api.nvim_win_set_cursor(win, { first_row, math.min(cur[2], #line_text) })
-end
-local function search_enter()
-  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
-  if conn_picker.active then return end  -- the search bar does not exist before a context is chosen
-  local win = vim.fn.bufwinid(browser_buf)
-  if win ~= -1 then vim.api.nvim_set_current_win(win) end
-
-  search_active = true
-  tree.set_header_line(browser_buf, search_query, 1)
-  -- The icon is idle-only virt text. While editing it is dropped so the
-  -- caret (at the true EOL) can never sit on or before it — the bar is
-  -- just the query, and insert mode is entered automatically.
-  tree.decorate_search_line(browser_buf, search_query, true)
-  -- the pinned overlay would cover the caret row: drop it until commit
-  header_bar.hide()
-  vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
-  vim.keymap.set("i", "<CR>", search_commit, { buffer = browser_buf, silent = true })
-  vim.keymap.set("i", "<Esc>", search_cancel, { buffer = browser_buf, silent = true })
-  -- Land on the search line FIRST: :startinsert! works like "A" (append at the
-  -- EOL of the line the caret is on), so without this it would put the tree
-  -- row under the cursor into insert mode instead. From (1,0) it reaches the
-  -- search line's TRUE EOL and Insert mode starts after this function returns
-  -- (no i/A needed). normal! A must not be used — insert mode entered via
-  -- :normal does not survive a mapping callback (:help :startinsert).
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
-  vim.cmd("startinsert!")
-end
-
---- Parse the query out of the search bar line: trim whitespace. The icon is
---- virt text, never in the buffer, but a stray icon (pasted, or a stale
---- pre-virt bar) is still stripped defensively — the icon must never leak
---- into a query.
---- @param line string
---- @return string
-local function parse_search_line(line)
-  line = line or ""
-  -- strip the fixed icon prefix repeatedly (an already-doubled bar repairs
-  -- itself), plus a bare icon alone from a deleted separator space — the
-  -- icon must never survive into the committed query
-  while line:sub(1, #tree.SEARCH_PREFIX) == tree.SEARCH_PREFIX do
-    line = line:sub(#tree.SEARCH_PREFIX + 1)
-  end
-  if line:sub(1, #tree.SEARCH_ICON) == tree.SEARCH_ICON then
-    line = line:sub(#tree.SEARCH_ICON + 1)
-  end
-  line = line:gsub("^%s+", "")
-  return (line:gsub("%s+$", ""))
-end
-
---- <CR> in the search bar: read the query, run async.search, return to tree.
--- NOTE: assigned (not `local function`) so it fills the forward-declared
--- local `search_commit` that search_enter captured — a second `local` here
--- would shadow it with nil (AGENTS.md local-fn hoisting pitfall).
-function search_commit()
-  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
-  local line = vim.api.nvim_buf_get_lines(browser_buf, 0, 1, false)[1] or ""
-  local query = parse_search_line(line)
-  vim.cmd.stopinsert()
-  vim.keymap.del("i", "<CR>", { buffer = browser_buf })
-  vim.keymap.del("i", "<Esc>", { buffer = browser_buf })
-  vim.api.nvim_set_option_value("modifiable", false, { buf = browser_buf })
-  search_active = false
-  if query == "" then
-    M.search_clear()
-    return
-  end
-  search_query = query
-  if current_db_node and current_conn then
-    async.search(current_db_node, current_conn.url, current_conn.name, query)
-  end
-  render_tree()
-  clamp_cursor()  -- the caret was on the bar row: walk it back to the tree
-end
-
---- <Esc> in the search bar: cancel, clear any results, restore the tree.
--- NOTE: assigned (not `local function`) — see search_commit.
-function search_cancel()
-  if browser_buf and vim.api.nvim_buf_is_valid(browser_buf) then
-    vim.cmd.stopinsert()
-    vim.keymap.del("i", "<CR>", { buffer = browser_buf })
-    vim.keymap.del("i", "<Esc>", { buffer = browser_buf })
-    vim.api.nvim_set_option_value("modifiable", false, { buf = browser_buf })
-  end
-  M.search_clear()  -- also walks the caret off the pinned bar row (clamp)
+  if not state.current_db_node or not state.current_conn then return end
+  searchbar.clear()
+  state.current_db_node.children = nil
+  scan.scan_keys(state.current_db_node, state.current_conn.url, state.current_conn.name)
 end
 
 ----------------------------------------------------------------------
@@ -643,14 +395,17 @@ end
 ----------------------------------------------------------------------
 
 local function setup_browser_buffer()
-  if browser_buf and vim.api.nvim_buf_is_valid(browser_buf) then return browser_buf end
+  if state.browser_buf and vim.api.nvim_buf_is_valid(state.browser_buf) then
+    return state.browser_buf
+  end
 
-  browser_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_set_option_value("buftype", "nofile", { buf = browser_buf })
-  vim.api.nvim_set_option_value("bufhidden", "hide", { buf = browser_buf })
-  vim.api.nvim_set_option_value("swapfile", false, { buf = browser_buf })
-  vim.api.nvim_set_option_value("modifiable", false, { buf = browser_buf })
-  vim.api.nvim_buf_set_name(browser_buf, "poste://redis_browser")
+  local buf = vim.api.nvim_create_buf(false, true)
+  state.browser_buf = buf
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+  vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buf })
+  vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
+  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  vim.api.nvim_buf_set_name(buf, "poste://redis_browser")
 
   --- The separator dash count derives from the window width, so a split
   --- resize must refresh line 2 — otherwise a rule written for a wider
@@ -662,28 +417,28 @@ local function setup_browser_buffer()
   vim.api.nvim_create_autocmd("WinResized", {
     group = resize_group,
     callback = function()
-      if search_active then return end
-      if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
-      if vim.fn.bufwinid(browser_buf) == -1 then return end
-      tree.set_header_line(browser_buf, separator_text(), 2)
+      if state.search_active then return end
+      if not state.browser_buf or not vim.api.nvim_buf_is_valid(state.browser_buf) then return end
+      if vim.fn.bufwinid(state.browser_buf) == -1 then return end
+      tree.set_header_line(state.browser_buf, separator_text(), 2)
       -- the overlay spans the window width and mirrors the separator — keep
       -- both in step with the resized split
-      header_bar.sync(browser_buf, { plain = conn_picker.active })
+      header_bar.sync(state.browser_buf, { plain = state.conn_picker.active })
     end,
   })
 
   --- Navigation clamp: the pinned header rows are chrome under the overlay
-  --- float — no cursor there (see clamp_cursor).
+  --- float — no cursor there (browser/searchbar.clamp_cursor).
   local cursor_group = vim.api.nvim_create_augroup("PosteRedisBrowserCursor", { clear = true })
   for _, ev in ipairs({ "CursorMoved", "CursorMovedI" }) do
     vim.api.nvim_create_autocmd(ev, {
       group = cursor_group,
-      buffer = browser_buf,
-      callback = clamp_cursor,
+      buffer = buf,
+      callback = searchbar.clamp_cursor,
     })
   end
 
-  local opts = { buffer = browser_buf, noremap = true, silent = true }
+  local opts = { buffer = buf, noremap = true, silent = true }
   local k
   k = config.get_keymap("redis_browser", "toggle_node", "<CR>")
   if k then vim.keymap.set("n", k, toggle_node, opts) end
@@ -694,16 +449,16 @@ local function setup_browser_buffer()
   k = config.get_keymap("redis_browser", "refresh_node", "r")
   if k then vim.keymap.set("n", k, refresh_node, opts) end
   k = config.get_keymap("redis_browser", "search", "<leader>/")
-  if k then vim.keymap.set("n", k, search_enter, opts) end
+  if k then vim.keymap.set("n", k, searchbar.enter, opts) end
   k = config.get_keymap("redis_browser", "search_clear", "<Esc>")
   if k then
     vim.keymap.set("n", k, function()
-      if search_active then
-        search_cancel()
-      elseif multi_select.active then
+      if state.search_active then
+        searchbar.cancel()
+      elseif state.multi_select.active then
         exit_multi_select()
       else
-        M.search_clear()
+        searchbar.clear()
       end
     end, opts)
   end
@@ -716,7 +471,7 @@ local function setup_browser_buffer()
   local actions = require("poste-redis.browser.actions")
   --- Build the action context: the current db node (reload target) + render.
   local function action_ctx()
-    return { db_node = current_db_node, render = render_tree }
+    return { db_node = state.current_db_node, render = render_tree }
   end
   k = config.get_keymap("redis_browser", "delete", "d")
   if k then
@@ -757,8 +512,8 @@ local function setup_browser_buffer()
   if k then
     vim.keymap.set("n", k, function()
       local node = current_node()
-      if not node or not current_conn then return end
-      require("poste-redis.browser.info").show(node, { url = current_conn.url })
+      if not node or not state.current_conn then return end
+      require("poste-redis.browser.info").show(node, { url = state.current_conn.url })
     end, opts)
   end
   k = config.get_keymap("redis_browser", "yank_key", "y")
@@ -803,127 +558,7 @@ local function setup_browser_buffer()
     end, opts)
   end
 
-  return browser_buf
-end
-
-----------------------------------------------------------------------
--- Reveal: open the tree at a specific key (dataset `gd`,
--- :PosteRedisReveal, .redis `gd`). The walk is render-driven: folders on
--- the key's path expand lazily, and each scan-end render resumes the walk
--- until the key's row can be focused.
-----------------------------------------------------------------------
-
---- The child of `node` that leads to `key`: the key leaf itself, or the
---- group whose prefix the key lives under (lazy headers carry their
---- branch-point prefix, so folded spines match in one hop).
-local function reveal_child(node, key)
-  for _, ch in ipairs(node.children or {}) do
-    if ch.node_type == "key" and ch.meta.key == key then return ch end
-  end
-  for _, ch in ipairs(node.children or {}) do
-    if ch.node_type == "group" and ch.meta.prefix then
-      local p = ch.meta.prefix .. ":"
-      if key:sub(1, #p) == p then return ch end
-    end
-  end
-  return nil
-end
-
---- Park the browser cursor on a node's row.
-local function reveal_focus(node)
-  for i, n in ipairs(line_to_node) do
-    if n == node then
-      local win = vim.fn.bufwinid(browser_buf)
-      if win ~= -1 then
-        vim.api.nvim_win_set_cursor(win, { i + tree.HEADER_LINES, 0 })
-      end
-      return true
-    end
-  end
-  return false
-end
-
--- NOTE: reveal_state / try_reveal are forward-declared at the top of the
--- file — render_tree drives the walk.
-try_reveal = function()
-  local st = reveal_state
-  if not st then return end
-  local root = current_db_node
-  if not root or not current_conn or root.loading then return end
-  local node = st.node or root
-  if node ~= root and node.loading then return end  -- a scan on the path streams
-
-  if node.children == nil then
-    expand_node(node, current_conn.url)  -- lazy folder: scan; walk resumes on render
-    return
-  end
-
-  local child = reveal_child(node, st.key)
-  if not child then
-    reveal_state = nil
-    vim.notify("Key not found in the browser tree: " .. st.key,
-      vim.log.levels.INFO, { title = redis_state.TITLE })
-    return
-  end
-  if child.node_type == "key" then
-    -- focus only lands when the key's row is rendered; until the flush
-    -- paints the expanded folder, keep the walk pending (render_tree retries)
-    if reveal_focus(child) then
-      reveal_state = nil
-      vim.notify("Revealed " .. st.key, vim.log.levels.INFO, { title = redis_state.TITLE })
-    end
-    return
-  end
-  -- a folder on the path: open it, then descend (expand renders → resume)
-  if not child.expanded or child.children == nil then
-    expand_node(child, current_conn.url)
-  end
-  st.node = child
-  try_reveal()
-end
-
---- Open the browser tree at `opts.key`, scoped to `opts.connection` (name)
---- / `opts.url` + `opts.db`. Re-scopes the browser when the request points
---- somewhere it is not already looking (browser-local scope only — the
---- global context is not clobbered).
---- @param opts table { key, connection, url?, db? }
---- @return boolean accepted
-function M.reveal(opts)
-  opts = opts or {}
-  local key = opts.key
-  if not key or key == "" then return false end
-  local conn_name = opts.connection
-  local url = opts.url
-  if not url and conn_name then
-    local err
-    url, err = connections.resolve_redis_url(conn_name)
-    if not url then
-      vim.notify("Cannot resolve connection: " .. tostring(err or conn_name),
-        vim.log.levels.ERROR, { title = redis_state.TITLE })
-      return false
-    end
-  end
-  if not url then
-    vim.notify("No connection to reveal against", vim.log.levels.WARN,
-      { title = redis_state.TITLE })
-    return false
-  end
-  conn_name = conn_name or url
-
-  reveal_state = { key = key, node = nil }
-  M.search_clear()
-  local db = opts.db or 0
-  if not current_conn or current_conn.url ~= url or current_db ~= db then
-    current_conn = { name = conn_name, url = url }
-    conn_picker.active = false
-    conn_picker.nodes = {}
-    select_db(db)
-  else
-    render_tree()
-  end
-  M.open()
-  try_reveal()
-  return true
+  return buf
 end
 
 ----------------------------------------------------------------------
@@ -962,52 +597,52 @@ function M.open(opts)
     )
     local pos = opts.split or "right"
     vim.cmd(split_command(pos, width))
-    opened_width = width
-    browser_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(browser_win, buf)
-    vim.api.nvim_set_option_value("winfixwidth", true, { win = browser_win })
+    state.opened_width = width
+    state.browser_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(state.browser_win, buf)
+    vim.api.nvim_set_option_value("winfixwidth", true, { win = state.browser_win })
     -- one row per key: rows clip right instead of wrapping (auto-width grows
     -- the split to fit expanded content, nowrap clips anything past the cap)
-    vim.api.nvim_set_option_value("wrap", false, { win = browser_win })
+    vim.api.nvim_set_option_value("wrap", false, { win = state.browser_win })
     -- no gutter: the pinned header overlay (browser/header_bar) anchors at
     -- window col 0, which must be the first TEXT column — a number/sign/fold/
     -- status column would shift the tree rows out from under the bar
-    vim.api.nvim_set_option_value("number", false, { win = browser_win })
-    vim.api.nvim_set_option_value("relativenumber", false, { win = browser_win })
-    vim.api.nvim_set_option_value("signcolumn", "no", { win = browser_win })
-    vim.api.nvim_set_option_value("foldcolumn", "0", { win = browser_win })
-    vim.api.nvim_set_option_value("statuscolumn", "", { win = browser_win })
+    vim.api.nvim_set_option_value("number", false, { win = state.browser_win })
+    vim.api.nvim_set_option_value("relativenumber", false, { win = state.browser_win })
+    vim.api.nvim_set_option_value("signcolumn", "no", { win = state.browser_win })
+    vim.api.nvim_set_option_value("foldcolumn", "0", { win = state.browser_win })
+    vim.api.nvim_set_option_value("statuscolumn", "", { win = state.browser_win })
   else
-    browser_win = win
+    state.browser_win = win
     vim.api.nvim_set_current_win(win)
   end
 
-  if not current_conn then
+  if not state.current_conn then
     -- a context handed in by a selector connects directly; otherwise show
     -- the in-window connections list and wait for the user's <CR>
     local c = opts.connection
     if c and c.name and c.url then
-      connect_connection(c.name, c.url)
+      picker.connect(c.name, c.url)
     else
-      show_conn_picker()
+      picker.show()
     end
   else
     render_tree()
   end
-  return browser_buf
+  return state.browser_buf
 end
 
 --- Close the browser window (session stays alive for reuse).
 function M.close()
   -- drop the pinned header overlay first: floats outlive their anchor window
   header_bar.close()
-  if browser_win and vim.api.nvim_win_is_valid(browser_win) then
-    vim.api.nvim_win_close(browser_win, true)
-    browser_win = nil
+  if state.browser_win and vim.api.nvim_win_is_valid(state.browser_win) then
+    vim.api.nvim_win_close(state.browser_win, true)
+    state.browser_win = nil
   end
   -- sessions keyed by url survive; cleanup_buf stops empty ones
-  if browser_buf and vim.api.nvim_buf_is_valid(browser_buf) then
-    session_conn.cleanup_buf(browser_buf)
+  if state.browser_buf and vim.api.nvim_buf_is_valid(state.browser_buf) then
+    session_conn.cleanup_buf(state.browser_buf)
   end
 end
 
@@ -1022,17 +657,17 @@ end
 --- the tree looked empty until a manual refresh.
 --- @param mode? string|nil "flat" | "flatten" | "nested" (nil = toggle)
 function M.toggle_view(mode)
-  if conn_picker.active then return end  -- no db to re-scan before a connection is chosen
+  if state.conn_picker.active then return end  -- no db to re-scan before a connection is chosen
   local applied
   if mode and (mode == "flat" or mode == "flatten" or mode == "nested") then
     applied = async.set_view_mode(mode)
   else
     applied = async.toggle_view_mode()
   end
-  M.search_clear()
-  if current_db_node and current_conn then
-    current_db_node.children = nil
-    scan.scan_keys(current_db_node, current_conn.url, current_conn.name)
+  searchbar.clear()
+  if state.current_db_node and state.current_conn then
+    state.current_db_node.children = nil
+    scan.scan_keys(state.current_db_node, state.current_conn.url, state.current_conn.name)
   end
   local label = applied == "nested" and "Nested folders"
     or (applied == "flatten" and "Flatten folders"
@@ -1043,11 +678,16 @@ end
 --- Clear any active search results and restore the tree (public, for the
 --- <Esc> normal-mode binding and programmatic use).
 function M.search_clear()
-  search_active = false
-  search_query = ""
-  if current_db_node then async.search_clear(current_db_node) end
-  render_tree()
-  clamp_cursor()  -- the caret may sit on the pinned bar row after <CR>/<Esc>
+  searchbar.clear()
+end
+
+--- Reveal a key in the tree (see browser/reveal.lua) and show the window.
+--- @param opts table { key, connection, url?, db? }
+--- @return boolean accepted
+function M.reveal(opts)
+  local accepted = reveal.start(opts)
+  if accepted then M.open() end
+  return accepted
 end
 
 --- The browser's current scope: one connection + one selected db. Used by
@@ -1057,19 +697,19 @@ end
 --- @return { connection = string|nil, db = number|nil }
 function M.current_scope()
   return {
-    connection = current_conn and current_conn.name,
-    db = current_conn and current_db or nil,
+    connection = state.current_conn and state.current_conn.name,
+    db = state.current_conn and state.current_db or nil,
   }
 end
 
 --- Debug info for :PosteRedisInfo.
 function M.info()
   return {
-    buffer = browser_buf,
-    window = browser_win,
-    connection = current_conn and current_conn.name,
-    db = current_db,
-    picking_connection = conn_picker.active,
+    buffer = state.browser_buf,
+    window = state.browser_win,
+    connection = state.current_conn and state.current_conn.name,
+    db = state.current_db,
+    picking_connection = state.conn_picker.active,
     sessions = session_conn.list(),
     view_mode = async.view_mode(),
   }
@@ -1082,42 +722,32 @@ M._test = {
   expand_or_child = expand_or_child,
   collapse_or_parent = collapse_or_parent,
   split_command = split_command,
-  search_enter = search_enter,
-  search_commit = search_commit,
-  search_cancel = search_cancel,
+  search_enter = searchbar.enter,
+  search_commit = searchbar.commit,
+  search_cancel = searchbar.cancel,
   pick_db = pick_db,
-  select_db = select_db,
-  choose_connection = choose_connection,
-  connect_connection = connect_connection,
-  show_conn_picker = show_conn_picker,
-  picker_hint_text = picker_hint_text,
-  conn_picker_state = function() return conn_picker end,
+  select_db = state.select_db,
+  choose_connection = picker.choose,
+  connect_connection = picker.connect,
+  show_conn_picker = picker.show,
+  picker_hint_text = picker.hint_text,
+  conn_picker_state = function() return state.conn_picker end,
   --- Test hook: forget the chosen context so the first-open picker path can
   --- be exercised again (browser state is module-global and persists across
   --- open/close).
-  reset_scope = function()
-    current_conn = nil
-    current_db = 0
-    current_db_node = nil
-    search_active = false
-    search_query = ""
-    multi_select.active = false
-    multi_select.selected = {}
-    conn_picker.active = false
-    conn_picker.nodes = {}
-  end,
+  reset_scope = state.reset_scope,
   toggle_multi_select = toggle_multi_select,
   exit_multi_select = exit_multi_select,
-  multi_select_state = function() return multi_select end,
-  parse_search_line = parse_search_line,
-  search_bar_text = search_bar_text,
+  multi_select_state = function() return state.multi_select end,
+  parse_search_line = searchbar.parse_line,
+  search_bar_text = searchbar.bar_text,
   db_select_text = db_select_text,
   separator_text = separator_text,
   display_root_node = display_root_node,
   update_browser_width = update_browser_width,
-  line_to_node = function() return line_to_node end,
-  reveal_state = function() return reveal_state end,
-  reveal_focus = reveal_focus,
+  line_to_node = function() return state.line_to_node end,
+  reveal_state = function() return state.reveal_state end,
+  reveal_focus = reveal.reveal_focus,
 }
 
 return M

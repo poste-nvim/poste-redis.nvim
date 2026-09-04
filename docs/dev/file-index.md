@@ -48,7 +48,11 @@ fallback — see `requirements.md`.
 | `value.lua` | TYPE-first paginated value viewer: HSCAN/SSCAN/ZSCAN pages, LRANGE windows, XRANGE, string GET (truncated + `F` full load); page tabs + loaded/total footer |
 | `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate; every mutation lands in the command history (batches as one aggregated entry) |
 | `header_bar.lua` | Pinned header chrome: mirrors the browser buffer's header lines 1-2 (filter bar + separator) into a borderless float anchored to the window's top rows (result/header.lua pattern), so the bar stays visible while the tree scrolls; hidden while the bar is edited, dies with the window (WinClosed) |
-| `init.lua` | `poste://redis_browser` right-hand split (gutter-free), keymaps, first-open connections picker (in-window list → <CR> connects, db 0), `reveal(key, connection, db)` (render-driven walk: expands the folder path, parks the cursor on the key), `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
+| `init.lua` | Browser facade: `poste://redis_browser` right-hand split (gutter-free), keymaps, render pipeline (render_tree + async hooks), `open`/`close`/`toggle_view`/`search_clear`/`reveal` public API, `g?` help. Delegates to `browser/*` |
+| `state.lua` | Shared mutable browser state (buf/win/line_to_node/scope/search/picker/multi-select/reveal fields) + `window()` re-resolution, `reset_scope`, `select_db` — depended on by all `browser/*` modules, no cycles |
+| `searchbar.lua` | Search-bar editing (<leader>/ → insert on line 1, <CR> search, Esc cancel) + the cursor clamp that keeps the caret off the pinned header rows |
+| `picker.lua` | First-open connections list: sorted in-window rows (redacted URLs), <CR> connects (global context follows), db 0 |
+| `reveal.lua` | Reveal-a-key walker: re-scopes (connection/db), expands the folder path across renders, parks the cursor on the key's row |
 
 ### Configuration & connections
 
