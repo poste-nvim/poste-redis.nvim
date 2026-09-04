@@ -4,10 +4,16 @@
 --- DB nodes: DBSIZE. Rendered in a markdown float (doc preview pattern).
 local session_conn = require("poste-redis.session_conn")
 local doc = require("poste-redis.doc")
-local redis_state = require("poste-redis.state")
 local icons = require("poste-redis.icons")
 
 local M = {}
+
+--- Max keys memory-probed for a group's estimated-size line: a 100k-key
+--- group must not fire 100k MEMORY USAGE round-trips (bounded like
+--- config.type_fetch_limit).
+M.GROUP_SAMPLE_CAP = 100
+
+
 
 --- Byte count humanizer (B / KB / MB / GB).
 --- @param bytes number
@@ -108,7 +114,7 @@ local function group_info(node, url, cb)
   end
 
   local function sample(k)
-    if sampled >= GROUP_SAMPLE_CAP then return end
+    if sampled >= M.GROUP_SAMPLE_CAP then return end
     sampled = sampled + 1
     pending_samples = pending_samples + 1
     session_conn.execute(url, { "MEMORY", "USAGE", k }, {
@@ -175,7 +181,7 @@ end
 
 M._test = {
   format_bytes = M.format_bytes,
-  GROUP_SAMPLE_CAP = GROUP_SAMPLE_CAP,
+  GROUP_SAMPLE_CAP = M.GROUP_SAMPLE_CAP,
 }
 
 return M
