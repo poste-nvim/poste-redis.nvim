@@ -84,6 +84,9 @@ function M.setup()
   link_if_empty("PosteRedisBrowserSep", sep_target)
   -- Group rows: child count digits after the name (eol virt text).
   define_if_empty("PosteRedisBrowserCount", "#808080")
+  -- Pinned header overlay (browser/header_bar float): blends with the tree
+  -- rows — the bar's content is colored by its own extmark groups.
+  link_if_empty("PosteRedisBrowserHeaderBar", "Normal")
 
   -- Key browser tree icons: gray expand/collapse markers, blue folder,
   -- green string, orange collections (zset/hash/list/set), purple everything
@@ -115,6 +118,7 @@ function M.setup()
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
     "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
     "PosteRedisBrowserWinbarDb", "PosteRedisBrowserSep", "PosteRedisBrowserCount",
+    "PosteRedisBrowserHeaderBar",
     "PosteRedisBrowserMarker", "PosteRedisBrowserConn", "PosteRedisBrowserDb",
     "PosteRedisBrowserGroup", "PosteRedisBrowserString",
     "PosteRedisBrowserCollection", "PosteRedisBrowserOther",

@@ -566,11 +566,19 @@ describe("poste-redis browser window", function()
     local source = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_name(source, "browser-source.redis")
     vim.api.nvim_set_current_buf(source)
-    local wins_before = #vim.api.nvim_list_wins()
+    -- count only split windows: the pinned header overlay is a float
+    local function split_wins()
+      local n = 0
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(w).relative == "" then n = n + 1 end
+      end
+      return n
+    end
+    local wins_before = split_wins()
 
     local ok, err = pcall(function() browser.open() end)
     assert.is_true(ok, tostring(err))
-    assert.equals(wins_before + 1, #vim.api.nvim_list_wins())
+    assert.equals(wins_before + 1, split_wins())
     assert.is_true(vim.fn.bufwinid(source) ~= -1, "source buffer was replaced")
 
     local browser_buf = browser.info().buffer

@@ -1,6 +1,6 @@
 --- Redis key browser window (M2, P1-1/P1-2).
 ---
---- Layout (v4):
+--- Layout (v5):
 ---   winbar              <- db scope (orange), display-only chrome; <Space>
 ---                          pops the db picker dropdown anywhere in the buffer
 ---   <search>            <- search bar (line 1): <leader>/ focuses it, <CR>
@@ -16,6 +16,11 @@
 ---                          While a search is active the results node is the
 ---                          display root instead: matched keys REPLACE the
 ---                          tree; <Esc> (search_clear) restores it.
+---   [pinned overlay]    <- header lines 1-2 are mirrored into a borderless
+---                          float pinned to the window's top rows
+---                          (browser/header_bar), so the filter bar + separator
+---                          stay visible while the tree scrolls. Hidden while
+---                          the bar is being edited (the caret needs line 1).
 ---
 --- First open (no connection chosen yet): the window lists the connections.toml
 --- entries INSTEAD of the tree. Nothing is auto-picked — <CR> on a row makes
@@ -31,6 +36,7 @@ local scan = require("poste-redis.browser.scan")
 local session_conn = require("poste-redis.session_conn")
 local redis_state = require("poste-redis.state")
 local connections = require("poste-redis.connections")
+local header_bar = require("poste-redis.browser.header_bar")
 
 local M = {}
 
@@ -194,6 +200,7 @@ local function render_tree()
     tree.decorate_separator(browser_buf, tree.header_lines[2])
     update_winbar()
     update_browser_width()
+    header_bar.sync(browser_buf, { plain = true })
     return
   end
   local search_line = search_bar_text()
@@ -211,6 +218,14 @@ local function render_tree()
   tree.decorate_separator(browser_buf, tree.header_lines[2])
   update_winbar()
   update_browser_width()
+  -- Pin the header chrome over the scrolling tree (browser/header_bar). While
+  -- the bar is being edited the caret sits on line 1, under where the overlay
+  -- would be — hide it until commit/cancel re-render.
+  if search_active then
+    header_bar.hide()
+  else
+    header_bar.sync(browser_buf)
+  end
 end
 
 async.render_hook = render_tree
@@ -518,6 +533,8 @@ local function search_enter()
   -- caret (at the true EOL) can never sit on or before it — the bar is
   -- just the query, and insert mode is entered automatically.
   tree.decorate_search_line(browser_buf, search_query, true)
+  -- the pinned overlay would cover the caret row: drop it until commit
+  header_bar.hide()
   vim.api.nvim_set_option_value("modifiable", true, { buf = browser_buf })
   vim.keymap.set("i", "<CR>", search_commit, { buffer = browser_buf, silent = true })
   vim.keymap.set("i", "<Esc>", search_cancel, { buffer = browser_buf, silent = true })
@@ -619,6 +636,9 @@ local function setup_browser_buffer()
       if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
       if vim.fn.bufwinid(browser_buf) == -1 then return end
       tree.set_header_line(browser_buf, separator_text(), 2)
+      -- the overlay spans the window width and mirrors the separator — keep
+      -- both in step with the resized split
+      header_bar.sync(browser_buf, { plain = conn_picker.active })
     end,
   })
 
@@ -788,6 +808,14 @@ function M.open(opts)
     -- one row per key: rows clip right instead of wrapping (auto-width grows
     -- the split to fit expanded content, nowrap clips anything past the cap)
     vim.api.nvim_set_option_value("wrap", false, { win = browser_win })
+    -- no gutter: the pinned header overlay (browser/header_bar) anchors at
+    -- window col 0, which must be the first TEXT column — a number/sign/fold/
+    -- status column would shift the tree rows out from under the bar
+    vim.api.nvim_set_option_value("number", false, { win = browser_win })
+    vim.api.nvim_set_option_value("relativenumber", false, { win = browser_win })
+    vim.api.nvim_set_option_value("signcolumn", "no", { win = browser_win })
+    vim.api.nvim_set_option_value("foldcolumn", "0", { win = browser_win })
+    vim.api.nvim_set_option_value("statuscolumn", "", { win = browser_win })
   else
     browser_win = win
     vim.api.nvim_set_current_win(win)
@@ -810,6 +838,8 @@ end
 
 --- Close the browser window (session stays alive for reuse).
 function M.close()
+  -- drop the pinned header overlay first: floats outlive their anchor window
+  header_bar.close()
   if browser_win and vim.api.nvim_win_is_valid(browser_win) then
     vim.api.nvim_win_close(browser_win, true)
     browser_win = nil

@@ -689,6 +689,8 @@ M._test = {
   make_db_node = M.make_db_node,
   make_group_node = M.make_group_node,
   make_key_node = M.make_key_node,
+  search_ns = search_ns,
+  header_ns = header_ns,
 }
 
 return M
