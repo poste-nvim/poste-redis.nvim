@@ -597,6 +597,14 @@ local function setup_browser_buffer()
       require("poste-redis.browser.info").show(node, { url = current_conn.url })
     end, opts)
   end
+  k = config.get_keymap("redis_browser", "yank_key", "y")
+  if k then
+    vim.keymap.set("n", k, function()
+      local node = current_node()
+      if not node or node.node_type ~= "key" then return end
+      actions.yank_key(node)
+    end, opts)
+  end
 
   k = config.get_keymap("redis_browser", "help", "g?")
   if k then
@@ -617,6 +625,7 @@ local function setup_browser_buffer()
         "  i     node info (count / memory / ttl)",
         "  t     show/edit TTL (secs, -1 = PERSIST)",
         "  R     rename key (conflict-checked)",
+        "  y     yank key name to clipboard",
         "  q     close browser",
         "  :PosteRedisBrowserView [flat|flatten|nested]  switch view mode",
         "          flatten = one folder per first : segment (方案A)",

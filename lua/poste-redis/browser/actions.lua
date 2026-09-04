@@ -418,6 +418,22 @@ function M.rename_key(node, ctx)
   end)
 end
 
+----------------------------------------------------------------------
+-- Yank
+----------------------------------------------------------------------
+
+--- Copy the key name to the system clipboard.
+--- @param node table key node
+function M.yank_key(node)
+  local key = node.meta and node.meta.key
+  if not key then
+    notify("No key to yank", vim.log.levels.WARN)
+    return
+  end
+  vim.fn.setreg("+", key)
+  notify(("Yanked: %s"):format(key))
+end
+
 M._test = {
   conn_url_for = conn_url_for,
   confirm = confirm,

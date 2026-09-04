@@ -121,6 +121,7 @@ M.defaults = {
       ttl = "t",
       rename = "R",
       info = "i",
+      yank_key = "y",
       multi_select_toggle = "<Tab>",
     },
   },
