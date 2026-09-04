@@ -10,7 +10,9 @@ local cache_leftcol = nil
 local cache_width = nil
 local cache_header = nil
 local cache_type_hl = nil
+local cache_icon_hl = nil
 local type_ns = vim.api.nvim_create_namespace("poste_redis_grid_header_type")
+local sort_ns = vim.api.nvim_create_namespace("poste_redis_grid_header_sort")
 local SEP = "│"
 
 --- Per-char display index of a line: byte range + display range per char.
@@ -78,6 +80,7 @@ function M.close()
   cache_width = nil
   cache_header = nil
   cache_type_hl = nil
+  cache_icon_hl = nil
 end
 
 --- Highlight the type cell (first column, e.g. " string") within a sliced
@@ -99,12 +102,25 @@ local function apply_type_hl(bf, text, type_hl)
   })
 end
 
+--- Highlight the column-sort icon (▲/▼ after a sorted column's name) in a
+--- sliced header line. Byte positions come from the UNSLICED padded header
+--- (sort.icon_range), which coincide with the slice only at leftcol == 0 —
+--- the same constraint the type-cell highlight already lives with.
+local function apply_sort_hl(bf, icon_hl)
+  if not bf or not vim.api.nvim_buf_is_valid(bf) then return end
+  vim.api.nvim_buf_clear_namespace(bf, sort_ns, 0, -1)
+  if not icon_hl then return end
+  vim.api.nvim_buf_add_highlight(bf, sort_ns, "PosteRedisResultSort", 0,
+    icon_hl[1], icon_hl[2])
+end
+
 --- Re-render the header float for the current viewport of `win`.
 --- @param win number  the result window the float is anchored to
 --- @param padded_header string  full padded header line (with left padding)
 --- @param index table[]|nil  cached per-char index (built when nil)
 --- @param type_hl string|nil  highlight for the type cell (first column)
-function M.update(win, padded_header, index, type_hl)
+--- @param icon_hl table|nil  { start, end_ } byte range of the sort icon
+function M.update(win, padded_header, index, type_hl, icon_hl)
   if not win or not vim.api.nvim_win_is_valid(win) then M.close(); return end
   if not padded_header then M.close(); return end
   index = index or build_index(padded_header)
@@ -121,10 +137,12 @@ function M.update(win, padded_header, index, type_hl)
   end
 
   if leftcol == cache_leftcol and win_width == cache_width
-      and padded_header == cache_header and type_hl == cache_type_hl then
+      and padded_header == cache_header and type_hl == cache_type_hl
+      and icon_hl == cache_icon_hl then
     return
   end
   cache_type_hl = type_hl
+  cache_icon_hl = icon_hl
   cache_leftcol = leftcol
   cache_width = win_width
   cache_header = padded_header
@@ -135,7 +153,10 @@ function M.update(win, padded_header, index, type_hl)
     vim.api.nvim_set_option_value("modifiable", true, { buf = float_buf })
     vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
     vim.api.nvim_set_option_value("modifiable", false, { buf = float_buf })
-    if leftcol == 0 then apply_type_hl(float_buf, text, type_hl) end
+    if leftcol == 0 then
+      apply_type_hl(float_buf, text, type_hl)
+      apply_sort_hl(float_buf, icon_hl)
+    end
     if float_win and vim.api.nvim_win_is_valid(float_win)
         and vim.api.nvim_win_get_width(float_win) ~= win_width then
       vim.api.nvim_win_set_config(float_win, { width = win_width })
@@ -148,7 +169,10 @@ function M.update(win, padded_header, index, type_hl)
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = float_buf })
   vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
   vim.api.nvim_set_option_value("modifiable", false, { buf = float_buf })
-  if leftcol == 0 then apply_type_hl(float_buf, text, type_hl) end
+  if leftcol == 0 then
+    apply_type_hl(float_buf, text, type_hl)
+    apply_sort_hl(float_buf, icon_hl)
+  end
   float_win = vim.api.nvim_open_win(float_buf, false, {
     relative = "win",
     win = win,

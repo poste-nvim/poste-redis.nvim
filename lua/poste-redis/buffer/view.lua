@@ -6,6 +6,7 @@ local state = require("poste-redis.buffer.state")
 local format = require("poste-redis.format")
 local grid = require("poste-redis.result.grid")
 local header = require("poste-redis.result.header")
+local sort = require("poste-redis.buffer.sort")
 
 local M = {}
 
@@ -77,7 +78,8 @@ function M.update_header()
   local tab = state.tabs[state.active]
   if tab and tab.kind == "table" and tab.header_padded and state.win
       and vim.api.nvim_win_is_valid(state.win) then
-    header.update(state.win, tab.header_padded, nil, tab.grid and tab.grid.type_hl or nil)
+    header.update(state.win, tab.header_padded, nil,
+      tab.grid and tab.grid.type_hl or nil, tab.sort_icon_hl)
   else
     header.close()
   end
@@ -165,7 +167,22 @@ end
 --- Render the active grid tab's current page into the buffer + header float.
 function M.render_grid(tab)
   if not tab.layout then
-    tab.layout = grid.build_layout(tab.grid)
+    local g = tab.grid
+    if tab.sort then
+      -- sorted: the header carries the icon, so the width math must see the
+      -- decorated column name (the column widens by the icon while sorted)
+      local proxy = {
+        columns = sort.decorated_columns(g.columns, tab.sort),
+        rows = g.rows,
+        total = g.total,
+        truncated = g.truncated,
+        right_align = g.right_align,
+        to_display = g.to_display,
+      }
+      tab.layout = grid.build_layout(proxy)
+    else
+      tab.layout = grid.build_layout(g)
+    end
   end
   local total = #tab.grid.rows
   tab.num_pages = math.max(1, math.ceil(total / tab.page_size))
@@ -186,6 +203,7 @@ function M.render_grid(tab)
   tab.padded = body
   tab.pmeta = pmeta
   tab.header_padded = lines[1]
+  tab.sort_icon_hl = sort.icon_range(tab.header_padded, tab.sort)
 
   vim.api.nvim_set_option_value("modifiable", true, { buf = state.buf })
   -- explicit end index: nvim 0.12's set_lines(-1) path can starve job stdout

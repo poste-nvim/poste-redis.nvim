@@ -42,6 +42,9 @@ function M.setup()
   link_if_empty("PosteRedisResultBorder", "FloatBorder")
   link_if_empty("PosteRedisResultSep", "NonText")
   link_if_empty("PosteRedisResultHeader", "Title")
+  -- Column-sort icon (▲/▼ right of a sorted column's name).
+  local sort_target = vim.fn.hlexists("@number") == 1 and "@number" or "Number"
+  link_if_empty("PosteRedisResultSort", sort_target)
   link_if_empty("PosteRedisResultMeta", "Comment")
   link_if_empty("PosteRedisResultError", "DiagnosticError")
   link_if_empty("PosteRedisResultWarning", "DiagnosticWarn")
@@ -109,6 +112,7 @@ function M.setup()
     "@comment", "@label", "@keyword", "@function", "@punctuation.special",
     "@string", "@number",
     "PosteRedisResultBorder", "PosteRedisResultSep", "PosteRedisResultHeader",
+    "PosteRedisResultSort",
     "PosteRedisResultMeta", "PosteRedisResultError", "PosteRedisResultWarning",
     "PosteRedisResultOk", "PosteRedisResultNull", "PosteRedisResultNumber",
     "PosteRedisResultString", "PosteRedisResultKey", "PosteRedisResultScore",

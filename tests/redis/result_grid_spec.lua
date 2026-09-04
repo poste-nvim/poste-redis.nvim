@@ -211,6 +211,78 @@ describe("poste-redis result grid", function()
       buffer.yank_column()
       assert.equals("1\n2", vim.fn.getreg('"'))
     end)
+  describe("column sort on the panel", function()
+    local sort = require("poste-redis.buffer.sort")
+
+    it("compare orders numeric strings numerically, text as strings", function()
+      assert.equals(-1, sort.compare("81", "99"))
+      assert.equals(1, sort.compare(99, 87))
+      assert.equals(0, sort.compare("x", "x"))
+      assert.equals(-1, sort.compare("81", "alice"))  -- mixed: string compare
+    end)
+
+    it("s toggles none → desc → asc → none on the cursor column", function()
+      open_grid({ { "bob", "87" }, { "alice", "99" }, { "jim", "81" } })
+      local tab = buffer.active_tab()
+      buffer.move_cell(0, 1)  -- the value column
+      assert.is_nil(tab.sort)
+
+      buffer.sort_column()  -- desc: numeric on the value cell
+      assert.same({ col = 3, dir = "desc" }, tab.sort)
+      local names = {}
+      for _, r in ipairs(tab.grid.rows) do names[#names + 1] = r[2] end
+      assert.same({ "alice", "bob", "jim" }, names)
+
+      buffer.sort_column()  -- asc
+      assert.same({ col = 3, dir = "asc" }, tab.sort)
+      names = {}
+      for _, r in ipairs(tab.grid.rows) do names[#names + 1] = r[2] end
+      assert.same({ "jim", "bob", "alice" }, names)
+
+      buffer.sort_column()  -- none: the server's original order
+      assert.is_nil(tab.sort)
+      names = {}
+      for _, r in ipairs(tab.grid.rows) do names[#names + 1] = r[2] end
+      assert.same({ "bob", "alice", "jim" }, names)
+    end)
+
+    it("the cursor follows the focused record across the re-order", function()
+      open_grid({ { "bob", "87" }, { "alice", "99" }, { "jim", "81" } })
+      local tab = buffer.active_tab()
+      buffer.move_cell(0, 1)   -- value column
+      buffer.move_cell(1, 0)   -- row 2: alice
+      buffer.sort_column()     -- desc: alice's row moves to the top
+      assert.equals(1, tab.cursor.row)
+      assert.equals("alice", tab.grid.rows[tab.cursor.row][2])
+    end)
+
+    it("the sorted header carries the icon right of the column name", function()
+      open_grid({ { "bob", "87" }, { "alice", "99" } })
+      local tab = buffer.active_tab()
+      buffer.move_cell(0, 1)  -- value column
+      buffer.sort_column()
+      local icon = sort.icon(tab.sort.dir)
+      assert.truthy(tab.header_padded:find(icon, 1, true) ~= nil,
+        "sort icon missing from the header line")
+      local hl = tab.sort_icon_hl
+      assert.equals(icon, tab.header_padded:sub(hl[1] + 1, hl[2]))
+      -- the sorted column widened to make room for the icon
+      assert.equals("value " .. icon, tab.layout.columns[3])
+      -- clearing the sort drops the icon again
+      buffer.sort_column()
+      buffer.sort_column()
+      assert.is_nil(tab.sort_icon_hl)
+      assert.equals("value", tab.layout.columns[3])
+    end)
+
+    it("s on the index column does nothing", function()
+      open_grid({ { "a", "1" }, { "b", "2" } })
+      local tab = buffer.active_tab()
+      tab.cursor.col = 1
+      buffer.sort_column()
+      assert.is_nil(tab.sort)
+      assert.equals("a", tab.grid.rows[1][2])  -- order untouched
+    end)
   end)
 
   describe("pagination on the panel", function()
@@ -501,4 +573,5 @@ describe("poste-redis result winbar", function()
     assert.equals("%#PosteRedisResultWinbarCmd#PING%*",
       view._test.format_command("PING"))
   end)
+end)
 end)

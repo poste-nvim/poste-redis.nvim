@@ -21,6 +21,7 @@ local pager = require("poste-redis.buffer.pager")
 local search = require("poste-redis.buffer.search")
 local preview = require("poste-redis.buffer.preview")
 local yank = require("poste-redis.buffer.yank")
+local sort = require("poste-redis.buffer.sort")
 
 local M = {}
 
@@ -268,6 +269,16 @@ function M.yank_column()
   yank.column(state.tabs[state.active])
 end
 
+--- `s` on a content column: cycle none → desc → asc → none and pin the sort
+--- icon next to the column name in the header.
+function M.sort_column()
+  local tab = state.tabs[state.active]
+  local handled = sort.toggle(tab)
+  if not handled then return end
+  view.render_active()
+  view.position_cursor(tab)
+end
+
 ------------------------------------------------------------------------
 -- Render entry points
 ------------------------------------------------------------------------
@@ -497,6 +508,8 @@ function setup_keymaps()
   if k then vim.keymap.set("n", k, function() M.prev_search_match() end, km) end
   k = config.get_keymap("redis_result", "refresh", "r")
   if k then vim.keymap.set("n", k, function() M.refresh() end, km) end
+  k = config.get_keymap("redis_result", "sort_column", "s")
+  if k then vim.keymap.set("n", k, function() M.sort_column() end, km) end
 
   -- Grid editing (poste-db dataset pattern): i edit cell, o add row, dd delete
   local grid_edit = require("poste-redis.browser.grid_edit")

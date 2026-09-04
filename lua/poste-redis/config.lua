@@ -99,6 +99,8 @@ M.defaults = {
       load_full = "F",
       -- re-run the active tab's command against its recorded connection
       refresh = "r",
+      -- sort by the column under the cursor: none → desc → asc → none
+      sort_column = "s",
       -- grid editing (poste-db dataset pattern)
       edit_cell = "i",
       add_row = "o",
