@@ -134,10 +134,11 @@ local function respine_headers(node, headers, full, touched)
   end
 end
 
---- Reorder a node's children. Flat/flatten view: flat keys first (arrival
---- order), then group nodes sorted by name — the stable layout for a db
---- node. Nested view: subfolders first (sorted), then direct keys (sorted),
---- the filesystem reading order of 方案B.
+--- Reorder a node's children. Every class sorts alphabetically within its
+--- level (SCAN returns keyspace order, which is not guaranteed alphabetical).
+--- Flat/flatten view: flat keys first (alphabetical), then group nodes sorted
+--- by name — the stable layout for a db node. Nested view: subfolders first
+--- (sorted), then direct keys (sorted), the filesystem reading order of 方案B.
 local function sort_children(node)
   local flat, groups = {}, {}
   for _, ch in ipairs(node.children or {}) do
@@ -145,9 +146,9 @@ local function sort_children(node)
     else flat[#flat + 1] = ch end
   end
   table.sort(groups, function(a, b) return a.name < b.name end)
+  table.sort(flat, function(a, b) return a.name < b.name end)
   node.children = {}
   if async.nested_view then
-    table.sort(flat, function(a, b) return a.name < b.name end)
     for _, g in ipairs(groups) do node.children[#node.children + 1] = g end
     for _, f in ipairs(flat) do node.children[#node.children + 1] = f end
   else
@@ -310,6 +311,7 @@ local function build_children(node, keys, conn_name, db)
       table.insert(node.children, tree.make_key_node(
         key_entry_name(k), conn_name, db, key_entry_meta(k)))
     end
+    sort_children(node)  -- SCAN arrival order must not leak into the layout
     return
   end
   if async.nested_view then
@@ -337,8 +339,10 @@ local function build_children(node, keys, conn_name, db)
       table.insert(group.children, tree.make_key_node(
         key_entry_name(k), conn_name, db, key_entry_meta(k)))
     end
+    sort_children(group)  -- same-level keys alphabetical, like a real scan end
     table.insert(node.children, group)
   end
+  sort_children(node)
 end
 
 --- Link parents + mark every group in a built subtree expanded: search
@@ -597,11 +601,9 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         end
         -- Render cap hit: stop paging — rows beyond it would never render.
         if not final_page and tree.last_truncated > 0 then
-          if async.nested_view then
-            -- last render of the scan: re-fold every header before it
-            respine_headers(node, node._nsegs, true)
-            sort_children(node)
-          end
+          -- last render of the scan: re-fold every header before it
+          if async.nested_view then respine_headers(node, node._nsegs, true) end
+          sort_children(node)
           node.loading = false
           node._seg_keys = nil
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
@@ -610,7 +612,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         elseif not final_page then
           next_page(new_cursor)
         else
-          if async.nested_view then sort_children(node) end
+          sort_children(node)
           node.loading = false
           node._seg_keys = nil
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)

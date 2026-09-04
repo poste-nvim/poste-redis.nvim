@@ -118,6 +118,34 @@ describe("poste-redis browser async grouping", function()
     assert.equals("z", db.children[3].name)
   end)
 
+  it("sorts same-level keys alphabetically in every view", function()
+    -- flat view: SCAN order (arrival) must not leak into the layout
+    async.set_view_mode("flat")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    scan._test.build_children(db, { "z", "m", "a" }, "c", 0)
+    assert.equals("a", db.children[1].name)
+    assert.equals("m", db.children[2].name)
+    assert.equals("z", db.children[3].name)
+
+    -- flatten: leaves AND the keys inside each folder sort alphabetically
+    async.set_view_mode("flatten")
+    local db2 = tree.make_db_node({ db = 0 }, "c")
+    scan._test.build_children(db2, { "user:z", "user:a", "plain:z", "plain:a" }, "c", 0)
+    local groups = {}
+    for _, ch in ipairs(db2.children) do
+      if ch.node_type == "group" then groups[#groups + 1] = ch end
+    end
+    assert.equals("user:z", groups[2].children[2].name)
+    assert.equals("user:a", groups[2].children[1].name)
+    local leaves = {}
+    for _, ch in ipairs(db2.children) do
+      if ch.node_type == "key" then leaves[#leaves + 1] = ch end
+    end
+    assert.equals(0, #leaves)  -- plain:a / plain:z bucket into the plain folder
+    assert.equals("plain:a", groups[1].children[1].name)
+    assert.equals("plain:z", groups[1].children[2].name)
+  end)
+
   it("keeps keys without : flat in tree view", function()
     async.set_view_mode("flatten")
     local db = tree.make_db_node({ db = 0 }, "c")
