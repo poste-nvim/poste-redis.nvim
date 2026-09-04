@@ -85,6 +85,11 @@ describe("poste-redis M2 exit — 100k-key browser acceptance", function()
     scan.scan_keys(db, url, "bench-conn", PREFIX .. "*")
     local done = vim.wait(30000, function() return not db.loading end, 5)
     local full_ms = (vim.loop.hrtime() - t0) / 1e6
+    -- The last render goes through the async flush, debounced ~10ms behind
+    -- the final SCAN page: `db.loading` flips false first. A fast local redis
+    -- streams every page inside ONE debounce window, so without draining the
+    -- flush queue here the tick count reads 1 and races this assertion.
+    vim.wait(1000, function() return render_ticks >= 2 end, 5)
     async.render_hook = nil
 
     assert.is_true(done, "scan did not finish in 30s")
