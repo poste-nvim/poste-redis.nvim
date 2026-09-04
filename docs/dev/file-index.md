@@ -36,7 +36,7 @@ fallback — see `requirements.md`.
 | `buffer/sort.lua` | Column sort on `s` (none → desc → asc → none): numeric-aware stable re-order of grid rows, cursor follows the focused record, sort icon byte-range in the rendered header (link @number) |
 | `result/grid.lua` | **Pure table-grid renderer**: `build_layout` (display widths + right-align), `render_page` (borderless `│` rows + col byte maps + pagination), `compute_matches` / `cell_match_range` (search). No vim ops — reusable in poste.nvim later |
 | `result/header.lua` | Floating fixed header for grid tabs (1-line float over the panel following horizontal scroll, per-char viewport slicing) |
-| `history.lua` | In-memory execution history + float list (j/k/CR/q) |
+| `history.lua` | In-memory command history: .redis runs + dataset/grid_edit writes + browser mutations (batch deletes aggregate to one `DEL prefix:*`, `yank` carries an executable redis-cli pipeline). Float list (j/k/CR/y/q): command left + highlighted, exec time right-aligned gray |
 
 ### Key browser (`browser/`)
 
@@ -46,7 +46,7 @@ fallback — see `requirements.md`.
 | `async.lua` | Browser async infrastructure: render/append hooks + uv-timer flush (buffer work never runs in job callbacks), view mode (flat/flatten/nested), bounded TYPE fetch, fuzzy substring search (`MATCH *query*`, glob-escaped; results bucketed via the `results_build` hook → scan's eager builders), `load_connections`, `fetch_dbs` (DBSIZE probe) |
 | `scan.lua` | Cursor-driven SCAN loops + tree builders: `scan_keys` (lazy db group headers, `header_scan_count`), `scan_group` (MATCH prefix, nested subfolders, `scan_count`), `build_children` / `build_nested_children` (view rebuild), `build_search_results` (search matches bucketed under their real folders, expanded), lazy-header stamps — nested view pre-folds each header to its single-spine branch point (`spine_fold`/`respine_headers`) with a direct-children count, flatten view keeps keys-under-prefix totals — epoch stale guard. Depends on async's pacing — never the reverse |
 | `value.lua` | TYPE-first paginated value viewer: HSCAN/SSCAN/ZSCAN pages, LRANGE windows, XRANGE, string GET (truncated + `F` full load); page tabs + loaded/total footer |
-| `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate |
+| `actions.lua` | **P1-4 write actions**: delete_key / delete_prefix (SCAN estimate + double confirm) / set_ttl (EXPIRE/PERSIST) / rename_key (EXISTS conflict check) — all via session, unified confirm gate; every mutation lands in the command history (batches as one aggregated entry) |
 | `header_bar.lua` | Pinned header chrome: mirrors the browser buffer's header lines 1-2 (filter bar + separator) into a borderless float anchored to the window's top rows (result/header.lua pattern), so the bar stays visible while the tree scrolls; hidden while the bar is edited, dies with the window (WinClosed) |
 | `init.lua` | `poste://redis_browser` right-hand split (gutter-free), keymaps, first-open connections picker (in-window list → <CR> connects, db 0), `reveal(key, connection, db)` (render-driven walk: expands the folder path, parks the cursor on the key), `:PosteRedisBrowser` / `:PosteRedisBrowserView` |
 

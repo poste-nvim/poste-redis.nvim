@@ -452,6 +452,21 @@ describe("poste-redis grid editing", function()
     assert.equals(1, refreshes)
   end)
 
+  it("writes land in the command history", function()
+    local history = require("poste-redis.history")
+    history.clear()
+    open_key_tab_conn({ type = "string", value = "hello" })
+    buffer.active_tab().cursor = { row = 1, col = 2 }
+    vim.ui.input = function(opts, cb) cb("world") end
+    grid_edit.edit_cell(buffer.active_tab())
+    local items = history.list()
+    assert.equals(1, #items, "exactly one entry per write (TTL probes excluded)")
+    assert.equals("SET user:1 world", items[1].command)
+    assert.equals("write", items[1].kind)
+    assert.equals("stubconn", items[1].connection)
+    history.clear()
+  end)
+
   it("hash edit on the value column issues HSET", function()
     open_key_tab_conn({ type = "hash", entries = { { "name", "Alice" } }, len = 1 })
     local t = buffer.active_tab()

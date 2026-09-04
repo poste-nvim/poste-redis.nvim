@@ -72,10 +72,16 @@ local function cursor_cell(tab)
   return row_data[col], col, row_data
 end
 
-local function exec(url, cmd, db, on_ok)
+local function exec(tab, url, cmd, db, on_ok)
   session_conn.execute(url, cmd, {
     on_response = function()
       notify(table.concat(cmd, " ") .. " — OK")
+      require("poste-redis.history").push({
+        command = table.concat(cmd, " "),
+        connection = tab and tab.meta and tab.meta.connection or "",
+        db = db,
+        kind = "write",
+      })
       on_ok()
     end,
     on_error = function(msg)
@@ -107,15 +113,15 @@ function M.edit_cell(tab)
   vim.ui.input({ prompt = ("Edit %s [%s]: "):format(key, type_name), default = current }, function(input)
     if input == nil or input == current then return end
     if type_name == "string" then
-      exec(url, { "SET", key, input }, db, function() refresh(tab) end)
+      exec(tab, url, { "SET", key, input }, db, function() refresh(tab) end)
     elseif type_name == "hash" then
       -- col 2 = field (editable → HSET new field, DEL old), col 3 = value
       if col == 2 and input ~= row_data[2] then
-        exec(url, { "HSET", key, input, row_data[3] or "" }, db, function()
-          exec(url, { "HDEL", key, row_data[2] }, db, function() refresh(tab) end)
+        exec(tab, url, { "HSET", key, input, row_data[3] or "" }, db, function()
+          exec(tab, url, { "HDEL", key, row_data[2] }, db, function() refresh(tab) end)
         end)
       else
-        exec(url, { "HSET", key, row_data[2], input }, db, function() refresh(tab) end)
+        exec(tab, url, { "HSET", key, row_data[2], input }, db, function() refresh(tab) end)
       end
     elseif type_name == "zset" then
       -- col 2 = member (rename → ZADD new score + ZREM old), col 3 = score
@@ -125,7 +131,7 @@ function M.edit_cell(tab)
           notify("Score must be a number: " .. input, vim.log.levels.ERROR)
           return
         end
-        exec(url, { "ZADD", key, tostring(score), row_data[2] }, db, function() refresh(tab) end)
+        exec(tab, url, { "ZADD", key, tostring(score), row_data[2] }, db, function() refresh(tab) end)
       else
         vim.ui.input({ prompt = "Score for " .. input .. ": ", default = tostring(row_data[3]) },
           function(score)
@@ -133,18 +139,18 @@ function M.edit_cell(tab)
               notify("Score must be a number", vim.log.levels.ERROR)
               return
             end
-            exec(url, { "ZADD", key, score, input }, db, function()
-              exec(url, { "ZREM", key, row_data[2] }, db, function() refresh(tab) end)
+            exec(tab, url, { "ZADD", key, score, input }, db, function()
+              exec(tab, url, { "ZREM", key, row_data[2] }, db, function() refresh(tab) end)
             end)
           end)
       end
     elseif type_name == "list" then
       -- row index (1-based in the grid) → LSET at index-1
-      exec(url, { "LSET", key, tostring((row_data[1] or 1) - 1), input }, db,
+      exec(tab, url, { "LSET", key, tostring((row_data[1] or 1) - 1), input }, db,
         function() refresh(tab) end)
     elseif type_name == "set" then
-      exec(url, { "SREM", key, raw }, db, function()
-        exec(url, { "SADD", key, input }, db, function() refresh(tab) end)
+      exec(tab, url, { "SREM", key, raw }, db, function()
+        exec(tab, url, { "SADD", key, input }, db, function() refresh(tab) end)
       end)
     else
       notify("Editing type '" .. tostring(type_name) .. "' is not supported", vim.log.levels.WARN)
@@ -179,17 +185,17 @@ function M.delete_row(tab)
   end
 
   if type_name == "string" then
-    exec(url, { "DEL", key }, db, function() refresh(tab) end)
+    exec(tab, url, { "DEL", key }, db, function() refresh(tab) end)
   elseif type_name == "hash" then
-    exec(url, { "HDEL", key, row_data[2] }, db, function() refresh(tab) end)
+    exec(tab, url, { "HDEL", key, row_data[2] }, db, function() refresh(tab) end)
   elseif type_name == "zset" then
-    exec(url, { "ZREM", key, row_data[2] }, db, function() refresh(tab) end)
+    exec(tab, url, { "ZREM", key, row_data[2] }, db, function() refresh(tab) end)
   elseif type_name == "set" then
-    exec(url, { "SREM", key, raw }, db, function() refresh(tab) end)
+    exec(tab, url, { "SREM", key, raw }, db, function() refresh(tab) end)
   elseif type_name == "list" then
     local idx = (row_data[1] or 1) - 1
-    exec(url, { "LSET", key, tostring(idx), DELETE_SENTINEL }, db, function()
-      exec(url, { "LREM", key, "1", DELETE_SENTINEL }, db, function() refresh(tab) end)
+    exec(tab, url, { "LSET", key, tostring(idx), DELETE_SENTINEL }, db, function()
+      exec(tab, url, { "LREM", key, "1", DELETE_SENTINEL }, db, function() refresh(tab) end)
     end)
   else
     notify("Deleting type '" .. tostring(type_name) .. "' is not supported", vim.log.levels.WARN)
@@ -215,7 +221,7 @@ function M.add_row(tab)
       if not field or field == "" then return end
       vim.ui.input({ prompt = "Value for " .. field .. ": " }, function(value)
         if value == nil then return end
-        exec(url, { "HSET", key, field, value }, db, function() refresh(tab) end)
+        exec(tab, url, { "HSET", key, field, value }, db, function() refresh(tab) end)
       end)
     end)
   elseif type_name == "zset" then
@@ -226,7 +232,7 @@ function M.add_row(tab)
           notify("Score must be a number", vim.log.levels.ERROR)
           return
         end
-        exec(url, { "ZADD", key, score, member }, db, function() refresh(tab) end)
+        exec(tab, url, { "ZADD", key, score, member }, db, function() refresh(tab) end)
       end)
     end)
   else
@@ -234,7 +240,7 @@ function M.add_row(tab)
     local verb = type_name == "list" and "RPUSH" or type_name == "set" and "SADD" or "SET"
     vim.ui.input({ prompt = ("Value to %s on %s: "):format(verb, key) }, function(value)
       if value == nil or value == "" then return end
-      exec(url, { verb, key, value }, db, function() refresh(tab) end)
+      exec(tab, url, { verb, key, value }, db, function() refresh(tab) end)
     end)
   end
 end

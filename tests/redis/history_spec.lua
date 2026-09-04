@@ -56,11 +56,49 @@ describe("poste-redis history", function()
     assert.is_false(history.is_open())
   end)
 
-  it("build_lines renders command + latency", function()
-    history.push(entry({ command = "HGETALL user:42", latency_ms = 1500 }))
-    local lines = history._test.build_lines()
-    assert.truthy(#lines >= 1)
-    assert.truthy(lines[1]:find("HGETALL"))
+  it("build renders the command left and the exec time right-aligned", function()
+    history.push(entry({
+      command = "HGETALL user:42",
+      ts = os.time({ year = 2026, month = 9, day = 5, hour = 14, min = 3, sec = 7 }),
+    }))
+    local lines, spans = history._test.build(60)
+    assert.truthy(lines[1]:find("HGETALL user:42", 1, true))
+    -- the time sits pinned to the right edge, 8 chars wide
+    assert.equals("14:03:07", lines[1]:sub(#lines[1] - 7))
+    -- the command span is byte-accurate (the ✓ mark is multibyte)
+    assert.equals("HGETALL user:42", lines[1]:sub(spans[1].cmd[1] + 1, spans[1].cmd[2]))
+    assert.equals("14:03:07", lines[1]:sub(spans[1].time[1] + 1))
+  end)
+
+  it("long commands truncate and keep the time column aligned", function()
+    history.push(entry({
+      command = "GET " .. string.rep("k", 120),
+      ts = os.time({ year = 2026, month = 9, day = 5, hour = 23, min = 59, sec = 59 }),
+    }))
+    local lines = history._test.build(60)
+    assert.equals(60, vim.fn.strdisplaywidth(lines[1]))
+    assert.equals("23:59:59", lines[1]:sub(#lines[1] - 7))
+  end)
+
+  it("y copies the command (the executable yank form wins)", function()
+    history.push(entry({ command = "GET k" }))
+    history.yank(1)
+    assert.equals("GET k", vim.fn.getreg('"'))
+
+    history.push(entry({
+      command = "DEL bench:*",
+      yank = "redis-cli --scan --pattern 'bench:*' | xargs redis-cli del",
+    }))
+    history.yank(1)
+    assert.equals("redis-cli --scan --pattern 'bench:*' | xargs redis-cli del",
+      vim.fn.getreg('"'))
+  end)
+
+  it("activate on a write entry (no snapshot) renders nothing", function()
+    history.push(entry({ command = "DEL k", kind = "write", lines = {} }))
+    local buffer = require("poste-redis.buffer")
+    history.activate(1)
+    assert.is_false(buffer.is_open())
   end)
 
   it("activate re-renders the stored snapshot into the panel", function()
@@ -73,8 +111,8 @@ describe("poste-redis history", function()
     buffer.close()
   end)
 
-  it("build_lines shows an empty placeholder with no history", function()
-    local lines = history._test.build_lines()
+  it("build shows an empty placeholder with no history", function()
+    local lines = history._test.build()
     assert.truthy(lines[1]:find("no history"))
   end)
 end)

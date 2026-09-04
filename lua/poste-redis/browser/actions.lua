@@ -26,6 +26,20 @@ local function notify(msg, level)
   vim.notify(msg, level or vim.log.levels.INFO, { title = redis_state.TITLE })
 end
 
+--- Record a mutation in the command history. `yank` carries an executable
+--- form for batch deletes (a bare `DEL prefix:*` glob cannot run as-is).
+local function record(command, opts)
+  require("poste-redis.history").push(vim.tbl_extend("force", {
+    command = command,
+    kind = "write",
+  }, opts or {}))
+end
+
+--- Executable redis-cli pipeline for every key matching a glob.
+local function scan_pipeline(prefix)
+  return ("redis-cli --scan --pattern '%s:*' | xargs redis-cli del"):format(prefix)
+end
+
 --- Unified confirm gate for destructive browser actions. Swappable in tests
 --- via _test.set_confirm.
 --- @param question string
@@ -81,6 +95,7 @@ function M.delete_key(node, ctx)
     on_response = function(ev)
       local n = ev.value and ev.value.value
       notify(("Deleted %s (%s key(s))"):format(key, tostring(n or 0)))
+      record("DEL " .. key, { connection = node.meta and node.meta.connection, db = node.meta and node.meta.db })
       reload(ctx.db_node, ctx.render)
     end,
     on_error = function(msg)
@@ -121,6 +136,13 @@ function M.delete_prefix(node, ctx)
       local function del_next(i)
         if i > #key_list then
           notify(("Deleted %d key(s) under %s:*"):format(#key_list, prefix))
+          -- one history line for the whole batch, not one per key
+          record(("DEL %s:*"):format(prefix), {
+            connection = node.meta and node.meta.connection,
+            db = db,
+            count = #key_list,
+            yank = scan_pipeline(prefix),
+          })
           reload(db_node, ctx.render)
           return
         end
@@ -170,6 +192,12 @@ function M.delete_node(node, ctx)
     local function del_next(i)
       if i > #key_list then
         notify(("Deleted node %s (%d key(s))"):format(prefix, #key_list))
+        record(("DEL %s:*"):format(prefix), {
+          connection = node.meta and node.meta.connection,
+          db = db,
+          count = #key_list,
+          yank = scan_pipeline(prefix),
+        })
         -- drop the node from its parent; reload() re-scans empty groups away
         local parent = node.parent
         if parent and parent.children then
@@ -259,6 +287,28 @@ function M.delete_nodes(nodes, ctx)
     local function del_next(i)
       if i > #flat then
         notify(("Deleted %d key(s) across %d node(s)"):format(#flat, #jobs))
+        -- one aggregated history line: literal keys + prefix globs; the yank
+        -- form splits globs into redis-cli scan pipelines (a bare glob DEL
+        -- cannot be pasted into redis-cli)
+        local patterns, yank_lines, lit = {}, {}, {}
+        for _, job in ipairs(jobs) do
+          if job.node.node_type == "key" then
+            patterns[#patterns + 1] = job.node.meta.key
+            lit[#lit + 1] = job.node.meta.key
+          else
+            if #lit > 0 then yank_lines[#yank_lines + 1] = "DEL " .. table.concat(lit, " "); lit = {} end
+            local pfx = job.node.meta.prefix or ""
+            patterns[#patterns + 1] = pfx .. ":*"
+            yank_lines[#yank_lines + 1] = scan_pipeline(pfx)
+          end
+        end
+        if #lit > 0 then yank_lines[#yank_lines + 1] = "DEL " .. table.concat(lit, " ") end
+        record("DEL " .. table.concat(patterns, " "), {
+          connection = nodes[1].meta and nodes[1].meta.connection,
+          db = nodes[1].meta and nodes[1].meta.db,
+          count = #flat,
+          yank = table.concat(yank_lines, "\n"),
+        })
         for _, job in ipairs(jobs) do
           local parent = job.node.parent
           if parent and parent.children then
@@ -358,6 +408,9 @@ function M.set_ttl(node, ctx)
         session_conn.execute(url, cmd, {
           on_response = function()
             notify(("TTL set on %s (%s)"):format(key, input))
+            record(table.concat(cmd, " "), {
+              connection = node.meta and node.meta.connection, db = db,
+            })
             reload(ctx.db_node, ctx.render)
           end,
           on_error = function(msg)
@@ -404,6 +457,9 @@ function M.rename_key(node, ctx)
         session_conn.execute(url, { "RENAME", key, new_key }, {
           on_response = function()
             notify(("Renamed %s → %s"):format(key, new_key))
+            record(("RENAME %s %s"):format(key, new_key), {
+              connection = node.meta and node.meta.connection, db = db,
+            })
             reload(ctx.db_node, ctx.render)
           end,
           on_error = function(msg)

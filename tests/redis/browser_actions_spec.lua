@@ -59,6 +59,7 @@ describe("poste-redis browser actions", function()
     session_conn.execute = orig_execute
     vim.fn.confirm = orig_confirm
     vim.ui.input = orig_input
+    require("poste-redis.history").clear()
   end)
 
   local function key_node(key, conn, db)
@@ -157,5 +158,38 @@ describe("poste-redis browser actions", function()
       if type(c) == "table" and c.cmd and c.cmd[1] == "RENAME" then rename = c.cmd end
     end
     assert.same({ "RENAME", "user:1", "newkey" }, rename)
+  end)
+
+  it("delete_prefix aggregates the batch into one history entry", function()
+    local history = require("poste-redis.history")
+    history.clear()
+    local group = tree.make_group_node("user", "stubconn", 0)
+    group.meta.url = "redis://h:6379/0"
+    actions.delete_prefix(group, {})
+    assert.is_true(wait_for(function() return history.count() > 0 end),
+      "batch delete did not finish")
+    local e = history.list()[1]
+    assert.equals("DEL user:*", e.command, "one line for the whole batch")
+    assert.equals(2, e.count)
+    assert.truthy(e.yank:find("redis-cli --scan --pattern 'user:*'", 1, true),
+      "yank must carry an executable pipeline, not a bare glob")
+  end)
+
+  it("delete_nodes aggregates the selection into one history entry", function()
+    local history = require("poste-redis.history")
+    history.clear()
+    local key = key_node("user:1", "stubconn", 0)
+    key.meta.url = "redis://h:6379/0"
+    local group = tree.make_group_node("cache", "stubconn", 0)
+    group.meta.url = "redis://h:6379/0"
+    actions.delete_nodes({ key, group }, {})
+    assert.is_true(wait_for(function() return history.count() > 0 end),
+      "batch delete did not finish")
+    local e = history.list()[1]
+    assert.equals("DEL user:1 cache:*", e.command)
+    assert.truthy(e.yank:find("DEL user:1", 1, true),
+      "literal keys stay a plain DEL in the yank form")
+    assert.truthy(e.yank:find("redis-cli --scan --pattern 'cache:*'", 1, true),
+      "prefix globs yank as scan pipelines")
   end)
 end)

@@ -72,6 +72,9 @@ function M.setup()
   -- History sidebar.
   link_if_empty("PosteRedisHistorySuccess", "DiagnosticOk")
   link_if_empty("PosteRedisHistoryError", "DiagnosticError")
+  -- Float list: command text left, execution time right (gray).
+  link_if_empty("PosteRedisHistoryCmd", "Function")
+  link_if_empty("PosteRedisHistoryTime", "Comment")
 
   -- Key browser search bar: the "filter by key" ghost hint stays gray; a
   -- committed query gets the @comment.hint treatment when the colorscheme
@@ -120,6 +123,7 @@ function M.setup()
     "PosteRedisResultWinbarKey", "PosteRedisResultWinbarCmd",
     "PosteRedisResultCell", "PosteRedisResultSearchMatch", "PosteRedisResultSearchCurrent",
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
+    "PosteRedisHistoryCmd", "PosteRedisHistoryTime",
     "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
     "PosteRedisBrowserWinbarDb", "PosteRedisBrowserSep", "PosteRedisBrowserCount",
     "PosteRedisBrowserHeaderBar",
