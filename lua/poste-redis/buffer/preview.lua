@@ -6,7 +6,20 @@ local format = require("poste-redis.format")
 
 local M = {}
 
-local function float(lines, title)
+--- Detect if a string is valid JSON (object or array).
+--- @param s string
+--- @return boolean
+local function is_json_string(s)
+  if type(s) ~= "string" then return false end
+  local trimmed = s:match("^%s*(.-)%s*$")
+  if not trimmed then return false end
+  local first = trimmed:sub(1, 1)
+  if first ~= "{" and first ~= "[" then return false end
+  local ok = pcall(vim.json.decode, trimmed)
+  return ok
+end
+
+local function float(lines, title, filetype)
   local width = math.min(
     constants.FLOAT_MAX_WIDTH,
     math.floor(vim.o.columns * constants.FLOAT_WIDTH_RATIO)
@@ -19,6 +32,9 @@ local function float(lines, title)
   vim.api.nvim_buf_set_option(b, "bufhidden", "wipe")
   vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
   vim.api.nvim_buf_set_option(b, "modifiable", false)
+  if filetype then
+    vim.api.nvim_set_option_value("filetype", filetype, { buf = b })
+  end
   local w = vim.api.nvim_open_win(b, true, {
     relative = "editor",
     width = width,
@@ -47,7 +63,7 @@ function M.raw(value, meta)
   for line in format.preview_json(value):gmatch("[^\n]+") do
     lines[#lines + 1] = line
   end
-  float(lines, (meta and meta.command) or "raw JSON")
+  float(lines, (meta and meta.command) or "raw JSON", "json")
 end
 
 --- Preview the current cell (table tab) or the raw value (text / no tab).
@@ -64,14 +80,19 @@ function M.cell(tab, last_value)
   if not row_data or not row_data[col] then return end
   local raw = row_data[col]
   local text
+  local filetype
   if type(raw) == "table" then
     text = format.preview_json(raw)
+    filetype = "json"
   else
     text = tostring(raw)
+    if is_json_string(text) then
+      filetype = "json"
+    end
   end
   local lines = {}
   for line in text:gmatch("[^\n]+") do lines[#lines + 1] = line end
-  float(lines, (tab.grid.columns[col] or "cell") .. " · row " .. global_row)
+  float(lines, (tab.grid.columns[col] or "cell") .. " · row " .. global_row, filetype)
 end
 
 return M
