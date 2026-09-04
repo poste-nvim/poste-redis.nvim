@@ -26,11 +26,7 @@ local function resolve_conn(tab)
   if not meta or not meta.connection then
     return nil, nil, "tab has no recorded connection"
   end
-  local conn = meta.connection
-  if conn:sub(1, 8) == "redis://" or conn:sub(1, 9) == "rediss://" then
-    return conn, meta.db, nil
-  end
-  local url, err = connections.resolve_redis_url(conn)
+  local url, err = connections.resolve(meta.connection)
   return url, meta.db, err
 end
 

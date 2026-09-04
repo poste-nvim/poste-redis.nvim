@@ -19,7 +19,7 @@ local function conn_url_for(node)
   if url then return url, nil end
   local name = node and node.meta and node.meta.connection
   if not name then return nil, "node has no connection" end
-  return connections.resolve_redis_url(name)
+  return connections.resolve(name)
 end
 
 local function notify(msg, level)

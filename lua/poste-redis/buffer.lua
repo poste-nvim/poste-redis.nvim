@@ -70,9 +70,7 @@ end
 --- @param conn_name string
 --- @return string|nil url, string|nil err
 local function resolve_connection_url(conn_name)
-  if constants.is_redis_url(conn_name) then return conn_name, nil end
-  local connections = require("poste-redis.connections")
-  return connections.resolve_redis_url(conn_name)
+  return require("poste-redis.connections").resolve(conn_name)
 end
 
 local fetch_ttl  -- forward declaration: the expiry tick re-probes

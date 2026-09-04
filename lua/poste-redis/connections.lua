@@ -254,6 +254,23 @@ function M.resolve_redis_url(name, opts)
   return build_url_from_fields(conn)
 end
 
+--- Resolve a connection REFERENCE that may be a connections.toml name or an
+--- already-formed redis URL: URLs pass through untouched, names go through
+--- resolve_redis_url. The one funnel for "connection field → URL" — the
+--- result panel, grid editing, and browser actions each used to roll their
+--- own (and drift).
+--- @param name_or_url string|nil
+--- @return string|nil url, string|nil err
+function M.resolve(name_or_url)
+  if not name_or_url or name_or_url == "" then
+    return nil, "no connection given"
+  end
+  if name_or_url:sub(1, 8) == "redis://" or name_or_url:sub(1, 9) == "rediss://" then
+    return name_or_url, nil
+  end
+  return M.resolve_redis_url(name_or_url)
+end
+
 --- List redis connections: { { name, url, host, port, db }, ... } (async cb).
 --- @param callback function(list: table[])
 --- @param opts? table { search_dir = string|nil }
