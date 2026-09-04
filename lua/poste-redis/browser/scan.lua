@@ -296,7 +296,7 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
           -- must never run while responses are in flight (heavy buffer work
           -- that overlaps arriving channel events starves them — nvim 0.12)
           async.schedule_render()
-          async.fetch_types(flat, conn_url, db)
+          async.fetch_types(flat, conn_url, db, node)
         elseif not final_page then
           next_page(new_cursor)
         else
@@ -312,7 +312,7 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
           -- must never run while responses are in flight (heavy buffer work
           -- that overlaps arriving channel events starves them — nvim 0.12)
           async.schedule_render()
-          async.fetch_types(flat, conn_url, db)
+          async.fetch_types(flat, conn_url, db, node)
         end
       end,
       on_error = function(msg)
@@ -439,7 +439,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
           node.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           async.schedule_render()
-          async.fetch_types(node.children, conn_url, db)
+          async.fetch_types(node.children, conn_url, db, node)
         elseif not final_page then
           next_page(new_cursor)
         else
@@ -447,7 +447,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
           node.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           async.schedule_render()
-          async.fetch_types(node.children, conn_url, db)
+          async.fetch_types(node.children, conn_url, db, node)
         end
       end,
       on_error = function(msg)

@@ -1437,6 +1437,34 @@ describe("poste-redis browser expand regressions", function()
     assert.is_nil(nodes[2].meta.type)
     session_conn.execute = orig_execute
   end)
+
+  it("fetch_types aborts refills when the guarding node's epoch advances", function()
+    local orig_execute = session_conn.execute
+    local dispatched = 0
+    local inflight = {}
+    session_conn.execute = function(conn_url, cmd, cbs)
+      dispatched = dispatched + 1
+      inflight[#inflight + 1] = cbs
+      return "dispatched"
+    end
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.epoch = 1
+    local nodes = {}
+    for i = 1, 300 do nodes[i] = tree.make_key_node("k" .. i, "c", 0) end
+    async.fetch_types(nodes, "redis://h", 0, db)
+    assert.equals(64, #inflight)  -- first window on the wire
+    -- a refresh bumps the node epoch → the batch must stop refilling
+    db.epoch = 2
+    while #inflight > 0 do
+      local cbs = table.remove(inflight, 1)
+      cbs.on_response({ value = { value = "string" } })
+    end
+    assert.equals(64, dispatched)  -- not 300: no refill after the guard tripped
+    -- the superseded batch applies nothing: the fresh scan owns the new tree
+    assert.is_nil(nodes[1].meta.type)
+    assert.is_nil(nodes[300].meta.type)
+    session_conn.execute = orig_execute
+  end)
 end)
 
 describe("poste-redis browser render cap", function()

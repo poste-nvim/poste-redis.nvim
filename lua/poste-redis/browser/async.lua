@@ -200,7 +200,11 @@ local TYPE_WINDOW = 64
 --- @param key_nodes table[] key nodes (node_type == "key")
 --- @param conn_url string
 --- @param db number
-function M.fetch_types(key_nodes, conn_url, db)
+--- @param guard_node table|nil node whose epoch guards the batch: when it
+---   advances (r / new scan / search switch on the same db), the remaining
+---   TYPE requests stop refilling instead of draining the shared session on a
+---   tree that already reset — the batch never renders stale types either.
+function M.fetch_types(key_nodes, conn_url, db, guard_node)
   local to_fetch = {}
   for _, n in ipairs(key_nodes or {}) do
     if n.node_type == "key" and not n.meta.type then
@@ -212,9 +216,15 @@ function M.fetch_types(key_nodes, conn_url, db)
   local pending = limit
   local next_idx = 0
   local in_flight = 0
+  local epoch = guard_node and guard_node.epoch
 
   local pump
   local function finish(n, ev)
+    if guard_node and guard_node.epoch ~= epoch then
+      -- superseded scan: stop refilling, render nothing (the new scan owns it)
+      pending = 0
+      return
+    end
     if ev then
       local t = ev.value and ev.value.value
       if type(t) == "string" then n.meta.type = t end
@@ -326,14 +336,14 @@ function M.search(db_node, conn_url, conn_name, subpath)
           results.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           M.schedule_render()
-          M.fetch_types(results.children, conn_url, db)
+          M.fetch_types(results.children, conn_url, db, db_node)
         elseif not final_page then
           next_page(new_cursor)
         else
           results.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           M.schedule_render()
-          M.fetch_types(results.children, conn_url, db)
+          M.fetch_types(results.children, conn_url, db, db_node)
         end
       end,
       on_error = function(msg)
