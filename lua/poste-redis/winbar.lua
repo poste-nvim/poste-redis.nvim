@@ -6,17 +6,13 @@
 --- config.config.source_winbar — buffer_setup attaches only when enabled.
 local config = require("poste-redis.config")
 local context = require("poste-redis.context")
+local util = require("poste-redis.util")
 
 local M = {}
 
 local attached = {}
 
---- Escape literal % so the winbar %-encoding passes user text through.
---- @param s string
---- @return string
-local function esc(s)
-  return s:gsub("%%", "%%%%")
-end
+local esc = util.escape_winbar
 
 --- Recompute + paint the winbar for a window showing a .redis buffer.
 --- @param win number|nil default current window
@@ -60,7 +56,6 @@ end
 
 M._test = {
   update = M.update,
-  esc = esc,
   attached = attached,
 }
 

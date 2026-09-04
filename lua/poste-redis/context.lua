@@ -18,6 +18,7 @@
 --- file, not the global.
 local parser = require("poste-redis.parser")
 local redis_state = require("poste-redis.state")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -144,12 +145,8 @@ end
 function M.display(ctx)
   ctx = ctx or {}
   local parts = {}
-  local conn = ctx.connection
+  local conn = util.host_label(ctx.connection)
   if conn and conn ~= "" then
-    if conn:sub(1, 8) == "redis://" or conn:sub(1, 9) == "rediss://" then
-      local redacted = conn:gsub("//([^/@]+)@", "//***@")
-      conn = redacted:match("@([^/]+)") or redacted:match("^%a+://([^/]+)") or redacted
-    end
     parts[#parts + 1] = conn
   end
   if ctx.db ~= nil then

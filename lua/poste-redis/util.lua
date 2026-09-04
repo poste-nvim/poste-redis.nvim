@@ -30,6 +30,28 @@ function M.redact_cmd(cmd)
   return out
 end
 
+--- Credential-free host label for a connection reference: plain names pass
+--- through; a redis:// URL renders as its host with userinfo stripped
+--- (redis://user:pass@host:6379 → host:6379).
+--- @param conn string|nil
+--- @return string|nil
+function M.host_label(conn)
+  if type(conn) ~= "string" then return conn end
+  if conn:sub(1, 8) ~= "redis://" and conn:sub(1, 9) ~= "rediss://" then
+    return conn
+  end
+  local redacted = conn:gsub("//([^/@]+)@", "//***@")
+  return redacted:match("@([^/]+)") or redacted:match("^%a+://([^/]+)") or redacted
+end
+
+--- Escape literal % so a winbar/statusline's %-encoding passes user text
+--- through. Parenthesized: gsub's second return must not leak.
+--- @param s string
+--- @return string
+function M.escape_winbar(s)
+  return (s:gsub("%%", "%%%%"))
+end
+
 --- Display width (CJK/emoji-aware via strdisplaywidth).
 --- @param s any
 --- @return number

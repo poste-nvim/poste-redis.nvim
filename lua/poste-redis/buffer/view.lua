@@ -7,6 +7,7 @@ local format = require("poste-redis.format")
 local grid = require("poste-redis.result.grid")
 local header = require("poste-redis.result.header")
 local sort = require("poste-redis.buffer.sort")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -233,11 +234,7 @@ function M.render_active()
   M.update_winbar()
 end
 
---- Escape literal % so the winbar's %-encoding passes user/command text
---- through untouched.
-local function esc(s)
-  return (s:gsub("%%", "%%%%"))
-end
+local esc = util.escape_winbar
 
 --- Winbar text for the command: the keyword (1st token) in
 --- PosteRedisResultWinbarCmd (linked to Function), the key argument (2nd
@@ -287,12 +284,7 @@ function M.update_winbar()
   -- own: connection name (or credential-free host for raw URLs) + db.
   local conn = meta and meta.connection
   if conn and conn ~= "" then
-    local label = conn
-    if conn:sub(1, 8) == "redis://" or conn:sub(1, 9) == "rediss://" then
-      -- strip userinfo before deriving the host: credentials never render
-      local redacted = conn:gsub("//([^/@]+)@", "//***@")
-      label = redacted:match("@([^/]+)") or redacted:match("^%a+://([^/]+)") or redacted
-    end
+    local label = util.host_label(conn)
     if type(meta.db) == "number" then
       label = label .. " db" .. meta.db
     end
