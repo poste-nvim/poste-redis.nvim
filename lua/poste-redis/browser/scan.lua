@@ -1,7 +1,9 @@
 --- Redis key-space scanning for the browser (M2, P1-1/P1-2): the
 --- cursor-driven SCAN loops (db group headers, group keys) and the tree-node
 --- builders that turn key lists into group/key nodes (flat / flatten /
---- nested views).
+--- nested views). In nested view the builders also pre-fold each lazy header
+--- to its single-spine branch point (respine_headers/spine_fold) and stamp
+--- the direct-children count its row will show after expansion.
 ---
 --- Render pacing (schedule_render / schedule_append / render_now), the
 --- render hooks, the view-mode flags and fetch_types live in
@@ -39,6 +41,99 @@ local function seg_count(prefix)
   return n
 end
 
+--- Single-spine fold of one lazy group header down to its branch point — the
+--- lazy-scan counterpart of tree.lua's fold_walk. From `pfx`, bucket `keys`
+--- (all full keys under `pfx:`) by their next `:` segment; while exactly one
+--- segment remains, it has deeper keys (is a group) and no key terminates
+--- exactly there, descend. Returns the folded prefix and the direct-children
+--- count the header will render after expansion: distinct segments at the
+--- stop level, +1 per segment that is both a terminal key and a group (that
+--- renders as two rows) — or the flat key count once the SPLIT_NEST cap stops
+--- splitting (deeper keys live as flat leaves inside). An empty rest (a
+--- trailing-colon key equal to the spine prefix) buckets as a leaf sentinel.
+--- @param pfx string absolute prefix of the header (never "")
+--- @param keys string[] full keys under pfx
+--- @return string folded_prefix, number direct_children
+local function spine_fold(pfx, keys)
+  local depth = seg_count(pfx)
+  while depth < SPLIT_NEST do
+    local kids, order = {}, {}
+    for i = 1, #keys do
+      local rest = keys[i]:sub(#pfx + 2)
+      local seg, deeper = rest:match("^([^:]+):(.*)$")
+      if not seg then
+        -- no further colon: the key terminates here as a direct leaf (an
+        -- empty rest — a trailing-colon key equal to pfx:":" — lands on the
+        -- empty-string sentinel segment)
+        seg = rest
+        deeper = nil
+      end
+      local b = kids[seg]
+      if not b then
+        b = { deep = false, term = false, keys = {} }
+        kids[seg] = b
+        order[#order + 1] = seg
+      end
+      if deeper then b.deep = true else b.term = true end
+      b.keys[#b.keys + 1] = keys[i]
+    end
+    if #order ~= 1 then
+      local n = #order
+      for i = 1, #order do
+        local b = kids[order[i]]
+        if b.term and b.deep then n = n + 1 end
+      end
+      return pfx, n
+    end
+    local b = kids[order[1]]
+    -- a key terminating exactly at the sole segment makes that child a key
+    -- leaf — the folder row stays over it (fold_walk stops the same way);
+    -- two rows when a group of the same name also exists
+    if b.term then return pfx, b.deep and 2 or 1 end
+    pfx = pfx .. ":" .. order[1]
+    keys = b.keys
+    depth = depth + 1
+  end
+  return pfx, #keys
+end
+
+--- Re-stamp lazy group headers with their single-spine fold (nested view):
+--- meta.prefix moves to the branch point — expansion SCANs from there, so one
+--- expand lands on the branch instead of walking each intermediate level —
+--- and _child_count becomes the direct-children count the row shows after
+--- expansion. Headers already loaded/loading are frozen: their children match
+--- the prefix they were scanned under. `full` re-stamps every header (last
+--- build of a scan, before its final render); otherwise only `touched`
+--- segments, so a newly created header carries its fold before its first
+--- render. `headers`/`node._seg_keys` are the seg→header and seg→keys maps
+--- the caller's builder maintains; header keys are the segment LOCAL to the
+--- parent, so the absolute prefix is the owning node's prefix ("" on the db
+--- node) joined with it.
+--- @param node table db/group node owning the headers
+--- @param headers table seg → lazy group node
+--- @param full boolean re-stamp all headers, not just touched
+--- @param touched table|nil seg → true (keys new since the last build)
+local function respine_headers(node, headers, full, touched)
+  if not async.nested_view then return end
+  local seg_keys = node._seg_keys
+  if not seg_keys then return end
+  local base = node.meta.prefix or ""
+  for seg, g in pairs(headers) do
+    if full or (touched and touched[seg]) then
+      if not (g.loaded or g.loading) then
+        local bk = seg_keys[seg]
+        if bk then
+          local abs = (base == "" and seg) or (base .. ":" .. seg)
+          local folded, n = spine_fold(abs, bk)
+          g.meta.prefix = folded
+          g.full_name = g.meta.connection .. "/" .. g.meta.db .. "/" .. folded
+          g._child_count = n
+        end
+      end
+    end
+  end
+end
+
 --- Reorder a node's children. Flat/flatten view: flat keys first (arrival
 --- order), then group nodes sorted by name — the stable layout for a db
 --- node. Nested view: subfolders first (sorted), then direct keys (sorted),
@@ -71,9 +166,11 @@ end
 --- @param conn_name string
 --- @param db number
 --- @param from number 1-based index of the first unseen key
+--- @param full boolean|nil last build of the scan: re-fold every header
 --- @return table[] new_nodes created for this delta
-local function build_group_headers(node, keys, conn_name, db, from)
+local function build_group_headers(node, keys, conn_name, db, from, full)
   local new_nodes = {}
+  local nested = async.nested_view
   if not async.tree_view then
     -- flat view: every key hangs directly under the db node
     for i = from, #keys do
@@ -85,6 +182,16 @@ local function build_group_headers(node, keys, conn_name, db, from)
     return new_nodes
   end
   node._segs = node._segs or {}
+  -- Nested view buckets each header's keys so respine_headers can pre-fold
+  -- the lazy spine (prefix → branch point) and stamp direct-children counts;
+  -- flatten view keeps the keys-under-prefix accumulation (there expansion
+  -- loads the prefix's keys as one flat list, so the total IS the count).
+  local seg_keys, touched
+  if nested then
+    node._seg_keys = node._seg_keys or {}
+    seg_keys = node._seg_keys
+    touched = {}
+  end
   for i = from, #keys do
     local k = keys[i]
     local seg = k:match("^([^:]+):")
@@ -102,12 +209,18 @@ local function build_group_headers(node, keys, conn_name, db, from)
         table.insert(node.children, g)
         table.insert(new_nodes, g)
       end
-      -- Keys-under-prefix seen by this scan, stamped on the lazy header so
-      -- the tree can show a child count before the group is expanded (exact
-      -- in flatten view, subtree total in nested view — after expansion the
-      -- rendered #children takes over).
-      g._child_count = (g._child_count or 0) + 1
+      if nested then
+        local bk = seg_keys[seg]
+        if not bk then bk = {}; seg_keys[seg] = bk end
+        bk[#bk + 1] = k
+        touched[seg] = true
+      else
+        g._child_count = (g._child_count or 0) + 1
+      end
     end
+  end
+  if touched then
+    respine_headers(node, node._segs, full, touched)
   end
   return new_nodes
 end
@@ -250,6 +363,7 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
   node.error = nil
   node.children = {}
   node._segs = {}
+  node._seg_keys = {}
   node.expanded = true
   async.render_now()
 
@@ -280,14 +394,18 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
         end
         local final_page = new_cursor == "0"
         -- Every page may surface new prefixes: append them immediately.
-        local new_nodes = build_group_headers(node, all_keys, conn_name, db, built + 1)
+        local new_nodes = build_group_headers(node, all_keys, conn_name, db, built + 1, final_page)
         built = #all_keys
         async.schedule_append(node, new_nodes)
         -- Render cap hit: stop walking the keyspace — rows beyond it would
         -- never render, and each page's fallback render costs real time.
         if not final_page and tree.last_truncated > 0 then
+          -- last render of the scan: re-fold every header from the full
+          -- keyspace before it, and drop the fold key buckets
+          respine_headers(node, node._segs, true)
           sort_children(node)
           node.loading = false
+          node._seg_keys = nil
           local flat = {}
           for _, ch in ipairs(node.children or {}) do
             if ch.node_type == "key" then flat[#flat + 1] = ch end
@@ -302,6 +420,7 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
         else
           sort_children(node)
           node.loading = false
+          node._seg_keys = nil
           -- Only flat keys live on the db node (groups stay lazy); fetch
           -- their types so the tree shows real type icons immediately.
           local flat = {}
@@ -331,19 +450,24 @@ end
 --- keys whose remainder after the folder prefix has a further `:`-segment
 --- create a lazy subfolder header (children=nil, loaded on expand); keys that
 --- terminate at this folder become direct leaves. Mirrors the db-level
---- build_group_headers but under the folder's own prefix. Folds stay lazy, so
---- a deep prefix costs one header per distinct next segment per level.
+--- build_group_headers but under the folder's own prefix. Each subfolder is
+--- pre-folded to its spine's branch point (respine_headers), so expanding it
+--- lands there in one step. Folds stay lazy, so a deep prefix costs one
+--- header per distinct next segment per level.
 --- @param node table group node
 --- @param keys string[] full keys matching the folder's SCAN
 --- @param conn_name string
 --- @param db number
 --- @param from number 1-based index of the first unseen key
+--- @param full boolean|nil last build of the scan: re-fold every header
 --- @return table[] new_nodes
-local function build_group_nested(node, keys, conn_name, db, from)
+local function build_group_nested(node, keys, conn_name, db, from, full)
   local new_nodes = {}
   local prefix = node.meta.prefix or ""
   local depth = seg_count(prefix)
   node._nsegs = node._nsegs or {}
+  node._seg_keys = node._seg_keys or {}
+  local touched = {}
   for i = from, #keys do
     local k = keys[i]
     local rest = k
@@ -359,14 +483,17 @@ local function build_group_nested(node, keys, conn_name, db, from)
         node._nsegs[seg] = g
         table.insert(new_nodes, g)
       end
-      -- Same stamp as build_group_headers: keys-under-prefix seen so far.
-      g._child_count = (g._child_count or 0) + 1
+      local bk = node._seg_keys[seg]
+      if not bk then bk = {}; node._seg_keys[seg] = bk end
+      bk[#bk + 1] = k
+      touched[seg] = true
     else
       local kn = tree.make_key_node(k, conn_name, db)
       kn.parent = node
       table.insert(new_nodes, kn)
     end
   end
+  respine_headers(node, node._nsegs, full, touched)
   return new_nodes
 end
 
@@ -386,6 +513,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
   node.error = nil
   node.children = {}
   node._nsegs = {}
+  node._seg_keys = {}
   node.expanded = true
   node.loaded = true
   async.render_now()
@@ -421,7 +549,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
           local new_nodes = {}
           if async.nested_view then
-            new_nodes = build_group_nested(node, all_keys, conn_name, db, built + 1)
+            new_nodes = build_group_nested(node, all_keys, conn_name, db, built + 1, final_page)
           else
             for i = built + 1, #all_keys do
               local kn = tree.make_key_node(all_keys[i], conn_name, db)
@@ -435,8 +563,13 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         end
         -- Render cap hit: stop paging — rows beyond it would never render.
         if not final_page and tree.last_truncated > 0 then
-          if async.nested_view then sort_children(node) end
+          if async.nested_view then
+            -- last render of the scan: re-fold every header before it
+            respine_headers(node, node._nsegs, true)
+            sort_children(node)
+          end
           node.loading = false
+          node._seg_keys = nil
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           async.schedule_render()
           async.fetch_types(node.children, conn_url, db, node)
@@ -445,6 +578,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         else
           if async.nested_view then sort_children(node) end
           node.loading = false
+          node._seg_keys = nil
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           async.schedule_render()
           async.fetch_types(node.children, conn_url, db, node)
@@ -467,6 +601,7 @@ M._test = {
   build_nested_children = build_nested_children,
   build_group_headers = build_group_headers,
   build_group_nested = build_group_nested,
+  spine_fold = spine_fold,
   SPLIT_NEST = SPLIT_NEST,
 }
 

@@ -1864,3 +1864,130 @@ describe("poste-redis browser child counts", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 end)
+
+describe("poste-redis browser lazy spine pre-fold (nested view)", function()
+  it("spine_fold walks a single-spine chain to its branch point", function()
+    async.set_view_mode("nested")
+    -- 1 → 2 → 3 → 4 branch into 5 (group) and 41 (key): fold stops at 1:2:3:4
+    local folded, n = scan._test.spine_fold("1", {
+      "1:2:3:4:5:6", "1:2:3:4:5:51", "1:2:3:4:41",
+    })
+    assert.equals("1:2:3:4", folded)
+    assert.equals(2, n)
+  end)
+
+  it("spine_fold counts a segment twice when key and folder share the name", function()
+    async.set_view_mode("nested")
+    -- a:b exists as key AND as folder (a:b:c:d): the fold stops at a and the
+    -- row will render both rows after expansion
+    local folded, n = scan._test.spine_fold("a", { "a:b", "a:b:c:d" })
+    assert.equals("a", folded)
+    assert.equals(2, n)
+  end)
+
+  it("spine_fold keeps a lone-key folder at its own prefix", function()
+    async.set_view_mode("nested")
+    -- folder a's only content is key a:b: no group child to descend into
+    local folded, n = scan._test.spine_fold("a", { "a:b" })
+    assert.equals("a", folded)
+    assert.equals(1, n)
+  end)
+
+  it("spine_fold treats a trailing-colon key as a leaf of its folder", function()
+    async.set_view_mode("nested")
+    local folded, n = scan._test.spine_fold("a", { "a:b:", "a:b:c" })
+    assert.equals("a:b", folded)
+    assert.equals(2, n)  -- leaf a:b: + leaf a:b:c
+  end)
+
+  it("spine_fold caps the chain at browser_split_nest segments", function()
+    async.set_view_mode("nested")
+    -- six segments is the split cap: deeper keys live flat inside the folder,
+    -- so the count there is the flat key count
+    local folded, n = scan._test.spine_fold("s1", {
+      "s1:s2:s3:s4:s5:s6:t1", "s1:s2:s3:s4:s5:s6:t2",
+    })
+    assert.equals("s1:s2:s3:s4:s5:s6", folded)
+    assert.equals(2, n)
+    local folded2, n2 = scan._test.spine_fold("x1", { "x1:x2:x3:x4:x5:x6:x7" })
+    assert.equals("x1:x2:x3:x4:x5:x6", folded2)
+    assert.equals(1, n2)
+  end)
+
+  it("build_group_headers pre-folds the lazy header to the branch point", function()
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {}
+    scan._test.build_group_headers(db, {
+      "1:2:3:4:5:6", "1:2:3:4:5:51", "1:2:3:4:41",
+    }, "c", 0, 1)
+    assert.equals(1, #db.children)  -- ONE header, no intermediate folders
+    local g = db.children[1]
+    assert.equals("1:2:3:4", g.meta.prefix)
+    assert.equals(2, g._child_count)  -- direct children: folder 5 + key 41
+    assert.is_nil(g.children, "header must stay lazy")
+  end)
+
+  it("build_group_headers unfolds the spine when a later page adds a sibling", function()
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {}
+    scan._test.build_group_headers(db, { "1:a:x" }, "c", 0, 1)
+    assert.equals("1:a", db.children[1].meta.prefix)
+    scan._test.build_group_headers(db, { "1:a:x", "1:b:y" }, "c", 0, 2)
+    assert.equals("1", db.children[1].meta.prefix)
+    assert.equals(2, db.children[1]._child_count)
+  end)
+
+  it("build_group_headers freezes the fold once the header was expanded", function()
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {}
+    scan._test.build_group_headers(db, { "a:x:1" }, "c", 0, 1)
+    local g = db.children[1]
+    assert.equals("a:x", g.meta.prefix)
+    g.loaded = true  -- user expanded it while the db scan was still running
+    scan._test.build_group_headers(db, { "a:x:1", "a:y:2" }, "c", 0, 2)
+    -- its loaded children match a:x: the prefix must not move under them
+    assert.equals("a:x", g.meta.prefix)
+  end)
+
+  it("build_group_nested pre-folds lazy subfolder spines", function()
+    async.set_view_mode("nested")
+    local group = tree.make_group_node("a", "c", 0)
+    local new_nodes = scan._test.build_group_nested(
+      group, { "a:b:c:d:x", "a:b:c:e:x" }, "c", 0, 1)
+    assert.equals(1, #new_nodes)  -- both keys fold into one subfolder header
+    local b = new_nodes[1]
+    assert.equals("b", b.name)
+    assert.equals("a:b:c", b.meta.prefix)  -- branch point of the b→c spine
+    assert.equals(2, b._child_count)       -- c's two subfolders d and e
+  end)
+
+  it("renders the pre-folded header as one branch-point row with its count", function()
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.children = {}
+    scan._test.build_group_headers(db, {
+      "1:2:3:4:5:6", "1:2:3:4:5:51", "1:2:3:4:41",
+    }, "c", 0, 1)
+    local buf = vim.api.nvim_create_buf(false, true)
+    db.expanded = true
+    tree.display_root = db
+    tree.header_lines = { "", "----------------" }
+    tree.render_tree(buf, {}, { db })
+    tree.display_root = nil
+
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert.equals(3, #lines)  -- two headers + ONE row: no intermediate levels
+    assert.match("1:2:3:4", lines[3])
+    local ns = vim.api.nvim_create_namespace("poste_redis_browser")
+    local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+    local counts = {}
+    for _, m in ipairs(marks) do
+      if m[4].virt_text then counts[#counts + 1] = m[4].virt_text[1][1] end
+    end
+    assert.same({ "  2" }, counts)  -- direct children, not the subtree total
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)
