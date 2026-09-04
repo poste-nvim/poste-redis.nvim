@@ -170,6 +170,32 @@ describe("poste-redis browser header bar overlay", function()
     assert.equals(40, cfg.width, "overlay width must follow the split")
   end)
 
+  it("keeps the cursor off the pinned rows; the bar is <leader>/ only", function()
+    local buf = open_connected(20)
+    local win = browser.info().window
+    vim.api.nvim_set_current_win(win)
+
+    -- gg lands on the first tree row, never on the pinned chrome
+    vim.cmd("normal! gg")
+    assert.equals(tree.HEADER_LINES + 1, vim.api.nvim_win_get_cursor(win)[1],
+      "gg must bottom out on the first tree row")
+
+    -- k at the first tree row stays there (row 2 is under the overlay)
+    vim.api.nvim_win_set_cursor(win, { tree.HEADER_LINES + 1, 0 })
+    vim.cmd("normal! k")
+    assert.equals(tree.HEADER_LINES + 1, vim.api.nvim_win_get_cursor(win)[1],
+      "k must not climb onto the pinned rows")
+
+    -- editing sits the caret on the bar (overlay hidden); commit walks it
+    -- back to the tree so it is never stranded under the re-shown overlay
+    browser._test.search_enter()
+    assert.equals(1, vim.api.nvim_win_get_cursor(win)[1], "editing needs the bar row")
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "key:001" })
+    browser._test.search_commit()
+    assert.equals(tree.HEADER_LINES + 1, vim.api.nvim_win_get_cursor(win)[1],
+      "commit must move the caret off the pinned bar row")
+  end)
+
   it("drops the overlay when the browser window closes", function()
     open_connected(5)
     assert.is_truthy(header_bar.float_win())

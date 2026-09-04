@@ -521,6 +521,26 @@ end
 --- buffer search keeps working.
 local search_commit  -- forward declarations (AGENTS.md: local fn hoisting)
 local search_cancel
+
+--- Keep the cursor off the two pinned header rows (filter bar + separator):
+--- they render under the overlay float, so a cursor there is invisible and
+--- can do nothing. Normal navigation bottoms out at the first tree row; the
+--- bar itself is only reachable through <leader>/ (search_enter), which is
+--- why the clamp skips while search_active.
+local function clamp_cursor()
+  if search_active then return end
+  if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
+  local win = vim.fn.bufwinid(browser_buf)
+  if not win or win == -1 then return end
+  local cur = vim.api.nvim_win_get_cursor(win)
+  local first_row = tree.HEADER_LINES + 1
+  if cur[1] >= first_row then return end
+  -- clamp only onto an EXISTING tree row: an empty db renders just the two
+  -- header lines, and there is no tree row to park the cursor on
+  if vim.api.nvim_buf_line_count(browser_buf) < first_row then return end
+  local line_text = vim.api.nvim_buf_get_lines(browser_buf, tree.HEADER_LINES, first_row, false)[1] or ""
+  vim.api.nvim_win_set_cursor(win, { first_row, math.min(cur[2], #line_text) })
+end
 local function search_enter()
   if not browser_buf or not vim.api.nvim_buf_is_valid(browser_buf) then return end
   if conn_picker.active then return end  -- the search bar does not exist before a context is chosen
@@ -591,6 +611,7 @@ function search_commit()
     async.search(current_db_node, current_conn.url, current_conn.name, query)
   end
   render_tree()
+  clamp_cursor()  -- the caret was on the bar row: walk it back to the tree
 end
 
 --- <Esc> in the search bar: cancel, clear any results, restore the tree.
@@ -602,10 +623,7 @@ function search_cancel()
     vim.keymap.del("i", "<Esc>", { buffer = browser_buf })
     vim.api.nvim_set_option_value("modifiable", false, { buf = browser_buf })
   end
-  search_active = false
-  search_query = ""
-  if current_db_node then async.search_clear(current_db_node) end
-  render_tree()
+  M.search_clear()  -- also walks the caret off the pinned bar row (clamp)
 end
 
 ----------------------------------------------------------------------
@@ -641,6 +659,17 @@ local function setup_browser_buffer()
       header_bar.sync(browser_buf, { plain = conn_picker.active })
     end,
   })
+
+  --- Navigation clamp: the pinned header rows are chrome under the overlay
+  --- float — no cursor there (see clamp_cursor).
+  local cursor_group = vim.api.nvim_create_augroup("PosteRedisBrowserCursor", { clear = true })
+  for _, ev in ipairs({ "CursorMoved", "CursorMovedI" }) do
+    vim.api.nvim_create_autocmd(ev, {
+      group = cursor_group,
+      buffer = browser_buf,
+      callback = clamp_cursor,
+    })
+  end
 
   local opts = { buffer = browser_buf, noremap = true, silent = true }
   local k
@@ -742,6 +771,8 @@ local function setup_browser_buffer()
         "  r     reload db keys (clears search)",
         "  <leader>/>  filter keys by sub-path (matches cache:a for 'cache')",
         "  <Esc>  clear search",
+        "  (the filter bar is pinned above the tree; <leader>/ is the only",
+        "   way into it — the cursor never rests on the bar rows)",
         "  <Space>  select database",
         "  d     delete key (confirm)",
         "  D     delete all keys under prefix (count + confirm)",
@@ -886,6 +917,7 @@ function M.search_clear()
   search_query = ""
   if current_db_node then async.search_clear(current_db_node) end
   render_tree()
+  clamp_cursor()  -- the caret may sit on the pinned bar row after <CR>/<Esc>
 end
 
 --- The browser's current scope: one connection + one selected db. Used by
