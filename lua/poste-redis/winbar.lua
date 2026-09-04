@@ -25,7 +25,7 @@ function M.update(win)
   if not vim.api.nvim_win_is_valid(win) then return end
   local ctx = context.resolve(win)
   local text = context.display(ctx)
-  local bar = ""
+  local bar = " "
   if text ~= "" then
     local ok_st, statusline = pcall(require, "poste-redis.statusline")
     local hl = ok_st and statusline.get_ctx_color(ctx.connection) or nil
