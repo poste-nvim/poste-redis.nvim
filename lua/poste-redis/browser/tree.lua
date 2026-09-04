@@ -636,10 +636,15 @@ function M.append_children(buf, line_to_node, node, new_nodes)
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 
   -- Splice the new nodes into line_to_node at the matching 1-based slot.
+  -- table.insert in a loop is O(M×N): every insert shifts the tail. Shift the
+  -- tail once and copy the block in instead — O(N+M) for the same result.
+  -- Streaming appends (a 10k-key group expand inserts thousands of nodes per
+  -- flush) made this the browser's hottest pure-Lua loop.
   local pos = node_idx + (node._desc_lines or 0) + 1
-  for k, n in ipairs(node_map) do
-    table.insert(line_to_node, pos + k - 1, n)
-  end
+  local old_n = #line_to_node
+  local ins_n = #node_map
+  for i = old_n, pos, -1 do line_to_node[i + ins_n] = line_to_node[i] end
+  for i = 1, ins_n do line_to_node[pos + i - 1] = node_map[i] end
 
   -- Highlight only the new lines (existing highlights auto-shift on insert).
   for k, n in ipairs(node_map) do
