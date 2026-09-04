@@ -1,0 +1,91 @@
+--- util spec — the shared helpers every module leans on: URL redaction,
+--- credential-free host labels, winbar %-escaping, display-width truncation
+--- and padding, clipboard formatting.
+local util = require("poste-redis.util")
+
+describe("poste-redis util", function()
+  describe("redact_url", function()
+    it("strips userinfo from redis URLs", function()
+      assert.equals("redis://***@host:6379/0", util.redact_url("redis://user:pass@host:6379/0"))
+      assert.equals("redis://***@host:6379/0", util.redact_url("redis://:pass@host:6379/0"))
+    end)
+
+    it("keeps URLs without userinfo intact", function()
+      assert.equals("redis://host:6379/0", util.redact_url("redis://host:6379/0"))
+    end)
+
+    it("keeps the host AND path, handles non-strings and TLS", function()
+      assert.equals("rediss://***@h/0", util.redact_url("rediss://u:p@h/0"))
+      assert.equals(nil, util.redact_url(nil))
+      -- a URL without userinfo passes through byte-for-byte (gsub no-op)
+      assert.equals("redis://host:6379/db", util.redact_url("redis://host:6379/db"))
+    end)
+  end)
+
+  describe("host_label", function()
+    it("extracts the credential-free host from a redis URL", function()
+      assert.equals("host:6379", util.host_label("redis://user:pass@host:6379/2"))
+      assert.equals("host", util.host_label("rediss://host"))
+      assert.equals("h:1", util.host_label("redis://h:1/0"))
+    end)
+
+    it("passes plain connection names through", function()
+      assert.equals("local-db", util.host_label("local-db"))
+    end)
+  end)
+
+  describe("escape_winbar", function()
+    it("doubles % so %-encoding passes text through", function()
+      assert.equals("GET 100%%", util.escape_winbar("GET 100%"))
+      assert.equals("plain", util.escape_winbar("plain"))
+    end)
+
+    it("returns exactly one value (gsub's count must not leak)", function()
+      local n = select("#", util.escape_winbar("a%b"))
+      assert.equals(1, n)
+    end)
+  end)
+
+  describe("truncate_display / pad_right", function()
+    it("keeps short strings verbatim", function()
+      assert.equals("abc", util.truncate_display("abc", 5))
+      assert.equals("abc", util.truncate_display("abc", 3))
+    end)
+
+    it("truncates to the width with an ellipsis, never splitting UTF-8", function()
+      local out = util.truncate_display("abcdef", 4)
+      assert.equals(4, vim.fn.strdisplaywidth(out))
+      assert.equals("…", out:sub(-3))
+      local cjk = util.truncate_display("你好世界", 5)
+      -- 2 glyphs (4 cells) + the 1-cell ellipsis: never half a glyph
+      assert.equals(5, vim.fn.strdisplaywidth(cjk))
+      assert.equals("你好…", cjk)
+    end)
+
+    it("pad_right pads by display width and never truncates", function()
+      assert.equals("ab  ", util.pad_right("ab", 4))
+      assert.equals("abc", util.pad_right("abc", 2))
+    end)
+  end)
+
+  describe("to_clipboard", function()
+    it("formats scalars for the clipboard", function()
+      assert.equals("", util.to_clipboard(nil))
+      assert.equals("true", util.to_clipboard(true))
+      assert.equals("7", util.to_clipboard(7))
+      assert.equals("s", util.to_clipboard("s"))
+    end)
+
+    it("encodes tables as compact JSON", function()
+      assert.equals('{"a":1}', util.to_clipboard({ a = 1 }))
+    end)
+  end)
+
+  describe("format_latency", function()
+    it("renders ms below a second, seconds above", function()
+      assert.equals("250 ms", util.format_latency(250))
+      assert.equals("1.50 s", util.format_latency(1500))
+      assert.equals("", util.format_latency(nil))
+    end)
+  end)
+end)
