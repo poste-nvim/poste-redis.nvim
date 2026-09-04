@@ -29,8 +29,8 @@ local function show_help(buf)
   local height = #items + 2
   local b = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(b, 0, -1, false, items)
-  vim.api.nvim_buf_set_option(b, "modifiable", false)
-  vim.api.nvim_buf_set_option(b, "bufhidden", "wipe")
+  vim.api.nvim_set_option_value("modifiable", false, { buf = b })
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = b })
   local w = vim.api.nvim_open_win(b, true, {
     relative = "editor",
     width = width,

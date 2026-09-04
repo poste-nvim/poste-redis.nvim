@@ -120,7 +120,7 @@ function M.resolve(win)
   end
 
   -- 3. .redis source buffer: the effective context at the cursor
-  if vim.api.nvim_buf_get_option(buf, "filetype") == "poste_redis" then
+  if vim.api.nvim_get_option_value("filetype", { buf = buf }) == "poste_redis" then
     local line_1 = vim.api.nvim_win_get_cursor(win)[1]
     local fc = M.file_context(buf, line_1)
     if not fc.connection then

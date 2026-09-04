@@ -385,16 +385,6 @@ describe("poste-redis grid editing", function()
   local refreshes = 0
   local ttl_reply = 60  -- what the stub's TTL probe answers
 
-  local function open_key_tab(value)
-    buffer.render({ {
-      seq = 1, command = "GET user:1", status = "", latency_ms = 1,
-      value = value, connection = "stubconn",
-    }, }, { render = true })
-    local t = buffer.active_tab()
-    t.meta.key = "user:1"
-    t.meta.db = 0
-  end
-
   local function open_key_tab_conn(value)
     buffer.render({ {
       seq = 1, command = "GET user:1", status = "", latency_ms = 1,

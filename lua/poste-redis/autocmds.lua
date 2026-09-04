@@ -26,7 +26,7 @@ end
 --- Wire up buffers already open when setup() runs.
 function M.setup_existing_buffers()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    local ft = vim.api.nvim_buf_get_option(buf, "filetype")
+    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
     if ft == "poste_redis" then
       buffer_setup.setup_buffer_keymaps(buf)
     end

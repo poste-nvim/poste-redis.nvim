@@ -6,7 +6,6 @@
 --- tab's recorded connection + db, then the tab refreshes itself so the grid
 --- always reflects the server.
 local session_conn = require("poste-redis.session_conn")
-local redis_state = require("poste-redis.state")
 local connections = require("poste-redis.connections")
 
 local M = {}

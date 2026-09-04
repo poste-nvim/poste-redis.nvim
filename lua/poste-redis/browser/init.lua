@@ -44,7 +44,6 @@ local M = {}
 local browser_buf = nil
 local browser_win = nil
 local line_to_node = {}
-local source_buf = nil
 
 --- Width the browser was last opened at: the auto-width floor, so the split
 --- never auto-shrinks below what the user asked for on open.
@@ -947,11 +946,9 @@ end
 --- ({ name, url }, from the :PosteRedisConnection / context selectors)
 --- connects directly. After a choice the browser lands on db 0 and renders
 --- the filter bar + separator + keys tree.
---- @param opts? table { source_buf = number|nil, split = "left"|"right", width = number, connection = { name, url }|nil }
+--- @param opts? table { split = "left"|"right", width = number, connection = { name, url }|nil }
 function M.open(opts)
   opts = opts or {}
-  source_buf = opts.source_buf or vim.api.nvim_get_current_buf()
-
   local buf = setup_browser_buffer()
 
   -- bufwinid returns a window id (winid), which nvim_set_current_win /
