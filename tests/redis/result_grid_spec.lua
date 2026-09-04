@@ -169,16 +169,20 @@ describe("poste-redis result grid", function()
       assert.is_nil(joined:find("field", 1, true))  -- header is not in the body
     end)
 
-    it("moves the cell cursor with move_cell and clamps", function()
+    it("moves the cell cursor with move_cell and clamps (index column skipped)", function()
       open_grid({ { "a", "1" }, { "b", "2" } })
       local tab = buffer.active_tab()
-      assert.same({ row = 1, col = 1 }, tab.cursor)
-      buffer.move_cell(0, 1)
+      -- the row-index column (1) is display-only: the cursor starts on the
+      -- first content column and h never enters the index
       assert.same({ row = 1, col = 2 }, tab.cursor)
+      buffer.move_cell(0, -1)
+      assert.same({ row = 1, col = 2 }, tab.cursor)
+      buffer.move_cell(0, 1)
+      assert.same({ row = 1, col = 3 }, tab.cursor)
       buffer.move_cell(1, 1)
       assert.same({ row = 2, col = 3 }, tab.cursor)  -- clamped to col 3 (hash: #, field, value)
       buffer.move_cell(-1, -3)
-      assert.same({ row = 1, col = 1 }, tab.cursor)
+      assert.same({ row = 1, col = 2 }, tab.cursor)
     end)
 
     it("goto_first_row / goto_last_row", function()
@@ -191,13 +195,14 @@ describe("poste-redis result grid", function()
 
     it("yank_cell copies the value, not the row index", function()
       open_grid({ { "a", "1" }, { "b", "2" } })
-      -- cursor starts on the "#" column: yanking it gives the row index
-      buffer.yank_cell()
-      assert.equals("1", vim.fn.getreg('"'))
-      -- move to the field column: yank gives the field value
-      buffer.move_cell(0, 1)
+      -- the cursor cannot sit on the index column: it starts on the field
+      -- column and yank gives the field value
       buffer.yank_cell()
       assert.equals("a", vim.fn.getreg('"'))
+      -- move to the value column: yank gives the value
+      buffer.move_cell(0, 1)
+      buffer.yank_cell()
+      assert.equals("1", vim.fn.getreg('"'))
     end)
 
     it("yank_column copies the whole column, one value per line", function()

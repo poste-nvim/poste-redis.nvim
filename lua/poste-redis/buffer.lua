@@ -191,12 +191,16 @@ end
 -- Cell navigation
 ------------------------------------------------------------------------
 
---- Move the cell cursor by (drow, dcol), clamped to the current page.
+--- Move the cell cursor by (drow, dcol), clamped to the current page. Column
+--- 1 is the row-index column — display-only chrome, never edited or yanked —
+--- so the cursor bottoms out at the first content column (2) and h from
+--- there stays put.
 function M.move_cell(drow, dcol)
   local tab = state.tabs[state.active]
   if not tab or tab.kind ~= "table" or not tab.pmeta or tab.pmeta.row_count == 0 then return end
   local row = math.max(1, math.min(tab.cursor.row + drow, tab.pmeta.row_count))
-  local col = math.max(1, math.min(tab.cursor.col + dcol, tab.pmeta.col_count))
+  local min_col = math.min(2, math.max(tab.pmeta.col_count, 1))
+  local col = math.max(min_col, math.min(tab.cursor.col + dcol, tab.pmeta.col_count))
   if row == tab.cursor.row and col == tab.cursor.col then return end
   tab.cursor.row, tab.cursor.col = row, col
   view.highlight_cell(tab)
@@ -294,7 +298,7 @@ function M.render(results, opts)
     if out.kind == "table" then
       out.page = 1
       out.page_size = state.PAGE_SIZE
-      out.cursor = { row = 1, col = 1 }
+      out.cursor = { row = 1, col = 2 }  -- col 1 is the index column: not focusable
       out.layout = nil
       out.pmeta = nil
       out.search_text = nil
@@ -330,7 +334,7 @@ function M.render_tabs(tab_list, opts)
     if t.kind == "table" then
       t.page = t.page or 1
       t.page_size = t.page_size or state.PAGE_SIZE
-      t.cursor = t.cursor or { row = 1, col = 1 }
+      t.cursor = t.cursor or { row = 1, col = 2 }
       t.layout = t.layout or nil
       t.search_text = t.search_text or nil
       t.search_matches = t.search_matches or {}

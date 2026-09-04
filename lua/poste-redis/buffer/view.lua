@@ -171,6 +171,8 @@ function M.render_grid(tab)
   tab.num_pages = math.max(1, math.ceil(total / tab.page_size))
   tab.page = math.max(1, math.min(tab.page or 1, tab.num_pages))
   if tab.cursor.row > tab.page_size then tab.cursor.row = 1 end
+  -- col 1 is the row-index column: display-only, never focused
+  if (tab.cursor.col or 1) < 2 then tab.cursor.col = 2 end
 
   local footer = build_footer(tab)
   local lines, pmeta = grid.render_page(tab.grid, tab.layout, tab.page, tab.page_size, footer)
