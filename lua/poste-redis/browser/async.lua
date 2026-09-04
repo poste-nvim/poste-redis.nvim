@@ -20,6 +20,21 @@ local config = require("poste-redis.config")
 local connections = require("poste-redis.connections")
 
 local M = {}
+-- nested_view is OWNED by browser/tree.lua (flatten_tree reads it on every
+-- render, and tree must not require this module back — that would be a
+-- require cycle). This metatable forwards reads and writes of M.nested_view
+-- to tree.nested_view, so every existing `async.nested_view` reference —
+-- including the runtime set_view_mode writes — keeps working unchanged.
+setmetatable(M, {
+  __index = function(t, k)
+    if k == "nested_view" then return tree.nested_view end
+    return rawget(t, k)
+  end,
+  __newindex = function(t, k, v)
+    if k == "nested_view" then tree.nested_view = v
+    else rawset(t, k, v) end
+  end,
+})
 
 --- Render hook set by browser/init.lua; called after every batch lands.
 M.render_hook = nil
@@ -94,6 +109,7 @@ end
 ---   tree_view=true,nested=true → "nested"
 -- Default mode from config (`browser_view_mode`). Applied once at module
 -- load; the toggle commands (:PosteRedisBrowserView) change it at runtime.
+-- M.nested_view is forwarded to tree.nested_view (single source of truth).
 local _default_mode = config.config.browser_view_mode or "nested"
 M.tree_view = _default_mode ~= "flat"
 M.nested_view = _default_mode == "nested"

@@ -26,8 +26,9 @@ local M = {}
 
 --- SPLIT_NEST is the max folder nesting depth; keys that would land deeper
 --- stay flat inside the deepest folder (prevents pathological trees from
---- `a:b:c:d:...` keys).
-local SPLIT_NEST = 2
+--- `a:b:c:d:...` keys). Configurable via `browser_split_nest`. Single-spine
+--- chains fold at render time (tree.lua), so a deeper cap costs no indentation.
+local SPLIT_NEST = config.config.browser_split_nest or 6
 
 --- Number of `:`-separated segments in a folder prefix ("" → 0, "a" → 1,
 --- "a:b" → 2). Drives the nested-view nest cap.

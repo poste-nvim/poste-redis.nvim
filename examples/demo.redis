@@ -5,6 +5,12 @@
 USE local              # 切换到 connections.toml 里的 local 连接
 SELECT 3               # 真·Redis 命令：切 db（M1 exec 模式，每次独立进程）
 
+set a:b:c:d "abcd"
+set a:d "ad"
+set 1:2:3:4:5:6 "deep"
+set 1:2:3:4:5:51 "deep"
+set 1:2:3:4:41 "deep"
+
 set a:b:c "abc"
 get a:b:c
 set b:c "bc"
@@ -67,3 +73,12 @@ ZREVRANK leaderboard:test:demo "player_c"
 ZSCORE leaderboard:test:demo "player_b"
 ZINCRBY leaderboard:test:demo 120 "player_c"
 ZREVRANGE leaderboard:test:demo 0 4 WITHSCORES
+
+SELECT 0
+get a:b:c
+
+
+SELECT 3
+get a:b:c
+
+

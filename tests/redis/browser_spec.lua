@@ -228,6 +228,109 @@ describe("poste-redis browser async grouping", function()
     assert.is_nil(db.children[2].children[1].meta.type)
   end)
 
+  it("nested view folds a single-spine group chain into one folder row", function()
+    -- JetBrains "compact middle directories": a → b → c are each groups with
+    -- exactly one GROUP child, so fold_walk collapses them into one row
+    -- mapped to the deepest group (a:b:c). Keys render relative to it.
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local a = tree.make_group_node("a", "c", 0)
+    local b = tree.make_group_node("a:b", "c", 0, "b")
+    local c = tree.make_group_node("a:b:c", "c", 0, "c")
+    a.parent = db
+    b.parent = a
+    c.parent = b
+    a.children = { b }
+    b.children = { c }
+    c.children = {
+      tree.make_key_node("a:b:c:d:x", "c", 0),
+      tree.make_key_node("a:b:c:e:x", "c", 0),
+    }
+    a.expanded = true
+    b.expanded = true
+    c.expanded = true
+    db.children = { a }
+    db.expanded = true
+    local lines, node_map = tree.flatten_tree({ db })
+    -- db row + one folded row for the whole chain + keys relative to it
+    assert.equals(4, #lines)
+    assert.match("a:b:c", lines[2])
+    assert.match("d:x", lines[3])
+    assert.match("e:x", lines[4])
+    -- the fold row maps to the DEEPEST group, so expand/load/delete keep the
+    -- real prefix (a:b:c), never the intermediate a or b
+    assert.equals(c, node_map[2])
+    assert.equals("key", node_map[3].node_type)
+    assert.equals("a:b:c:d:x", node_map[3].meta.key,
+      "display shortens, canonical key stays full")
+  end)
+
+  it("nested view keeps lone-key folders as expandable groups", function()
+    -- A group whose only child is a KEY stays a folder row (expandable, count
+    -- shown); the key renders beneath it. fold_walk never absorbs a folder
+    -- into its key leaf — node types are never changed.
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local a = tree.make_group_node("a", "c", 0)
+    local b = tree.make_group_node("a:b:c", "c", 0)  -- spine under a
+    a.parent = db
+    b.parent = a
+    a.children = { b }
+    b.children = {
+      tree.make_group_node("a:b:c:d", "c", 0, "d"),
+      tree.make_group_node("a:b:c:e", "c", 0, "e"),
+    }
+    b.children[1].children = { tree.make_key_node("a:b:c:d:x", "c", 0) }
+    b.children[2].children = { tree.make_key_node("a:b:c:e:x", "c", 0) }
+    a.expanded = true
+    b.expanded = true
+    db.children = { a }
+    db.expanded = true
+    local lines = tree.flatten_tree({ db })
+    -- db, folded row a:b:c, subfolder d (lone-key, stays folder), subfolder e
+    assert.equals(4, #lines)
+    assert.match("a:b:c", lines[2])
+    -- d and e are folder rows (not absorbed into key leaves), collapsed by default
+    assert.match("d", lines[3])
+    assert.match("e", lines[4])
+  end)
+
+  it("nested view does NOT fold a branching level, and flatten keeps folders", function()
+    async.set_view_mode("nested")
+    local db = tree.make_db_node({ db = 0 }, "c")
+    local a = tree.make_group_node("a", "c", 0)
+    local b = tree.make_group_node("a:b", "c", 0, "b")
+    local c = tree.make_group_node("a:c", "c", 0, "c")
+    a.parent = db
+    b.parent = a
+    c.parent = a
+    a.children = { b, c }
+    b.children = { tree.make_key_node("a:b:1", "c", 0) }
+    c.children = { tree.make_key_node("a:c:2", "c", 0) }
+    a.expanded = true
+    -- b and c are lone-key folders: they stay collapsed as folder rows
+    -- (expandable, count shown). The fold stops at a's branching level.
+    db.children = { a }
+    db.expanded = true
+    local lines = tree.flatten_tree({ db })
+    -- a branches into b and c: the fold stops there, both render as folder rows
+    assert.equals(4, #lines)  -- db, a, b (folder), c (folder)
+    assert.match("b", lines[3])
+    assert.match("c", lines[4])
+    -- flatten mode: first-segment folder style, group rows + keys keep names
+    async.set_view_mode("flatten")
+    local db2 = tree.make_db_node({ db = 0 }, "c")
+    local g = tree.make_group_node("user", "c", 0)
+    g.children = { tree.make_key_node("user:1", "c", 0) }
+    db2.children = { g }
+    db2.expanded = true
+    g.expanded = true
+    local lines2 = tree.flatten_tree({ db2 })
+    assert.equals(3, #lines2)  -- db, folder user, key user:1
+    assert.match("user%S*", lines2[2])
+    assert.match("user:1", lines2[3])
+  end)
+
   it("scan_group builds nested subfolders lazily in nested view", function()
     async.set_view_mode("nested")
     local session_conn = require("poste-redis.session_conn")
@@ -1262,6 +1365,7 @@ describe("poste-redis browser expand regressions", function()
     -- two scans can stream at once (db groups + a group's keys): the db
     -- append computes its insert offset from the db node's _desc_lines, so
     -- a stale count splices lines into the middle of the group's keys
+    async.set_view_mode("flatten")  -- single-key groups fold in nested view
     local buf = vim.api.nvim_create_buf(false, true)
     local db = tree.make_db_node({ db = 0 }, "c")
     local grp = tree.make_group_node("user", "c", 0)
@@ -1680,7 +1784,10 @@ describe("poste-redis browser child counts", function()
     local lazy_group = tree.make_group_node("bench", "c", 0)
     lazy_group._child_count = 10
     local loaded = tree.make_group_node("cache", "c", 0)
-    loaded.children = { tree.make_key_node("cache:1", "c", 0) }
+    loaded.children = {
+      tree.make_key_node("cache:1", "c", 0),
+      tree.make_key_node("cache:2", "c", 0),
+    }
     local failed = tree.make_group_node("err", "c", 0)
     failed._child_count = 7
     failed.error = "boom"
@@ -1697,8 +1804,9 @@ describe("poste-redis browser child counts", function()
     for _, m in ipairs(marks) do
       if m[4].virt_text then counts[#counts + 1] = m[4].virt_text[1][1] end
     end
-    -- lazy stamp + loaded #children; failed scan and plain keys show none
-    assert.same({ "  10", "  1" }, counts)
+    -- lazy stamp + loaded #children (kept ≥2 so it isn't folded into its lone
+    -- key leaf); failed scan and plain keys show none
+    assert.same({ "  10", "  2" }, counts)
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 

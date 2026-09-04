@@ -14,6 +14,12 @@
 local M = {}
 
 local config = require("poste-redis.config")
+-- Nested-view flag. Owned HERE (not browser/async.lua): flatten_tree reads it
+-- on every render, and tree must not require async (async → tree is the only
+-- legal edge; tree → async would be a require cycle). async re-exposes the
+-- same storage through a metatable forward, so `async.nested_view` keeps
+-- working everywhere. Initialized from the same config default async-derived.
+M.nested_view = (config.config.browser_view_mode or "nested") == "nested"
 
 -- Nerd-font glyphs (no emoji): marker + icons per node type. Glyphs and the
 -- per-type color map live in poste-redis.icons (shared with the result grid).
@@ -132,6 +138,41 @@ local function notice_node()
   return { node_type = "notice", name = "truncation notice", _icon_len = 0 }
 end
 
+--- Display name of a value under a folder context: strip the context prefix
+--- (`a:b:c:d:x` under ctx `a:b:c` → `d:x`). The canonical full name in
+--- node.name / node.meta.key is never touched — this is display-only, so
+--- search, copy, delete and TYPE all keep operating on the real key.
+--- @param name string (key or full prefix)
+--- @param ctx string display-context prefix ("" = no stripping)
+--- @return string
+local function rel_name(name, ctx)
+  if ctx == "" then return name end
+  local p = ctx .. ":"
+  if name:sub(1, #p) == p then return name:sub(#p + 1) end
+  return name
+end
+
+--- Single-spine fold walk (nested view): while a group has exactly ONE child
+--- and that child is also a group, collapse the parent into the child. A
+--- chain `a` → `b` → `c` (all groups) renders as one row `a:b:c` (JetBrains
+--- "compact middle directories"). A group whose only child is a KEY stays as
+--- a folder row (expandable, count shown) — the key renders beneath it.
+--- Never changes a node's type: a folder remains a folder. Stops at a lazy
+--- group (children = nil), a group with 0 or >1 children, or a group whose
+--- sole child is a key. Recomputed on every render, so streaming SCAN pages
+--- that add siblings to a folded spine simply unfold it next render.
+--- @param node table group node
+--- @return table deepest surviving node (always a group)
+local function fold_walk(node)
+  local cur = node
+  while cur.node_type == "group" and cur.children and #cur.children == 1 do
+    local only = cur.children[1]
+    if only.node_type ~= "group" then break end
+    cur = only
+  end
+  return cur
+end
+
 --- Flatten a node list into display lines + a parallel node map.
 --- Rendering is bounded twice: config.render_max_per_node children per node
 --- (an inline "… N more" notice renders under the truncated node, so its
@@ -150,8 +191,27 @@ end
 ---   (right after any marker glyph), computed here so apply_highlights never
 ---   re-reads the buffer. skipped = rows not rendered by per-node or total
 ---   caps (the scans stop paging once this is non-zero).
-function M.flatten_tree(nodes, depth, multi_select, budget)
+--- @param ctx string|nil display-context prefix: when a node's children are
+---   rendered this becomes the group's absolute prefix, so keys (and folded
+---   chain prefixes) display relative to it in nested view. "" = the whole key.
+function M.flatten_tree(nodes, depth, multi_select, budget, ctx)
   depth = depth or 0
+  ctx = ctx or ""
+  local nested = M.nested_view
+  -- Fold single-spine group chains before emitting: a chain of groups that
+  -- each have exactly one GROUP child renders as ONE row (fold_walk). A group
+  -- whose sole child is a KEY stays as a folder row (never absorbed into the
+  -- key leaf). The fold row maps to the deepest surviving group, so
+  -- expand/load/delete all keep real semantics. The display root itself is
+  -- never folded (its status/loader rendering and its children-at-depth-0
+  -- contract stay intact — e.g. the search results node, which is a group).
+  for i = 1, #nodes do
+    local n = nodes[i]
+    if nested and n.node_type == "group" and n ~= M.display_root then
+      local f = fold_walk(n)
+      if f ~= n then nodes[i] = f end
+    end
+  end
   local lines = {}
   local node_map = {}
   local icon_cols = {}
@@ -165,8 +225,9 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
   end
 
   local function emit_children(node, kids, child_depth)
+    local child_ctx = (node.meta and node.meta.prefix) or ctx
     local child_lines, child_map, child_cols, child_skipped, child_budget = M.flatten_tree(
-      kids, child_depth, multi_select, budget)
+      kids, child_depth, multi_select, budget, child_ctx)
     skipped = skipped + child_skipped
     budget_skipped = budget_skipped + child_budget
     node._desc_lines = #child_lines
@@ -246,7 +307,19 @@ function M.flatten_tree(nodes, depth, multi_select, budget)
         -- No trailing type/size suffix: the key type is conveyed by the icon
         -- glyph + color only, and rows must fit narrow splits unwrapped
         -- (browser auto-width grows the split, nowrap clips past the cap).
-        local line = indent .. marker .. icon .. " " .. node.name
+        -- Nested view renders keys + folder prefixes relative to their display
+        -- context (folded chains like `a:b:c` as one row, keys as `d:x` tails);
+        -- node.name / meta.key keep the canonical full name, so copy/delete/
+        -- TYPE always operate on the real key.
+        local disp = node.name
+        if nested then
+          if node.node_type == "key" then
+            disp = rel_name(node.name, ctx)
+          elseif node.node_type == "group" then
+            disp = rel_name(node.meta.prefix or node.name, ctx)
+          end
+        end
+        local line = indent .. marker .. icon .. " " .. disp
         -- Failed scans on visible nodes (group/db/connection) surface inline —
         -- silent errors made every failure look like "the tree is broken".
         if node.error then
@@ -548,7 +621,12 @@ function M.append_children(buf, line_to_node, node, new_nodes)
   if not node_idx then return false end  -- node not rendered → full render
 
   local child_depth = (node._depth or 0) + 1
-  local lines, node_map, icon_cols = M.flatten_tree(new_nodes, child_depth)
+  -- The appended nodes are children of `node`, so their display context is the
+  -- node's own prefix (keys flatten relative to it, and fold chains re-resolve
+  -- against it) — append_children must not lose the group prefix that
+  -- render_tree carries via flatten_tree's ctx recursion.
+  local child_ctx = (node.meta and node.meta.prefix) or ""
+  local lines, node_map, icon_cols = M.flatten_tree(new_nodes, child_depth, nil, nil, child_ctx)
 
   -- Buffer insert point (0-based): right after the node's rendered subtree.
   -- node_idx is a 1-based slot in line_to_node → buffer line node_idx+HEADER.

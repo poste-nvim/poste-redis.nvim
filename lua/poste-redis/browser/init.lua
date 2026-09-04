@@ -240,7 +240,10 @@ local current_node  -- forward decl (defined in "Keymap handlers")
 --- Expand a group node's children (lazy scan_group). Keys are leaves; the db
 --- lives in the header select, not the tree. In nested view the subfolders
 --- created by scan_group recurse here the same way — each is its own lazy
---- scan_group until the SPLIT_NEST cap turns further keys into flat leaves.
+--- scan_group until the browser_split_nest cap turns further keys into flat
+--- leaves. Single-spine chains fold at render time (tree.lua fold_walk), so a
+--- collapsed nested chain expands through one row that maps to the deepest
+--- group.
 --- @param node table group node
 --- @param conn_url string
 local function expand_node(node, conn_url)
