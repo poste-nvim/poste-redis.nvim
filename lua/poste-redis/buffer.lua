@@ -277,6 +277,10 @@ function M.sort_column()
   if not handled then return end
   view.render_active()
   view.position_cursor(tab)
+  -- The reorder rewrites the buffer, the floating header AND the winbar in
+  -- one tick; without an explicit redraw some terminals paint the header
+  -- float a beat late and the sort reads as laggy even on tiny grids.
+  vim.cmd.redraw()
 end
 
 --- `gd` on a result tab: open the browser tree at this tab's key (the tab's
