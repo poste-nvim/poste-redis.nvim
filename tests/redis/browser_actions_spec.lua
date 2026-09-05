@@ -99,7 +99,43 @@ describe("poste-redis browser actions", function()
     end))
     local scan = calls[1]
     assert.equals("SCAN", scan.cmd[1])
-    assert.equals("user:*", scan.cmd[4])  -- SCAN 0 MATCH user:* COUNT 1000
+    assert.equals("user:*", scan.cmd[6])  -- SCAN <cursor> COUNT 1000 MATCH user:*
+    local dels = 0
+    for _, c in ipairs(calls) do if c.cmd[1] == "DEL" then dels = dels + 1 end end
+    assert.equals(2, dels)
+  end)
+
+  it("delete_prefix loops SCAN pages before confirming (multi-page prefix)", function()
+    -- a single estimate page undercounted prefixes with >1 page of keys and
+    -- the delete silently missed the rest
+    local scan_pages = 0
+    session_conn.execute = function(conn_url, cmd, cbs, bufnr, opts)
+      calls[#calls + 1] = { cmd = cmd, opts = opts }
+      local name = (cmd[1] or ""):upper()
+      vim.schedule(function()
+        if name == "SCAN" then
+          scan_pages = scan_pages + 1
+          if scan_pages == 1 then
+            cbs.on_response({ value = { value = { "user:1" }, cursor = "5" } })
+          else
+            cbs.on_response({ value = { value = { "user:2" }, cursor = "0" } })
+          end
+        elseif name == "DEL" then
+          cbs.on_response({ value = { value = 1 } })
+        else
+          cbs.on_response({ value = { value = "OK" } })
+        end
+      end)
+      return "dispatched"
+    end
+    local group = tree.make_group_node("user", "stubconn", 0)
+    group.meta.url = "redis://h:6379/0"
+    actions.delete_prefix(group, {})
+    assert.is_true(wait_for(function()
+      local dels = 0
+      for _, c in ipairs(calls) do if c.cmd[1] == "DEL" then dels = dels + 1 end end
+      return dels >= 2
+    end), "keys from both SCAN pages must be deleted")
     local dels = 0
     for _, c in ipairs(calls) do if c.cmd[1] == "DEL" then dels = dels + 1 end end
     assert.equals(2, dels)

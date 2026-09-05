@@ -165,49 +165,64 @@ function M.delete_prefix(node, ctx)
     return
   end
   local db = node.meta and node.meta.db
-  -- Estimate matching keys with SCAN MATCH prefix:*
-  session_conn.execute(url, { "SCAN", "0", "MATCH", prefix .. ":*", "COUNT", "1000" }, {
-    on_response = function(ev)
-      -- SCAN reply: {type, value: keys[], cursor} (redis_executor SCAN branch)
-      local keys = ev.value and ev.value.value or {}
-      local key_list = {}
-      for _, k in ipairs(keys) do
-        if type(k) == "string" then key_list[#key_list + 1] = k end
-      end
-      local question = ("Delete %d key(s) matching  %s:*  ?"):format(#key_list, prefix)
-      if not confirm(question) then
-        notify("Deletion cancelled")
+  local key_list = {}
+
+  -- Estimate matching keys with a FULL SCAN cursor loop: a single page
+  -- undercounted prefixes with more than one page of keys, the confirm
+  -- showed the wrong count and the delete silently missed the rest.
+  local function confirm_and_delete()
+    local question = ("Delete %d key(s) matching  %s:*  ?"):format(#key_list, prefix)
+    if not confirm(question) then
+      notify("Deletion cancelled")
+      return
+    end
+    -- delete one by one via DEL (no Lua scripting in M2 scope)
+    local function del_next(i)
+      if i > #key_list then
+        notify(("Deleted %d key(s) under %s:*"):format(#key_list, prefix))
+        -- one history line for the whole batch, not one per key
+        record(("DEL %s:*"):format(prefix), {
+          connection = node.meta and node.meta.connection,
+          db = db,
+          count = #key_list,
+          yank = scan_pipeline(prefix),
+        })
+        -- the prefix's whole subtree is gone: drop its row, no rescan
+        refresh_tree(db_node, ctx.render, function() detach_node(node) end)
         return
       end
-      -- delete one by one via DEL (no Lua scripting in M2 scope)
-      local function del_next(i)
-        if i > #key_list then
-          notify(("Deleted %d key(s) under %s:*"):format(#key_list, prefix))
-          -- one history line for the whole batch, not one per key
-          record(("DEL %s:*"):format(prefix), {
-            connection = node.meta and node.meta.connection,
-            db = db,
-            count = #key_list,
-            yank = scan_pipeline(prefix),
-          })
-          -- the prefix's whole subtree is gone: drop its row, no rescan
-          refresh_tree(db_node, ctx.render, function() detach_node(node) end)
-          return
+      session_conn.execute(url, { "DEL", key_list[i] }, {
+        on_response = function() del_next(i + 1) end,
+        on_error = function(msg)
+          notify(("DEL %s failed: %s"):format(key_list[i], tostring(msg)), vim.log.levels.ERROR)
+          del_next(i + 1)
+        end,
+      }, nil, { db = db })
+    end
+    del_next(1)
+  end
+
+  local function estimate_page(cursor)
+    session_conn.execute(url, { "SCAN", cursor, "COUNT", "1000", "MATCH", prefix .. ":*" }, {
+      on_response = function(ev)
+        -- SCAN reply: {type, value: keys[], cursor} (redis_executor SCAN branch)
+        for _, k in ipairs(ev.value and ev.value.value or {}) do
+          if type(k) == "string" then key_list[#key_list + 1] = k end
         end
-        session_conn.execute(url, { "DEL", key_list[i] }, {
-          on_response = function() del_next(i + 1) end,
-          on_error = function(msg)
-            notify(("DEL %s failed: %s"):format(key_list[i], tostring(msg)), vim.log.levels.ERROR)
-            del_next(i + 1)
-          end,
-        }, nil, { db = db })
-      end
-      if #key_list > 0 then del_next(1) end
-    end,
-    on_error = function(msg)
-      notify("SCAN estimate failed: " .. tostring(msg), vim.log.levels.ERROR)
-    end,
-  }, nil, { db = db })
+        local cursor2 = (ev.value and ev.value.cursor) or "0"
+        if cursor2 == "0" then
+          confirm_and_delete()
+        else
+          estimate_page(cursor2)
+        end
+      end,
+      on_error = function(msg)
+        notify("SCAN estimate failed: " .. tostring(msg), vim.log.levels.ERROR)
+      end,
+    }, nil, { db = db })
+  end
+
+  estimate_page("0")
 end
 
 --- Delete a group/db node and every key under it (full SCAN cursor loop,
