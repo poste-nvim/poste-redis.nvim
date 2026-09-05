@@ -95,7 +95,20 @@ function flush()
     if M.render_hook then M.render_hook() end
     return
   end
+  -- Coalesce CONSECUTIVE appends to the same node: several SCAN pages can
+  -- land inside one debounce window, and every separate append costs its own
+  -- O(rendered rows) buffer insert + line-map splice. Merging keeps the
+  -- cumulative streaming cost linear in flushes, not in queued pages.
+  local merged = {}
   for _, a in ipairs(appends) do
+    local last = merged[#merged]
+    if last and last.node == a.node then
+      for _, n in ipairs(a.nodes) do last.nodes[#last.nodes + 1] = n end
+    else
+      merged[#merged + 1] = { node = a.node, nodes = a.nodes }
+    end
+  end
+  for _, a in ipairs(merged) do
     if not M.append_hook or not M.append_hook(a.node, a.nodes) then
       render_dirty = true  -- node not rendered: fall back to a full render
     end

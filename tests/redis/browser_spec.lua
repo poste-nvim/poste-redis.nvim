@@ -2260,3 +2260,36 @@ describe("poste-redis browser connections picker (first open)", function()
     assert.is_nil(browser.current_scope().connection)
   end)
 end)
+
+describe("poste-redis browser async flush", function()
+  it("coalesces queued appends to the same node into one append call", function()
+    local async = require("poste-redis.browser.async")
+    local tree = require("poste-redis.browser.tree")
+    -- drain any dirty flag left by earlier tests: the flush prefers a full
+    -- render over queued appends (correctly — the nodes are already in
+    -- node.children), which would discard this test's own queue
+    async.schedule_render()
+    vim.wait(100, function() return false end, 5)
+    local orig_hook = async.append_hook
+    local calls = {}
+    async.append_hook = function(node, nodes)
+      calls[#calls + 1] = { node = node, n = #nodes, names = {} }
+      for _, n in ipairs(nodes) do calls[1].names[#calls[1].names + 1] = n.name end
+      return true
+    end
+
+    local node = tree.make_group_node("g", "c", 0)
+    node.expanded = true
+    -- three pages land inside one debounce window
+    async.schedule_append(node, { tree.make_key_node("a", "c", 0) })
+    async.schedule_append(node, { tree.make_key_node("b", "c", 0) })
+    async.schedule_append(node, { tree.make_key_node("c2", "c", 0) })
+    assert.is_true(vim.wait(200, function() return #calls > 0 end, 5),
+      "flush did not run")
+    async.append_hook = orig_hook
+
+    assert.equals(1, #calls, "one flush = one append per node")
+    assert.equals(3, calls[1].n, "all queued pages ride the single append")
+    assert.same({ "a", "b", "c2" }, calls[1].names, "page order is preserved")
+  end)
+end)
