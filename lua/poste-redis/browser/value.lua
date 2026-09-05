@@ -16,14 +16,18 @@ local buffer = require("poste-redis.buffer")
 local format = require("poste-redis.format")
 local redis_state = require("poste-redis.state")
 local connections = require("poste-redis.connections")
+local config = require("poste-redis.config")
 
 local M = {}
 
---- Page size for SCAN-family / LRANGE pagination.
-local PAGE = 500
-
 --- View session state (one at a time; a new view replaces it).
 local view = nil
+
+--- Elements per value-viewer page (config.value_page_size). Deliberately
+--- independent from scan_count, which paces the keyspace scan.
+local function page_size()
+  return config.config.value_page_size or 500
+end
 
 --- Build the per-page fetch command for a key/type/cursor.
 --- @param key string
@@ -32,16 +36,16 @@ local view = nil
 --- @return string[]|nil command tokens
 local function page_command(key, type, cursor)
   cursor = cursor or 0
-  if type == "hash" then return { "HSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
-  if type == "set" then return { "SSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
-  if type == "zset" then return { "ZSCAN", key, tostring(cursor), "COUNT", tostring(PAGE) } end
+  if type == "hash" then return { "HSCAN", key, tostring(cursor), "COUNT", tostring(page_size()) } end
+  if type == "set" then return { "SSCAN", key, tostring(cursor), "COUNT", tostring(page_size()) } end
+  if type == "zset" then return { "ZSCAN", key, tostring(cursor), "COUNT", tostring(page_size()) } end
   if type == "list" then
     local from = tonumber(cursor) or 0
-    return { "LRANGE", key, tostring(from), tostring(from + PAGE - 1) }
+    return { "LRANGE", key, tostring(from), tostring(from + page_size() - 1) }
   end
   if type == "stream" then
     local from = tostring(cursor)
-    return { "XRANGE", key, from, "+", "COUNT", tostring(PAGE) }
+    return { "XRANGE", key, from, "+", "COUNT", tostring(page_size()) }
   end
   if type == "string" then return { "GET", key } end
   return { "GET", key }  -- unknown: try the raw string
@@ -59,7 +63,7 @@ local function resolve_node(node)
   local url = node.meta and node.meta.url
   local err
   if not url then
-    url, err = connections.resolve_redis_url(conn_name)
+    url, err = connections.resolve(conn_name)
   end
   if not url then
     return nil, nil, "Connection '" .. conn_name .. "' not found: " .. tostring(err), 0
@@ -151,7 +155,7 @@ function M.next_page()
       local items = ev.value and ev.value.value or {}
       v.cursor = tostring((tonumber(v.cursor) or 0) + #items)
       v.loaded = v.loaded + #items
-      if #items < PAGE then v.done = true end
+      if #items < page_size() then v.done = true end
       add_page(ev, ("%s [list · page %d]"):format(v.key, #v.pages + 1))
     elseif v.type == "string" then
       v.done = true
@@ -247,7 +251,6 @@ end
 M._test = {
   page_command = page_command,
   footer = footer,
-  PAGE = PAGE,
 }
 
 return M

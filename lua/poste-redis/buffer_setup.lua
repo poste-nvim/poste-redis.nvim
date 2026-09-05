@@ -1,12 +1,12 @@
 --- Source-buffer keymaps for `poste_redis` buffers (the .redis file).
 --- Bound once per buffer on FileType / setup_existing_buffers.
 local config = require("poste-redis.config")
+local constants = require("poste-redis.constants")
 
 local M = {}
 
 --- Show the keymap help for a source buffer in a float.
 local function show_help(buf)
-  local constants = require("poste-redis.constants")
   local items = {
     "poste-redis source keymaps:",
     "  " .. config.format_keymap("redis_source", "run") .. "   run command under cursor / selection",
@@ -103,7 +103,7 @@ function M.setup_buffer_keymaps(buf)
       local tokens = parser.command_tokens(line)
       if not tokens or #tokens < 2 or tokens[1]:upper() == "USE" or tokens[1]:upper() == "SELECT" then
         vim.notify("No key to reveal on this line", vim.log.levels.INFO,
-          { title = "PosteRedis" })
+          { title = constants.TITLE })
         return
       end
       local ctx = require("poste-redis.context").file_context(buf, lnum)

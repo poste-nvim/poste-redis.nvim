@@ -30,7 +30,7 @@ function M.resolve_target()
   if not conn then
     return nil, "no redis context set — run :PosteRedisContext first"
   end
-  return connections.resolve_redis_url(conn)
+  return connections.resolve(conn)
 end
 
 --- Execute an AI-authored redis codeblock (one command per line) against the

@@ -20,6 +20,10 @@ M.defaults = {
   -- pipelined session requests (that wedges the shared redis-session process:
   -- every later SCAN queues behind the flood).
   type_fetch_limit = 500,
+  -- Elements per page in the value viewer (HSCAN/SSCAN/ZSCAN/LRANGE pages
+  -- when a key's value is opened from the browser). Independent from
+  -- scan_count, which paces the keyspace scan.
+  value_page_size = 500,
   -- Max rows rendered in the key browser tree. A 100k-key group flattened
   -- into buffer lines makes every full re-render a 100k-line rewrite, which
   -- starves the session's stdout processing (browser freeze). Beyond the cap

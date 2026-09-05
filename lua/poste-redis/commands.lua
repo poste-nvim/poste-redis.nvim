@@ -45,10 +45,10 @@ function M.setup()
 
   vim.api.nvim_create_user_command("PosteRedisReveal", function(args)
     local browser = require("poste-redis.browser.init")
+    local redis_state = require("poste-redis.state")
     local key = args.args and args.args ~= "" and args.args or nil
     if key then
       -- explicit key: scope by the current global context
-      local redis_state = require("poste-redis.state")
       local accepted = browser.reveal({
         key = key,
         connection = redis_state.context.connection,
@@ -56,14 +56,14 @@ function M.setup()
       })
       if not accepted then
         vim.notify("Cannot reveal " .. key .. " (no connection context)",
-          vim.log.levels.WARN, { title = "PosteRedis" })
+          vim.log.levels.WARN, { title = redis_state.TITLE })
       end
       return
     end
     -- no argument: reveal the active result tab's key
     if not browser.reveal_current() then
       vim.notify("No key to reveal (open a result tab or pass a key)",
-        vim.log.levels.INFO, { title = "PosteRedis" })
+        vim.log.levels.INFO, { title = redis_state.TITLE })
     end
   end, { nargs = "?", desc = "Reveal a key in the browser tree (default: the active result tab's key)" })
 

@@ -265,7 +265,7 @@ end
 --- @param default_url string|nil
 --- @return table[] groups  { connection, entries, start_line, error }
 function M.group_by_connection(entries, resolve, default_url)
-  resolve = resolve or function(name) return require("poste-redis.connections").resolve_redis_url(name) end
+  resolve = resolve or function(name) return require("poste-redis.connections").resolve(name) end
   local groups = {}
   local current = nil
   local function ensure_current(e)
@@ -445,7 +445,7 @@ function M._connection_for(buf)
   local entries = parser.buffer_entries(buf)
   for i = #entries, 1, -1 do
     if entries[i].kind == "use" and entries[i].connection then
-      local url, err = connections.resolve_redis_url(entries[i].connection)
+      local url, err = connections.resolve(entries[i].connection)
       if url then
         connections.apply_connection(entries[i].connection, url)
         return url, entries[i].connection
