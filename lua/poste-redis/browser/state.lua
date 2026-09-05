@@ -95,6 +95,10 @@ function M.select_db(db)
   M.current_db_node = tree.make_db_node({ db = db }, M.current_conn.name)
   tree.display_root = M.current_db_node
   M.search_query = ""
+  -- the selection bound to the previous scope must not survive a switch:
+  -- D after <Space> would otherwise batch-delete the OLD db's nodes
+  M.multi_select.active = false
+  M.multi_select.selected = {}
   scan.scan_keys(M.current_db_node, M.current_conn.url, M.current_conn.name)
   if M.render then M.render() end
 end

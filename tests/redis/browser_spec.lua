@@ -2290,4 +2290,22 @@ describe("poste-redis browser async flush", function()
     assert.equals(3, calls[1].n, "all queued pages ride the single append")
     assert.same({ "a", "b", "c2" }, calls[1].names, "page order is preserved")
   end)
+
+  --- Regression: select_db used to keep the previous scope's multi-select,
+  --- so D after a db/connection switch batch-deleted the OLD scope's nodes.
+  it("select_db clears the multi-select bound to the previous scope", function()
+    local bst = require("poste-redis.browser.state")
+    local stale = tree.make_key_node("stale", "c", 0)
+    bst.multi_select.active = true
+    bst.multi_select.selected = { [stale] = true }
+    -- select_db needs a context; without a connection it returns early
+    bst.current_conn = { name = "stub", url = "redis://stub:6379/0" }
+    local scan = require("poste-redis.browser.scan")
+    local orig_scan_keys = scan.scan_keys
+    scan.scan_keys = function() end  -- no transport in this spec
+    require("poste-redis.browser.init")._test.select_db(0)
+    scan.scan_keys = orig_scan_keys
+    assert.is_false(bst.multi_select.active)
+    assert.equals(0, #vim.tbl_keys(bst.multi_select.selected))
+  end)
 end)
