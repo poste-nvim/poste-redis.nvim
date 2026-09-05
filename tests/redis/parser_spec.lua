@@ -123,6 +123,16 @@ describe("poste-redis parser", function()
     assert.same({ "SET", "k", 'a"b\nc' }, args)
   end)
 
+  it("decodes escaped backslashes in ONE pass (JSON \\\\n is backslash + n)", function()
+    -- sequential gsub passes turned `\\n` into a newline after `\\` → `\`;
+    -- per JSON it must stay the literal two characters backslash + n
+    local args = parser.entry_args(parser.extract_entries('SET k "a\\\\nb"\n')[1])
+    assert.same({ "SET", "k", "a\\nb" }, args)
+    -- the plain escapes still decode
+    local args2 = parser.entry_args(parser.extract_entries('SET k "x\\ty"\n')[1])
+    assert.same({ "SET", "k", "x\ty" }, args2)
+  end)
+
   it("unquotes single-quoted args literally", function()
     local args = parser.entry_args(parser.extract_entries("LPUSH q 'hello world'\n")[1])
     assert.same({ "LPUSH", "q", "hello world" }, args)

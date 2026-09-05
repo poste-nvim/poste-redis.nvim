@@ -62,6 +62,9 @@ end
 
 --- Strip surrounding quotes from a token. Double quotes: JSON-compatible
 --- escapes (\", \\, \n, \t, \r). Single quotes: literal (redis-cli style).
+--- Decoding is ONE pass over `\x` pairs: sequential gsub passes would let
+--- `\\n` (backslash + n per JSON) re-match as `\n` after `\\` → `\` and
+--- decode to a newline instead of the literal two characters.
 --- @param tok string
 --- @return string
 local function unquote(tok)
@@ -70,8 +73,14 @@ local function unquote(tok)
   if (first == '"' or first == "'") and last == first and #tok >= 2 then
     local inner = tok:sub(2, -2)
     if first == '"' then
-      inner = inner:gsub('\\"', '"'):gsub("\\\\", "\\")
-        :gsub("\\n", "\n"):gsub("\\t", "\t"):gsub("\\r", "\r")
+      inner = inner:gsub("\\(.)", function(e)
+        if e == '"' then return '"' end
+        if e == "\\" then return "\\" end
+        if e == "n" then return "\n" end
+        if e == "t" then return "\t" end
+        if e == "r" then return "\r" end
+        return "\\" .. e  -- unknown escape: keep both characters verbatim
+      end)
     end
     return inner
   end
