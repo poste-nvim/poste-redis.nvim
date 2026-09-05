@@ -96,6 +96,17 @@ describe("poste-redis result buffer", function()
     assert.is_false(buffer.is_open())
   end)
 
+  it("render recovers from a stale hidden buffer holding the panel name", function()
+    -- `:q` on the panel window leaves the hidden scratch buffer alive with
+    -- the poste://redis_result name; the next render used to raise E95
+    local ghost = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(ghost, "poste://redis_result")
+    buffer.render(sample_results, { render = true })
+    assert.is_true(buffer.is_open())
+    assert.equals("poste://redis_result", vim.api.nvim_buf_get_name(buffer.buf()))
+    buffer.close()
+  end)
+
   it("re-render replaces previous tabs", function()
     buffer.render(sample_results, { render = true })
     buffer.render({ { seq = 1, command = "PING", status = "PONG", latency_ms = 1,

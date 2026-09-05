@@ -438,6 +438,13 @@ function M.show_panel(enter)
   vim.api.nvim_set_option_value("bufhidden", "hide", { buf = state.buf })
   vim.api.nvim_set_option_value("swapfile", false, { buf = state.buf })
   vim.api.nvim_set_option_value("modifiable", false, { buf = state.buf })
+  -- `:q` on the panel window leaves the hidden scratch buffer alive holding
+  -- the name; re-naming a fresh buffer then raised E95 and every later run
+  -- failed to open the panel until nvim restarted. Drop the stale one first.
+  local stale = vim.fn.bufnr("poste://redis_result")
+  if stale ~= -1 then
+    pcall(vim.api.nvim_buf_delete, stale, { force = true })
+  end
   vim.api.nvim_buf_set_name(state.buf, "poste://redis_result")
   vim.bo[state.buf].filetype = "poste_redis_result"
 
