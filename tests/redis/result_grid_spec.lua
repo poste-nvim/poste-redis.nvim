@@ -426,6 +426,7 @@ describe("poste-redis grid editing", function()
   local sent_cmds = {}
   local refreshes = 0
   local ttl_reply = 60  -- what the stub's TTL probe answers
+  local lindex_reply = nil  -- what the stub's LINDEX probe answers (nil = skip)
 
   local function open_key_tab_conn(value)
     buffer.render({ {
@@ -447,6 +448,7 @@ describe("poste-redis grid editing", function()
     sent_cmds = {}
     refreshes = 0
     ttl_reply = 60
+    lindex_reply = nil
     -- counting refresh that still re-runs the tab command (M.refresh)
     grid_edit.set_refresh(function()
       refreshes = refreshes + 1
@@ -456,6 +458,12 @@ describe("poste-redis grid editing", function()
       if cmd[1] == "TTL" then
         if cbs and cbs.on_response then
           cbs.on_response({ value = { type = "number", value = ttl_reply } })
+        end
+        return "dispatched"
+      end
+      if cmd[1] == "LINDEX" then
+        if cbs and cbs.on_response then
+          cbs.on_response({ value = { type = "string", value = lindex_reply } })
         end
         return "dispatched"
       end
@@ -520,10 +528,42 @@ describe("poste-redis grid editing", function()
     open_key_tab_conn({ type = "list", value = { "job-1", "job-2" }, len = 2 })
     local t = buffer.active_tab()
     t.cursor = { row = 1, col = 2 }
+    lindex_reply = "job-1"  -- LINDEX must confirm the rendered value first
     vim.fn.confirm = function() return 1 end
     grid_edit.delete_row(t)
     assert.is_truthy(sent_cmds[#sent_cmds - 1]:find("^LSET user:1 0 __POSTE_DELETE_ROW__$"))
     assert.equals("LREM user:1 1 __POSTE_DELETE_ROW__", sent_cmds[#sent_cmds])
+  end)
+
+  it("stale list cell refuses the write (LINDEX mismatch)", function()
+    -- the grid's index is only the true list index when the result started
+    -- at the list head and nothing shifted; a stale write corrupted an
+    -- unrelated element
+    open_key_tab_conn({ type = "list", value = { "job-1", "job-2" }, len = 2 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    lindex_reply = "SOMETHING-ELSE"  -- server value drifted from the render
+    vim.ui.input = function(opts, cb) cb("edited") end
+    grid_edit.edit_cell(t)
+    vim.wait(50, function() return false end, 5)
+    for _, c in ipairs(sent_cmds) do
+      assert.is_nil(c:find("^LSET"), "no LSET may run against a stale index")
+    end
+  end)
+
+  it("matching LINDEX lets the list edit through", function()
+    open_key_tab_conn({ type = "list", value = { "job-1", "job-2" }, len = 2 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    lindex_reply = "job-1"
+    vim.ui.input = function(opts, cb) cb("edited") end
+    grid_edit.edit_cell(t)
+    assert.is_truthy(vim.wait(200, function()
+      for _, c in ipairs(sent_cmds) do
+        if c:find("^LSET user:1 0 edited$") then return true end
+      end
+      return false
+    end, 5), "LSET must run after a matching LINDEX")
   end)
 
   it("zset score edit issues ZADD", function()

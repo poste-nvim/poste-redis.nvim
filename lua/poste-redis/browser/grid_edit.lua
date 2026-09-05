@@ -85,6 +85,27 @@ local function exec(tab, url, cmd, db, on_ok)
   }, nil, { db = db })
 end
 
+--- Verify the value currently stored at a list index still matches the
+--- rendered cell, then run the write. The grid's index column is the row's
+--- position in the RENDERED result, which only equals the true list index
+--- when the result started at the list head and nothing shifted since — a
+--- stale write would corrupt an unrelated element.
+local function verified_list_write(tab, url, key, idx_0, expected, build_cmd, db, on_ok)
+  session_conn.execute(url, { "LINDEX", key, tostring(idx_0) }, {
+    on_response = function(ev)
+      local current = ev.value and ev.value.value
+      if tostring(current) ~= tostring(expected) then
+        notify("List changed since render — press r to refresh, then retry", vim.log.levels.WARN)
+        return
+      end
+      exec(tab, url, build_cmd(), db, on_ok)
+    end,
+    on_error = function(msg)
+      notify("LINDEX failed: " .. tostring(msg), vim.log.levels.ERROR)
+    end,
+  }, nil, { db = db })
+end
+
 --- Edit the cell under the cursor (i). Index column is not editable.
 --- @param tab table
 function M.edit_cell(tab)
@@ -140,9 +161,10 @@ function M.edit_cell(tab)
           end)
       end
     elseif type_name == "list" then
-      -- row index (1-based in the grid) → LSET at index-1
-      exec(tab, url, { "LSET", key, tostring((row_data[1] or 1) - 1), input }, db,
-        function() refresh(tab) end)
+      -- row index (1-based in the grid) → LSET at index-1, verified first
+      verified_list_write(tab, url, key, (row_data[1] or 1) - 1, raw, function()
+        return { "LSET", key, tostring((row_data[1] or 1) - 1), input }
+      end, db, function() refresh(tab) end)
     elseif type_name == "set" then
       exec(tab, url, { "SREM", key, raw }, db, function()
         exec(tab, url, { "SADD", key, input }, db, function() refresh(tab) end)
@@ -188,8 +210,12 @@ function M.delete_row(tab)
   elseif type_name == "set" then
     exec(tab, url, { "SREM", key, raw }, db, function() refresh(tab) end)
   elseif type_name == "list" then
+    -- sentinel + LREM at the rendered index, verified first (same stale-
+    -- index hazard as edit_cell)
     local idx = (row_data[1] or 1) - 1
-    exec(tab, url, { "LSET", key, tostring(idx), DELETE_SENTINEL }, db, function()
+    verified_list_write(tab, url, key, idx, raw, function()
+      return { "LSET", key, tostring(idx), DELETE_SENTINEL }
+    end, db, function()
       exec(tab, url, { "LREM", key, "1", DELETE_SENTINEL }, db, function() refresh(tab) end)
     end)
   else
