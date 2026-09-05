@@ -327,6 +327,9 @@ function M.search(db_node, conn_url, conn_name, subpath)
     return
   end
   local db = db_node.meta.db
+  -- ignore render caps left by unrelated trees (see scan_keys reset note):
+  -- a previously browsed oversized tree stopped the search after page one
+  tree.last_truncated = 0
   db_node.epoch = (db_node.epoch or 0) + 1
   local epoch = db_node.epoch
 
@@ -375,8 +378,8 @@ function M.search(db_node, conn_url, conn_name, subpath)
           if M.results_build then M.results_build(results, all_keys, conn_name, db) end
           M.schedule_render()
         end
+        -- render cap hit: stop paging, the remaining matches would never show
         if not final_page and tree.last_truncated > 0 then
-          -- render cap hit: stop paging, the remaining matches would never show
           results.loading = false
           -- render BEFORE dispatching the TYPE batch (see scan_keys note)
           M.schedule_render()

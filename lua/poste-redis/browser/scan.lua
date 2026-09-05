@@ -395,6 +395,11 @@ M.build_children = build_children
 --- @param pattern string|nil  MATCH pattern (nil = no filter)
 function M.scan_keys(node, conn_url, conn_name, pattern)
   local db = node.meta.db
+  -- tree.last_truncated is written by every full render, including renders
+  -- of UNRELATED trees: without this reset a previously browsed oversized
+  -- tree made THIS scan stop after page one (missing results). From here on
+  -- only renders of this scan's own growth can set it again.
+  tree.last_truncated = 0
   node.epoch = (node.epoch or 0) + 1
   local epoch = node.epoch
   node.loading = true
@@ -545,6 +550,7 @@ end
 --- @param subpattern string|nil  extra path after the group prefix (search)
 function M.scan_group(node, conn_url, conn_name, subpattern)
   local db = node.meta.db
+  tree.last_truncated = 0  -- ignore caps from unrelated renders (see scan_keys)
   node.epoch = (node.epoch or 0) + 1
   local epoch = node.epoch
   node.loading = true

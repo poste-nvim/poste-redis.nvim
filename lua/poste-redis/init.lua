@@ -7,7 +7,12 @@ function M.setup(opts)
   config.merge(opts)
 
   require("poste-redis.highlights").setup()
+  -- named augroup with clear: a second setup() (re-merge opts) must not
+  -- stack another handler — each would re-apply highlights on ColorScheme,
+  -- and every nvim_set_hl invalidates highlighting (full redraws)
+  local cs_group = vim.api.nvim_create_augroup("PosteRedisColorScheme", { clear = true })
   vim.api.nvim_create_autocmd("ColorScheme", {
+    group = cs_group,
     callback = function() require("poste-redis.highlights").setup() end,
   })
 

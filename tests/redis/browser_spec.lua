@@ -1185,13 +1185,20 @@ describe("poste-redis browser e2e (live redis)", function()
     assert.is_truthy(db._search_results, "search results node missing")
     local results = db._search_results
     assert.equals("bench:a", results.name)  -- name = sub-path; the node is never rendered (display root)
+    -- matches render as a REAL bucketed tree (folders preserved), so the
+    -- key leaves hide under group nodes — collect recursively
     local names = {}
-    for _, k in ipairs(results.children or {}) do
-      names[#names + 1] = k.name
+    local function collect(nodes)
+      for _, k in ipairs(nodes or {}) do
+        if k.node_type == "key" then names[#names + 1] = k.name
+        else collect(k.children) end
+      end
     end
+    collect(results.children)
     assert.is_true(vim.tbl_contains(names, "bench:a:x"), "missing bench:a:x")
     assert.is_true(vim.tbl_contains(names, "bench:a:b:y"), "missing bench:a:b:y")
     assert.is_false(vim.tbl_contains(names, "bench:c:z"), "non-matching key leaked")
+    assert.is_false(vim.tbl_contains(names, "other:1"), "non-matching key leaked")
 
     -- clearing drops the results node; the db children were never touched
     async.search_clear(db)
