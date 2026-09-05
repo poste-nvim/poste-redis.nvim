@@ -21,7 +21,7 @@ fallback — see `requirements.md`.
 
 | File | Role |
 |------|------|
-| `parser.lua` | **The only parser (D1)**: `extract_entries` (continuations joined, quote-aware comments, `USE`), `cursor_entry`, `visual_entries`, `file_entries`, `entry_args` |
+| `parser.lua` | **The only parser (D1)**: `extract_entries` (continuations joined, quote-aware comments, `USE`), `cursor_entry`, `visual_entries`, `file_entries`, `entry_args` `buffer_entries` takes { max_line } for bounded hot-path parses |
 | `exec_run.lua` | `run_async` (stdin JSON → `poste redis-exec` → NDJSON events), `run_file_async` (USE grouping, sequential batches, SELECT-aware db stamped as `ev.db`), `run_sync`, `run_selection_async`, stale-guard + busy bookkeeping |
 | `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`list`; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests; `opts.db` auto-SELECTs on db change |
 | `runner.lua` | `<CR>` / `:PosteRedisRunFile` entry: connects exec_run → buffer → history, spinner indicators, silently preselects the file's declared db for line/selection runs (SELECT result swallowed) |
