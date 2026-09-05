@@ -135,6 +135,10 @@ describe("poste-redis history", function()
     -- never reaches the panel's bottom edge, so the statusline stays visible
     local panel_h = vim.api.nvim_win_get_height(panel_win)
     assert.is_true(vim.api.nvim_win_get_height(history.win()) < panel_h)
+    -- floats inherit the anchor's window options at open time: without the
+    -- reset the sidebar picked up the panel's gray meta winhl
+    assert.equals("Normal:Normal",
+      vim.api.nvim_get_option_value("winhl", { win = history.win() }))
     history.toggle()
     assert.is_false(history.is_open())
   end)

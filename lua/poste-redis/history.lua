@@ -246,6 +246,10 @@ function M.open()
     border = "rounded",
   })
   vim.api.nvim_set_option_value("cursorline", true, { win = win })
+  -- floats inherit the CURRENT window's options at open time; opened from
+  -- the result panel that means winhl=Normal:PosteRedisResultMeta and the
+  -- sidebar's text rendered in the panel's gray meta ink
+  pcall(vim.api.nvim_set_option_value, "winhl", "Normal:Normal", { win = win })
   local km = { buffer = buf, noremap = true, silent = true }
   vim.keymap.set("n", "j", function() move(1) end, km)
   vim.keymap.set("n", "k", function() move(-1) end, km)
