@@ -107,6 +107,8 @@ end
 local key_cache = {}          -- key -> string[] candidates
 local key_fetching = {}       -- fetch key -> true
 local key_callbacks = {}      -- fetch key -> cb[]
+local key_fetch_gen = {}      -- fetch key -> generation (stale-response guard)
+local fetch_gen_counter = 0   -- monotonic; clear_key_cache invalidates via wipe
 
 --- Run queued callbacks for a fetch key with the given candidates.
 local function flush_key(fkey, candidates)
@@ -150,11 +152,19 @@ function M.ensure_key_candidates(conn_url, prefix, db, callback)
   if key_fetching[fkey] then queue_key(fkey, callback); return end
   key_fetching[fkey] = true
   key_callbacks[fkey] = { callback }
+  -- generation guard: clear_key_cache (a mutation elsewhere) may drop this
+  -- fetch's callbacks while the SCAN is in flight, and a NEWER fetch for the
+  -- same prefix can start right after — the stale response must neither
+  -- overwrite the fresh cache nor answer the new fetch's callbacks
+  fetch_gen_counter = fetch_gen_counter + 1
+  local my_gen = fetch_gen_counter
+  key_fetch_gen[fkey] = my_gen
 
   local scan_count = config.config.scan_count or 500
   local cmd = { "SCAN", "0", "MATCH", prefix .. "*", "COUNT", tostring(scan_count) }
   session_conn.execute(conn_url, cmd, {
     on_response = function(ev)
+      if key_fetch_gen[fkey] ~= my_gen then return end
       -- SCAN reply: {type, value: keys[], cursor} (redis_executor SCAN branch)
       local v = ev.value
       local keys = (v and v.value) or {}
@@ -176,6 +186,7 @@ function M.ensure_key_candidates(conn_url, prefix, db, callback)
       flush_key(fkey, candidates)
     end,
     on_error = function()
+      if key_fetch_gen[fkey] ~= my_gen then return end
       flush_key(fkey, {})
     end,
   }, nil, { db = db })
@@ -186,6 +197,7 @@ function M.clear_key_cache()
   key_cache = {}
   key_fetching = {}
   key_callbacks = {}
+  key_fetch_gen = {}  -- in-flight responses fail the gen check and drop
 end
 
 --- Drop the connection-name cache (connections.toml changed).

@@ -172,6 +172,41 @@ describe("poste-redis completion data", function()
     session_conn.execute = orig_execute
   end)
 
+  it("a stale in-flight SCAN cannot answer a post-clear fetch", function()
+    -- clear_key_cache drops an in-flight fetch's callbacks; a NEWER fetch
+    -- for the same prefix may start right after, and the stale response
+    -- must neither flush the new callbacks nor poison the fresh cache
+    local orig_execute = session_conn.execute
+    data.clear_key_cache()
+    local pending_response = nil
+    session_conn.execute = function(_url, cmd, callbacks)
+      -- capture the FIRST fetch's response for later delivery
+      if pending_response == nil then
+        pending_response = function()
+          callbacks.on_response({ value = { value = { "user:OLD" } } })
+        end
+        return "dispatched"
+      end
+      -- second fetch resolves immediately with fresh data
+      vim.schedule(function()
+        callbacks.on_response({ value = { value = { "user:NEW" } } })
+      end)
+      return "dispatched"
+    end
+
+    local first_result, second_result = nil, nil
+    data.ensure_key_candidates("redis://h:6379/0", "user:", 0, function(r) first_result = r end)
+    data.clear_key_cache()  -- mutation invalidates mid-flight
+    data.ensure_key_candidates("redis://h:6379/0", "user:", 0, function(r) second_result = r end)
+
+    pending_response()  -- the stale SCAN lands after the clear
+
+    assert.is_true(vim.wait(500, function() return second_result ~= nil end, 5))
+    assert.same({ "user:NEW" }, second_result, "new fetch must get fresh data")
+    assert.is_nil(first_result, "the cleared fetch's callback stays dead")
+    session_conn.execute = orig_execute
+  end)
+
   it("handles a SCAN error by returning no candidates", function()
     local orig_execute = session_conn.execute
     data.clear_key_cache()
