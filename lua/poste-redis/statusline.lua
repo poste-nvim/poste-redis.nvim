@@ -30,8 +30,27 @@ local function window_ctx()
   return { connection = redis_state.context.connection, db = redis_state.context.db }
 end
 
---- Build (once) + return the highlight group for a connection name, based
---- on its connections.toml entry (color / link / bg).
+local hl_cache = {}      -- conn_name -> { hl_name = string, fp = string }
+local hl_cache_group = nil
+
+--- get_ctx_color runs on EVERY statusline evaluation and every cursor move
+--- (source winbar + browser winbar). nvim_set_hl invalidates global
+--- highlighting and forces a full-screen redraw even when the value is
+--- unchanged, so the definition is only re-applied when the connections.toml
+--- fingerprint (color/link/bg) actually changed; a ColorScheme event drops
+--- the cache so definitions re-derive against the new scheme.
+local function cache_drop_group()
+  if not hl_cache_group then
+    hl_cache_group = vim.api.nvim_create_augroup("PosteRedisCtxHlCache", { clear = true })
+    vim.api.nvim_create_autocmd("ColorScheme", {
+      group = hl_cache_group,
+      callback = function() hl_cache = {} end,
+    })
+  end
+end
+
+--- Build (once per fingerprint) + return the highlight group for a connection
+--- name, based on its connections.toml entry (color / link / bg).
 --- @param conn_name string
 --- @return string|nil highlight group name
 function M.get_ctx_color(conn_name)
@@ -46,10 +65,16 @@ function M.get_ctx_color(conn_name)
   local bg = config.bg
   if not color and not link then return nil end
 
+  local fp = (color or "") .. "\0" .. (link or "") .. "\0" .. (bg or "")
+  local cached = hl_cache[conn_name]
+  if cached and cached.fp == fp then return cached.hl_name end
+
   local hl_name = "PosteRedisCtx" .. conn_name:gsub("[^%w_]", "_")
 
   if link then
     pcall(vim.api.nvim_set_hl, 0, hl_name, { link = link })
+    cache_drop_group()
+    hl_cache[conn_name] = { hl_name = hl_name, fp = fp }
     return hl_name
   end
   if not color then return nil end
@@ -81,6 +106,8 @@ function M.get_ctx_color(conn_name)
   local ok_hl = pcall(vim.api.nvim_set_hl, 0, hl_name, hl_opts)
   if not ok_hl then return nil end
 
+  cache_drop_group()
+  hl_cache[conn_name] = { hl_name = hl_name, fp = fp }
   return hl_name
 end
 
