@@ -102,7 +102,15 @@ function M.detect(line_before)
     return { kind = "connection", prefix = prefix, command = "USE" }
   end
 
-  -- Single token (cursor still in the command name) → command table.
+  -- Empty prefix = the cursor sits AFTER a completed token (trailing
+  -- whitespace): that is an argument position. `GET ` must offer key
+  -- candidates, not the command table again — accepting a command
+  -- completion inserts exactly this trailing space.
+  if prefix == "" then
+    return { kind = "key", prefix = "", command = tokens[1]:upper() }
+  end
+
+  -- Single token with a partial word (cursor still in the command name).
   if #tokens == 1 then
     return { kind = "command", prefix = prefix }
   end

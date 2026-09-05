@@ -26,6 +26,19 @@ describe("poste-redis completion ctx", function()
     assert.equals("get", d.prefix)
   end)
 
+  it("detects an argument position on a trailing space (empty prefix)", function()
+    -- accepting a command completion inserts "GET " with the trailing
+    -- space; the menu must then offer keys, not the command table again
+    local d = ctx.detect("GET ")
+    assert.equals("key", d.kind)
+    assert.equals("", d.prefix)
+    assert.equals("GET", d.command)
+    -- USE keeps its own completion kind
+    local u = ctx.detect("USE ")
+    assert.equals("connection", u.kind)
+    assert.equals("", u.prefix)
+  end)
+
   it("detects a key argument position with a prefix", function()
     local d = ctx.detect("GET user:")
     assert.equals("key", d.kind)
