@@ -8,6 +8,7 @@
 local session_conn = require("poste-redis.session_conn")
 local redis_state = require("poste-redis.state")
 local connections = require("poste-redis.connections")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -35,9 +36,12 @@ local function record(command, opts)
   }, opts or {}))
 end
 
---- Executable redis-cli pipeline for every key matching a glob.
+--- Executable redis-cli pipeline for every key matching a glob. The prefix
+--- is glob-escaped so it matches only itself (a key `a*b:1` under folder
+--- `a*b` must not drag `aXb:1` into the delete).
 local function scan_pipeline(prefix)
-  return ("redis-cli --scan --pattern '%s:*' | xargs redis-cli del"):format(prefix)
+  return ("redis-cli --scan --pattern '%s:*' | xargs redis-cli del")
+    :format(util.glob_escape(prefix))
 end
 
 --- Unified confirm gate for destructive browser actions. Swappable in tests
@@ -203,7 +207,7 @@ function M.delete_prefix(node, ctx)
   end
 
   local function estimate_page(cursor)
-    session_conn.execute(url, { "SCAN", cursor, "COUNT", "1000", "MATCH", prefix .. ":*" }, {
+    session_conn.execute(url, { "SCAN", cursor, "COUNT", "1000", "MATCH", util.glob_escape(prefix) .. ":*" }, {
       on_response = function(ev)
         -- SCAN reply: {type, value: keys[], cursor} (redis_executor SCAN branch)
         for _, k in ipairs(ev.value and ev.value.value or {}) do
@@ -277,7 +281,7 @@ function M.delete_node(node, ctx)
   end
 
   local function next_page(cursor)
-    session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", prefix .. ":*" }, {
+    session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", util.glob_escape(prefix) .. ":*" }, {
       on_response = function(ev)
         for _, k in ipairs(ev.value and ev.value.value or {}) do
           if type(k) == "string" then key_list[#key_list + 1] = k end
@@ -384,7 +388,7 @@ function M.delete_nodes(nodes, ctx)
   for _, job in ipairs(jobs) do
     if job.node.node_type == "group" then
       pending_scans = pending_scans + 1
-      local match = (job.node.meta.prefix or "") .. ":*"
+      local match = util.glob_escape(job.node.meta.prefix or "") .. ":*"
       local db = job.node.meta and job.node.meta.db
       local function scan_next(cursor)
         session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", match }, {

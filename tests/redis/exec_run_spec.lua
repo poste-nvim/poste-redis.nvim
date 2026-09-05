@@ -269,7 +269,7 @@ describe("poste-redis exec_run", function()
     -- opts.connection (the pre-USE default) overrode every USE group and the
     -- whole file ran against the default connection.
     local payloads = {}
-    local orig_run_async = cli.run_async
+    local saved_run_async = cli.run_async
     cli.run_async = function(_cmd, opts)
       payloads[#payloads + 1] = vim.json.decode(opts.stdin).connection
       vim.schedule(function()
@@ -296,7 +296,7 @@ describe("poste-redis exec_run", function()
       "redis://a:6379/0",        -- USE a group keeps its own URL
       "redis://b:6379/0",        -- USE b group keeps its own URL
     }, payloads)
-    cli.run_async = orig_run_async
+    cli.run_async = saved_run_async
     vim.api.nvim_buf_delete(src, { force = true })
     exec_run.cancel()
   end)

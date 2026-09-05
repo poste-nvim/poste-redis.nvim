@@ -5,6 +5,7 @@
 local session_conn = require("poste-redis.session_conn")
 local doc = require("poste-redis.doc")
 local icons = require("poste-redis.icons")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -89,7 +90,8 @@ end
 local function group_info(node, url, cb)
   local prefix = node.meta.prefix or ""
   local db = node.meta.db or 0
-  local match = prefix .. ":*"
+  -- glob-escape: the prefix is a literal key name, not a pattern
+  local match = util.glob_escape(prefix) .. ":*"
   local count = 0
   local memory = 0
   local sampled = 0

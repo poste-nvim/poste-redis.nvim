@@ -19,6 +19,7 @@ local tree = require("poste-redis.browser.tree")
 local config = require("poste-redis.config")
 local constants = require("poste-redis.constants")
 local connections = require("poste-redis.connections")
+local util = require("poste-redis.util")
 
 local M = {}
 -- nested_view is OWNED by browser/tree.lua (flatten_tree reads it on every
@@ -286,8 +287,7 @@ end
 --- @param query string raw committed search query (non-empty)
 --- @return string
 local function fuzzy_match_pattern(query)
-  local esc = query:gsub("([%*%?%[%]\\])", "\\%1")
-  return "*" .. esc .. "*"
+  return "*" .. util.glob_escape(query) .. "*"
 end
 
 --- Every key leaf in a results subtree (bucketed: keys hide under group

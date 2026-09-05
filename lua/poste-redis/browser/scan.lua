@@ -23,6 +23,7 @@ local async = require("poste-redis.browser.async")
 local session_conn = require("poste-redis.session_conn")
 local tree = require("poste-redis.browser.tree")
 local config = require("poste-redis.config")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -569,7 +570,10 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
   local page = 0
 
   local prefix = node.meta.prefix or ""
-  local match = prefix .. ":"
+  -- the prefix is a literal key name: glob metacharacters inside it must not
+  -- widen the MATCH (a key `a*b:x` under folder `a*b` would otherwise match
+  -- `a<anything>b:x` too)
+  local match = util.glob_escape(prefix) .. ":"
   if subpattern and subpattern ~= "" then
     match = match .. subpattern .. "*"
   else

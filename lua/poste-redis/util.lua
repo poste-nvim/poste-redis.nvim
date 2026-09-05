@@ -111,6 +111,16 @@ function M.escape_for_line(s)
   return s:gsub("\r\n", "⏎"):gsub("\n", "⏎"):gsub("\r", "⏎"):gsub("\t", "  ")
 end
 
+--- Escape redis glob metacharacters so a literal string (a key name or a
+--- key-derived prefix) matches only itself in a SCAN `MATCH` pattern.
+--- Redis globs: `*`, `?`, `[`, `]` and the `\` escape itself.
+--- @param s any
+--- @return any
+function M.glob_escape(s)
+  if type(s) ~= "string" then return s end
+  return (s:gsub("[%*%?%[%]\\]", "\\%0"))
+end
+
 --- Raw value for the clipboard (yank cell/column): keeps strings verbatim
 --- (no escape, no quotes), numbers as integers, tables as compact JSON.
 --- @param v any

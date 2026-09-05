@@ -379,6 +379,23 @@ describe("poste-redis browser async grouping", function()
     session_conn.execute = orig_execute
   end)
 
+  it("scan_group glob-escapes a prefix containing glob metacharacters", function()
+    async.set_view_mode("flatten")
+    local session_conn = require("poste-redis.session_conn")
+    local orig_execute = session_conn.execute
+    local seen_cmd
+    session_conn.execute = function(conn_url, cmd, cbs)
+      if cmd[1] == "SCAN" then seen_cmd = cmd end  -- skip the trailing TYPE fetch
+      cbs.on_response({ value = { value = { "a*b:1" }, cursor = "0" } })
+      return "dispatched"
+    end
+    local group = tree.make_group_node("a*b", "c", 0)
+    scan.scan_group(group, "redis://h", "c")
+    -- a raw `a*b:*` would match aXb:* too — the key-derived prefix must be literal
+    assert.same({ "SCAN", "0", "COUNT", "500", "MATCH", "a\\*b:*" }, seen_cmd)
+    session_conn.execute = orig_execute
+  end)
+
   it("scan_group keeps keys flat in flatten view", function()
     async.set_view_mode("flatten")
     local session_conn = require("poste-redis.session_conn")
