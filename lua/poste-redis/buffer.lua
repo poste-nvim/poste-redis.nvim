@@ -364,11 +364,13 @@ end
 --- Render a pre-formatted tab list (browser value viewer pages). Each tab is
 --- a { lines, meta } or { grid, meta } pair already formatted.
 --- @param tab_list table[]
---- @param opts? table { render = boolean }
+--- @param opts? table { render = boolean, active = number } — active (1-based)
+---   selects which tab ends up focused (default 1; the value viewer's
+---   progressive fetch passes the newest page so <Tab> advances to it)
 function M.render_tabs(tab_list, opts)
   opts = opts or {}
   state.tabs = tab_list or {}
-  state.active = 1
+  state.active = math.max(1, math.min(opts.active or 1, #state.tabs))
   for _, t in ipairs(state.tabs) do
     if t.kind == "table" then
       t.page = t.page or 1
@@ -587,12 +589,24 @@ function setup_keymaps()
 end
 
 function M.next_tab()
-  if #state.tabs < 2 then return end
+  if #state.tabs < 2 then
+    -- single-tab panels skip switching, but the value viewer's progressive
+    -- fetch rides <Tab>: one page fetched + cursor not exhausted = fetch more
+    pcall(function()
+      require("poste-redis.browser.value").maybe_fetch_next(1, 1)
+    end)
+    return
+  end
   state.active = state.active + 1
   if state.active > #state.tabs then state.active = 1 end
   state.last_value = state.tabs[state.active].meta.value
   view.render_active()
   fetch_ttl()
+  -- value viewer: landing on the last fetched page with more available
+  -- fetches the next one (the footer's "<Tab> next page")
+  pcall(function()
+    require("poste-redis.browser.value").maybe_fetch_next(state.active, #state.tabs)
+  end)
 end
 
 function M.prev_tab()

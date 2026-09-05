@@ -114,8 +114,10 @@ local function add_page(ev, label)
     end
   end
   view.pages[#view.pages + 1] = out
-  -- Re-render all pages as tabs (render_tabs replaces the tab set)
-  buffer.render_tabs(view.pages, { render = true })
+  -- Re-render all pages as tabs (render_tabs replaces the tab set); the
+  -- viewer stays on the newest page so a progressive <Tab> fetch advances
+  -- to it instead of yanking the user back to page 1
+  buffer.render_tabs(view.pages, { render = true, active = #view.pages })
   -- fire the one-shot first-render hook (tests / browser focus restore)
   if view.first_hook then
     local h = view.first_hook
@@ -126,9 +128,8 @@ end
 
 --- Fetch and append the next page for the current view.
 function M.next_page()
-  if not view then return end
+  if not view or view.done or view.busy then return end
   local v = view
-  if v.done then return end
 
   local cmd = page_command(v.key, v.type, v.cursor)
   if not cmd then return end
@@ -136,11 +137,13 @@ function M.next_page()
 
   local function on_event(ev)
     v.busy = false
-    if v.cursor == "0" then v.done = true end
-
     if v.type == "hash" then
       local entries = ev.value and ev.value.entries or {}
       v.cursor = (ev.value and ev.value.cursor) or "0"
+      -- done is judged from the UPDATED cursor: the start cursor is "0" too,
+      -- so checking before the update marked the view done after page 1 and
+      -- a multi-page hash/set/zset could never load its next page
+      if v.cursor == "0" then v.done = true end
       v.loaded = v.loaded + #entries
       v.total = ev.value and ev.value.len or nil
       add_page(ev, ("%s [hash · page %d]"):format(v.key, #v.pages + 1))
@@ -148,6 +151,7 @@ function M.next_page()
     elseif v.type == "set" or v.type == "zset" then
       local items = ev.value and ev.value.value or {}
       v.cursor = (ev.value and ev.value.cursor) or "0"
+      if v.cursor == "0" then v.done = true end
       v.loaded = v.loaded + #items
       v.total = ev.value and ev.value.len or nil
       add_page(ev, ("%s [%s · page %d]"):format(v.key, v.type, #v.pages + 1))
@@ -174,6 +178,18 @@ function M.next_page()
         { title = redis_state.TITLE })
     end,
   }, nil, { db = v.db })
+end
+
+--- Called after a panel tab switch: when the user lands on the value view's
+--- LAST fetched page while the scan cursor is not exhausted, fetch the next
+--- page — the footer's "<Tab> next page" contract. Without this the viewer
+--- showed the hint but never had another page to switch to.
+--- @param active_idx number  panel's active tab (1-based)
+--- @param tab_count number  panel's total tabs
+function M.maybe_fetch_next(active_idx, tab_count)
+  if not view or view.done or view.busy then return end
+  if active_idx ~= tab_count then return end
+  M.next_page()
 end
 
 --- Load the full value of a truncated string (bypasses preview_max_bytes via
