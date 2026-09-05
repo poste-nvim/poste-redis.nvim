@@ -39,6 +39,7 @@
 --- transport. The browser is scoped to ONE connection + ONE db at a time.
 
 local config = require("poste-redis.config")
+local constants = require("poste-redis.constants")
 local tree = require("poste-redis.browser.tree")
 local async = require("poste-redis.browser.async")
 local scan = require("poste-redis.browser.scan")
@@ -207,7 +208,7 @@ end
 local function pick_db()
   if not state.current_conn then return end
   local items = {}
-  for db = 0, 15 do
+  for db = 0, constants.REDIS_DB_COUNT - 1 do
     items[#items + 1] = { db = db, label = ("db %d"):format(db) }
   end
   vim.ui.select(items, {

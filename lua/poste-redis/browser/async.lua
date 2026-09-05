@@ -17,6 +17,7 @@
 local session_conn = require("poste-redis.session_conn")
 local tree = require("poste-redis.browser.tree")
 local config = require("poste-redis.config")
+local constants = require("poste-redis.constants")
 local connections = require("poste-redis.connections")
 
 local M = {}
@@ -334,6 +335,7 @@ function M.search(db_node, conn_url, conn_name, subpath)
   local results = db_node._search_results
   if not results then
     results = tree.make_group_node(subpath, conn_name, db)
+    -- test sentinel: proves search results never leaked into db children
     results.is_search = true
     results.parent = db_node
     db_node._search_results = results
@@ -444,13 +446,13 @@ function M.fetch_dbs(node, conn_url, cb)
   M.schedule_render()
 
   local dbs = {}
-  local pending = 16
+  local pending = constants.REDIS_DB_COUNT
   local function done()
     if node.epoch ~= epoch then return end
     node.loading = false
     cb(dbs)
   end
-  for db = 0, 15 do
+  for db = 0, constants.REDIS_DB_COUNT - 1 do
     session_conn.execute(conn_url, { "DBSIZE" }, {
       on_response = function(ev)
         if node.epoch ~= epoch then return end

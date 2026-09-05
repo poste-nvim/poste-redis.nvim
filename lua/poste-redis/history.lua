@@ -128,7 +128,6 @@ local function build(width)
     spans[#spans + 1] = {
       cmd = { cmd_s, cmd_s + #cmd },
       time = { #line - 8, #line },
-      ok = not e.error,
     }
   end
   if #lines == 0 then lines[1] = "  (no history)" end

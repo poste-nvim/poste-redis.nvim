@@ -198,6 +198,8 @@ function M.move_cell(drow, dcol)
   local tab = state.tabs[state.active]
   if not tab or tab.kind ~= "table" or not tab.pmeta or tab.pmeta.row_count == 0 then return end
   local row = math.max(1, math.min(tab.cursor.row + drow, tab.pmeta.row_count))
+  -- first content column: 2 (col 1 is the index), falling back to 1 only for
+  -- a degenerate grid with a single column
   local min_col = math.min(2, math.max(tab.pmeta.col_count, 1))
   local col = math.max(min_col, math.min(tab.cursor.col + dcol, tab.pmeta.col_count))
   if row == tab.cursor.row and col == tab.cursor.col then return end

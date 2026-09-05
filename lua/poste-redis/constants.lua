@@ -33,6 +33,11 @@ function M.is_redis_url(url)
   return type(url) == "string" and (url:sub(1, 8) == "redis://" or url:sub(1, 9) == "rediss://")
 end
 
+--- Default redis database count (redis.conf `databases 16`). The browser's
+--- db picker and the DBSIZE probe iterate 0..REDIS_DB_COUNT-1; a server
+--- configured with more dbs simply is not listed beyond this.
+M.REDIS_DB_COUNT = 16
+
 --- Dangerous commands (P2 blacklist). M1: parser flags these so the result
 --- panel shows a yellow warning; full interception lands in M3.
 M.DANGEROUS_COMMANDS = {
