@@ -153,9 +153,14 @@ function M.start(opts)
   end
   conn_name = conn_name or url
 
-  state.reveal_state = { key = key, node = nil }
+  -- Clear any active search BEFORE parking the reveal walk: clear() can
+  -- trigger a render, and render_tree resumes a PENDING reveal against
+  -- whatever tree is on screen — the OLD scope here, not the connection/db
+  -- selected below. The stale walk either failed with "key not found" or
+  -- parked the cursor on a row that select_db then re-built away.
   local searchbar = require("poste-redis.browser.searchbar")
   searchbar.clear()
+  state.reveal_state = { key = key, node = nil }
   local db = opts.db or 0
   if not state.current_conn or state.current_conn.url ~= url or state.current_db ~= db then
     state.current_conn = { name = conn_name, url = url }

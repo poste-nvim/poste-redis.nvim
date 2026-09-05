@@ -134,6 +134,32 @@ describe("poste-redis browser reveal", function()
     end, 5), "the walk must terminate")
     assert.match("not found", notified or "")
   end)
+  it("reveal to another db while search results are shown re-walks the NEW scope", function()
+    -- Regression: reveal.start parked the reveal state BEFORE clearing the
+    -- search; clear's render resumed the walk against the OLD scope's tree
+    -- and cleared the walk, so the final scope never got walked.
+    browser.open({ connection = { name = "stub", url = "redis://127.0.0.1:16479/0" } })
+    local bst = require("poste-redis.browser.state")
+    assert.is_true(vim.wait(2000, function()
+      return bst.current_db_node and bst.current_db_node.children
+        and #bst.current_db_node.children > 0
+    end, 5), "db 0 scan did not finish")
+
+    -- active search results replace the tree on db 0
+    async.search(bst.current_db_node, "redis://127.0.0.1:16479/0", "stub", "user")
+    assert.is_true(vim.wait(2000, function()
+      return bst.current_db_node._search_results ~= nil
+        and bst.current_db_node._search_results.loading == false
+    end, 5), "search results did not finish")
+
+    -- reveal the same-named key under db 1: only the NEW scope's walk is valid
+    browser.reveal({ key = "cache:a", connection = "stub", db = 1 })
+    local node = wait_revealed()
+    assert.equals("key", node.node_type)
+    assert.equals("cache:a", node.meta.key)
+    assert.equals(1, node.meta.db, "the revealed node must live in the requested db")
+    assert.equals(1, browser.current_scope().db)
+  end)
 end)
 
 describe("poste-redis reveal entry points", function()
