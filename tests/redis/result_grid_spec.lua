@@ -283,6 +283,48 @@ describe("poste-redis result grid", function()
       assert.is_nil(tab.sort)
       assert.equals("a", tab.grid.rows[1][2])  -- order untouched
     end)
+
+    it("re-rendering syncs the physical caret to the focus cell", function()
+      open_grid({ { "a", "1" }, { "b", "2" }, { "c", "3" } })
+      local tab = buffer.active_tab()
+      local win = buffer.win()
+      local function caret()
+        return vim.api.nvim_win_get_cursor(win)[1]
+      end
+      -- fresh render parks the caret on the focus cell (data row 1)
+      assert.equals(tab.pmeta.data_start_line, caret())
+      -- user moves to data row 2: focus and caret move together
+      buffer.move_cell(1, 0)
+      assert.equals(tab.pmeta.data_start_line + 1, caret())
+      -- a NEW statement replaces the tabs: focus resets to row 1 and the
+      -- caret must follow (it used to stay on the old line, so pressing k
+      -- at the top felt dead while the focus was already there)
+      open_grid({ { "x", "1" }, { "y", "2" } })
+      tab = buffer.active_tab()
+      assert.equals(1, tab.cursor.row)
+      assert.equals(tab.pmeta.data_start_line, caret(),
+        "caret must track the focus cell after a re-render")
+    end)
+
+    it("render while another window is current does not scroll that window", function()
+      open_grid({ { "a", "1" } })
+      local src = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(src, 0, -1, false, { string.rep("x", 200) })
+      vim.api.nvim_set_current_buf(src)
+      vim.api.nvim_set_option_value("wrap", false, { win = 0 })
+      -- scroll the source window programmatically (zh is unreliable headless)
+      local sv = vim.api.nvim_win_call(0, function() return vim.fn.winsaveview() end)
+      sv.leftcol = 30
+      vim.api.nvim_win_call(0, function() vim.fn.winrestview(sv) end)
+      local leftcol = vim.fn.winsaveview().leftcol
+      assert.is_true(leftcol > 0, "test setup: source window must be scrolled")
+      -- re-render positions the panel caret while the source window is
+      -- current; the source window's horizontal view must stay untouched
+      require("poste-redis.buffer.view").render_active()
+      assert.equals(leftcol, vim.fn.winsaveview().leftcol,
+        "the source window's horizontal view must be untouched")
+      pcall(vim.api.nvim_buf_delete, src, { force = true })
+    end)
   end)
 
   describe("pagination on the panel", function()

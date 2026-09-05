@@ -54,7 +54,10 @@ function M.highlight_cell(tab)
 end
 
 --- Place the physical cursor on the current cell, scrolling horizontally if
---- the cell is off-screen.
+--- the cell is off-screen. Window-scoped: renders also run while another
+--- window (e.g. the .redis source) is current, and winsaveview/winrestview
+--- act on the CURRENT window — calling them bare here would horizontally
+--- scroll whichever window the user is actually looking at.
 function M.position_cursor(tab)
   local pmeta = tab.pmeta
   if not pmeta or pmeta.row_count == 0 or not state.win or not vim.api.nvim_win_is_valid(state.win) then return end
@@ -64,12 +67,12 @@ function M.position_cursor(tab)
   local line_idx = pmeta.data_start_line + tab.cursor.row - 1
   local line = vim.api.nvim_buf_get_lines(state.buf, line_idx - 1, line_idx, false)[1] or ""
   local disp = vim.fn.strdisplaywidth(line:sub(1, range.ext_start))
-  local saved = vim.fn.winsaveview()
+  local saved = vim.api.nvim_win_call(state.win, function() return vim.fn.winsaveview() end)
   local win_width = vim.api.nvim_win_get_width(state.win)
   if disp < saved.leftcol or disp >= saved.leftcol + win_width - 1 then
-    local v = vim.fn.winsaveview()
+    local v = vim.api.nvim_win_call(state.win, function() return vim.fn.winsaveview() end)
     v.leftcol = math.max(0, disp - math.floor(win_width / 4))
-    vim.fn.winrestview(v)
+    vim.api.nvim_win_call(state.win, function() vim.fn.winrestview(v) end)
   end
   pcall(vim.api.nvim_win_set_cursor, state.win, { line_idx, range.ext_start })
 end
@@ -216,6 +219,12 @@ function M.render_grid(tab)
   apply_value_colors(tab)
   M.highlight_cell(tab)
   M.apply_search_highlights(tab)
+  -- Sync the physical caret to the focus cell: a fresh render (new statement
+  -- run, tab switch) resets tab.cursor to {1,2}, but nvim leaves the caret on
+  -- its old line after the full-buffer rewrite — focus and caret would drift
+  -- apart until the next navigation. Window-scoped, so renders that fire
+  -- while the user is in another window (the .redis source) are safe.
+  M.position_cursor(tab)
 end
 
 --- Render the active tab into the buffer + winbar + header float.
