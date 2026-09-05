@@ -149,19 +149,19 @@ describe("poste-redis session_conn", function()
     assert.equals("a", responses[2].value.value)
   end)
 
-  it("prepends a fire-and-forget SELECT when opts.db differs from the session db", function()
+  it("prepends a tracked SELECT when opts.db differs from the session db", function()
     local session = session_conn.get(URL)
     local responses = {}
     session_conn.execute(URL, { "GET", "k" }, {
       on_response = function(ev) responses[#responses + 1] = ev end,
     }, nil, { db = 2 })
-    -- first chansend is the SELECT (seq 0), second is the real command (seq 1)
+    -- first chansend is the SELECT (seq 1), second is the real command (seq 2)
     assert.equals(2, #fake_job.chansend)
     local sel = vim.json.decode(fake_job.chansend[1])
-    assert.equals(0, sel.seq)
+    assert.equals(1, sel.seq)
     assert.same({ "SELECT", "2" }, sel.command)
     local cmd = vim.json.decode(fake_job.chansend[2])
-    assert.equals(1, cmd.seq)
+    assert.equals(2, cmd.seq)
     assert.same({ "GET", "k" }, cmd.command)
 
     -- same db again: no SELECT, just the command
@@ -169,7 +169,7 @@ describe("poste-redis session_conn", function()
       on_response = function() end,
     }, nil, { db = 2 })
     assert.equals(3, #fake_job.chansend)
-    assert.equals(2, vim.json.decode(fake_job.chansend[3]).seq)
+    assert.equals(3, vim.json.decode(fake_job.chansend[3]).seq)
 
     -- db switch: SELECT again
     session_conn.execute(URL, { "GET", "k3" }, {
@@ -178,12 +178,45 @@ describe("poste-redis session_conn", function()
     assert.equals(5, #fake_job.chansend)
     assert.same({ "SELECT", "5" }, vim.json.decode(fake_job.chansend[4]).command)
 
-    -- SELECT reply (seq 0) has no pending callback and is ignored safely
+    -- the SELECT reply routes to its own pending entry (success: no-op) and
+    -- never lands on the command's callbacks
     emit(session, { vim.json.encode({
-      type = "result", seq = 0, command = "SELECT 2", status = "OK", latency_ms = 1,
+      type = "result", seq = 1, command = "SELECT 2", status = "OK", latency_ms = 1,
       value = { type = "string", value = "OK" },
     }) })
     assert.equals(0, #responses)
+  end)
+
+  it("a failed SELECT errors the pipelined command and reverts the session db", function()
+    -- Regression: the SELECT was fire-and-forget (seq 0, no pending entry)
+    -- while session.db was already updated — a failed SELECT (db out of
+    -- range) left every later request silently running on the OLD db while
+    -- the UI claimed the requested one.
+    local session = session_conn.get(URL)
+    local errs, responses = {}, {}
+    session_conn.execute(URL, { "GET", "k" }, {
+      on_response = function(ev) responses[#responses + 1] = ev end,
+      on_error = function(msg) errs[#errs + 1] = msg end,
+    }, nil, { db = 99 })
+    -- SELECT (seq 1) fails; the command (seq 2) reply arrives anyway —
+    -- its pending entry was removed, so it must not report success
+    emit(session, {
+      vim.json.encode({ type = "result", seq = 1, command = "SELECT 99", status = "error",
+        latency_ms = 1, error = "ERR DB index is out of range" }),
+      vim.json.encode({ type = "result", seq = 2, command = "GET k", status = "OK", latency_ms = 1,
+        value = { type = "string", value = "wrong-db" } }),
+    })
+    assert.equals(1, #errs)
+    assert.match("SELECT 99 failed", errs[1])
+    assert.match("out of range", errs[1])
+    assert.equals(0, #responses)
+
+    -- the recorded db was reverted: the next execute re-issues the SELECT
+    session_conn.execute(URL, { "GET", "k" }, {
+      on_response = function() end,
+    }, nil, { db = 99 })
+    local sel = vim.json.decode(fake_job.chansend[#fake_job.chansend - 1])
+    assert.same({ "SELECT", "99" }, sel.command)
   end)
 
   it("fails pending requests when the process exits and drops the session", function()

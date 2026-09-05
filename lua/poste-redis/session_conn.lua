@@ -197,7 +197,9 @@ end
 ---   - max_items, max_bytes: process-level limits (start only)
 ---   - db: number|nil — if set and the session is not already on that db, a
 ---     SELECT is sent first so the command runs in the right database (the
----     long-lived connection keeps SELECT state, P1-5)
+---     long-lived connection keeps SELECT state, P1-5). A failed SELECT
+---     errors the request (the command behind it would run on the old db)
+---     and the next execute re-issues the SELECT.
 --- @return string "dispatched" | "start_failed" | "not_running"
 function M.execute(conn_url, command, callbacks, bufnr, opts)
   callbacks = callbacks or {}
@@ -220,26 +222,50 @@ function M.execute(conn_url, command, callbacks, bufnr, opts)
 
   -- Track + steer SELECT state on the shared connection. The first request
   -- carries the db; later ones switch only when the db actually changes.
+  -- The SELECT gets its own seq + pending entry: recording session.db BEFORE
+  -- the reply is safe only while the reply is tracked — a failed SELECT
+  -- (e.g. a db index out of range) leaves the connection on the old db, and
+  -- the command already pipelined behind it would run THERE while the UI
+  -- claims opts.db (silent wrong-db reads/writes).
   local db = opts.db
+  local cmd_seq  -- assigned after the SELECT seq below; read by its handler
   if db ~= nil and session.db ~= db then
+    local prev_db = session.db
     session.db = db
-    -- Fire-and-forget SELECT; errors surface via the real command's error.
-    local sel_payload = vim.json.encode({ seq = 0, command = { "SELECT", tostring(db) } }) .. "\n"
+    session.seq = session.seq + 1
+    local sel_seq = session.seq
+    session.pending[sel_seq] = {
+      on_response = function() end,  -- SELECT OK: nothing to do
+      on_error = function(msg, event)
+        -- revert so the next execute re-issues the SELECT, and fail the
+        -- command pipelined behind it (its own reply, if any, ran on the
+        -- wrong db and must not surface as success). A newer execute may
+        -- have switched elsewhere already — only undo our own write.
+        if session.db == db then session.db = prev_db end
+        local cmd_cb = cmd_seq and session.pending[cmd_seq] or nil
+        if cmd_seq then session.pending[cmd_seq] = nil end
+        if cmd_cb and cmd_cb.on_error then
+          cmd_cb.on_error("SELECT " .. tostring(db) .. " failed: " .. tostring(msg), event)
+        end
+      end,
+      at = os.time(),
+    }
+    local sel_payload = vim.json.encode({ seq = sel_seq, command = { "SELECT", tostring(db) } }) .. "\n"
     pcall(vim.fn.chansend, session.job_id, sel_payload)
   end
 
   session.seq = session.seq + 1
+  cmd_seq = session.seq
   session.last_active = os.time()
-  local seq = session.seq
-  session.pending[seq] = {
+  session.pending[cmd_seq] = {
     on_response = callbacks.on_response,
     on_error = callbacks.on_error,
     at = os.time(),
   }
-  local payload = vim.json.encode({ seq = seq, command = command }) .. "\n"
+  local payload = vim.json.encode({ seq = cmd_seq, command = command }) .. "\n"
   local sent = vim.fn.chansend(session.job_id, payload)
   if sent <= 0 then
-    session.pending[seq] = nil
+    session.pending[cmd_seq] = nil
     if callbacks.on_error then callbacks.on_error("redis session chansend failed", nil) end
     return "not_running"
   end
