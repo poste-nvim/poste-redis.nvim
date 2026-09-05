@@ -158,6 +158,32 @@ describe("poste-redis result buffer", function()
     assert.equals("local", buffer._tabs()[1].meta.connection)
   end)
 
+  it("reveal_current derives the key from a text tab's command", function()
+    -- gd works from any tab kind: a GET's string reply renders as text but
+    -- still names a key. The derivation must skip non-key commands.
+    buffer.render({
+      { type = "result", seq = 1, command = "GET user:1", status = "OK", latency_ms = 1,
+        value = { type = "string", value = "v" } },
+      { type = "result", seq = 2, command = "CONFIG GET maxmemory", status = "OK", latency_ms = 1,
+        value = { type = "unknown", value = "maxmemory 0" } },
+    }, { render = false })
+    local parser = require("poste-redis.parser")
+    local revealed = {}
+    local browser = require("poste-redis.browser.init")
+    local orig_reveal = browser.reveal
+    browser.reveal = function(opts) revealed[#revealed + 1] = opts; return true end
+    buffer.next_tab()  -- onto the CONFIG text tab: no key to reveal
+    assert.is_false(buffer.reveal_current())
+    buffer.prev_tab()  -- the GET text tab
+    assert.is_true(buffer.reveal_current())
+    browser.reveal = orig_reveal
+    assert.equals(1, #revealed)
+    assert.equals("user:1", revealed[1].key)
+    assert.equals("user:1", parser.key_arg(parser.command_tokens("GET user:1")))
+    assert.is_nil(parser.key_arg(parser.command_tokens("CONFIG GET maxmemory")))
+    assert.is_nil(parser.key_arg(parser.command_tokens("OBJECT ENCODING user:1")))
+  end)
+
   it("dangerous commands produce a tab and do not crash", function()
     local res = { { seq = 1, command = "FLUSHALL", status = "error", latency_ms = 1,
       error = "NOPERM", value = { type = "nil", value = nil } } }

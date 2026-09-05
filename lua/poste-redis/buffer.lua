@@ -284,18 +284,24 @@ function M.sort_column()
 end
 
 --- `gd` on a result tab: open the browser tree at this tab's key (the tab's
---- stamped connection + db scope the jump).
+--- stamped connection + db scope the jump). Grid tabs carry a pre-stamped
+--- key; text tabs derive it from the tab's command on demand.
 --- @return boolean accepted
 function M.reveal_current()
   local tab = state.tabs[state.active]
   local meta = tab and tab.meta or {}
-  if not meta.key or meta.key == "" then
+  local key = meta.key
+  if not key and meta.command and meta.command ~= "" then
+    key = require("poste-redis.parser").key_arg(
+      require("poste-redis.parser").command_tokens(meta.command))
+  end
+  if not key or key == "" then
     vim.notify("This tab has no key to reveal", vim.log.levels.INFO,
       { title = constants.TITLE })
     return false
   end
   return require("poste-redis.browser.init").reveal({
-    key = meta.key,
+    key = key,
     connection = meta.connection,
     db = meta.db,
   })
@@ -321,12 +327,12 @@ function M.render(results, opts)
     -- shows "local db3", not a host
     out.meta.connection = ev.connection_name or opts.connection or out.meta.connection
     -- Context travels with the result: the db the command ran on (stamped by
-    -- exec_run, SELECT-aware) and, for editable grid tabs, the key argument —
-    -- grid_edit needs both to write where the command actually was.
+    -- exec_run, SELECT-aware) and the key argument — grid_edit needs both to
+    -- write where the command actually was, and `gd` reveals it for ANY tab
+    -- kind (a GET's string reply renders as text but still names a key).
     out.meta.db = ev.db or out.meta.db
     if out.kind == "table" then
-      local tokens = parser.command_tokens(out.meta.command)
-      if tokens and #tokens >= 2 then out.meta.key = tokens[2] end
+      out.meta.key = parser.key_arg(parser.command_tokens(out.meta.command))
     end
     if out.kind == "table" then
       out.page = 1

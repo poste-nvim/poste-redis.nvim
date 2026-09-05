@@ -89,14 +89,15 @@ function M.setup_buffer_keymaps(buf)
       local lnum = vim.fn.line(".")
       local line = vim.api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1] or ""
       local tokens = parser.command_tokens(line)
-      if not tokens or #tokens < 2 or tokens[1]:upper() == "USE" or tokens[1]:upper() == "SELECT" then
+      local key = parser.key_arg(tokens)
+      if not key then
         vim.notify("No key to reveal on this line", vim.log.levels.INFO,
           { title = constants.TITLE })
         return
       end
       local ctx = require("poste-redis.context").file_context(buf, lnum)
       require("poste-redis.browser.init").reveal({
-        key = tokens[2],
+        key = key,
         connection = ctx.connection,
         db = ctx.db or 0,
       })
