@@ -83,25 +83,22 @@ function M.get_ctx_color(conn_name)
   if bg then
     if bg:sub(1, 1) == "#" then
       hl_opts.bg = bg
-    else
+    elseif vim.fn.hlexists(bg) == 1 then
       local bg_ok, bg_hl = pcall(vim.api.nvim_get_hl, 0, { name = bg })
       if bg_ok and bg_hl.bg then
         hl_opts.bg = bg_hl.bg
-      else
-        hl_opts.bg = bg
       end
     end
+    -- an unknown bg name is dropped, not passed through: nvim_set_hl would
+    -- reject the whole definition and the connection loses its fg color too
   end
   if color:sub(1, 1) == "#" then
     hl_opts.fg = color
+  elseif vim.fn.hlexists(color) == 1 then
+    -- a highlight-group name links through
+    hl_opts.link = color
   else
-    -- a highlight-group name links through; anything else is a raw color
-    local hl_exists = pcall(vim.api.nvim_get_hl, 0, { name = color })
-    if hl_exists then
-      hl_opts.link = color
-    else
-      hl_opts.fg = color
-    end
+    hl_opts.fg = color
   end
   local ok_hl = pcall(vim.api.nvim_set_hl, 0, hl_name, hl_opts)
   if not ok_hl then return nil end

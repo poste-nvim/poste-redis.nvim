@@ -89,4 +89,30 @@ describe("poste-redis statusline ctx color", function()
     stub_config({ ["late"] = { color = "#98c379" } })
     assert.equals("PosteRedisCtxlate", statusline.get_ctx_color("late"))
   end)
+
+  it("treats an unknown group-name color as a raw value, not a link", function()
+    -- nvim_get_hl returns an empty table for missing groups (truthy): the
+    -- old check linked every bare color to a possibly nonexistent group
+    stub_config({
+      ["raw"] = { color = "98c379" },  -- no leading #, no such group
+    })
+    statusline.get_ctx_color("raw")
+    local calls = _G._set_hl_calls
+    local last = calls[#calls]
+    assert.equals("PosteRedisCtxraw", last.name)
+    assert.equals("98c379", last.opts.fg)
+    assert.is_nil(last.opts.link)
+  end)
+
+  it("drops an invalid bg instead of poisoning the whole definition", function()
+    stub_config({
+      ["badbg"] = { color = "#112233", bg = "NoSuchGroupAtAll" },
+    })
+    statusline.get_ctx_color("badbg")
+    local calls = _G._set_hl_calls
+    local last = calls[#calls]
+    assert.equals("PosteRedisCtxbadbg", last.name)
+    assert.equals("#112233", last.opts.fg)
+    assert.is_nil(last.opts.bg)
+  end)
 end)
