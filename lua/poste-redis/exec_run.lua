@@ -314,6 +314,11 @@ end
 
 --- Run one group (per-connection batch), then dispatch the next — multi-USE
 --- files execute sequentially so batches never interleave in the UI.
+--- Chain validity: run_async's own captured-seq guards stop each batch when a
+--- newer run supersedes it, so this recursion only ever continues while the
+--- run is current. The one extra check covers the SYNCHRONOUS path — a
+--- callbacks.on_group that cancels/supersedes mid-chain (fire-time guards
+--- here compare the seq with itself, so they cannot drop anything).
 --- @param groups table[]
 --- @param index number  1-based group to dispatch
 --- @param opts table
@@ -335,11 +340,19 @@ local function dispatch_group(groups, index, opts, callbacks, all_results, all_s
       start_line = g.start_line,
     }
     all_results[#all_results + 1] = err_ev
+    local seq_before = exec_seq
     guarded(exec_seq, callbacks.on_result, err_ev)()
-    dispatch_group(groups, index + 1, opts, callbacks, all_results, all_summaries)
+    -- the callback may have canceled/superseded the run; only continue the
+    -- synchronous chain while the seq is unchanged
+    if exec_seq == seq_before then
+      dispatch_group(groups, index + 1, opts, callbacks, all_results, all_summaries)
+    end
     return
   end
+  local seq_before = exec_seq
   guarded(exec_seq, callbacks.on_group, g)()
+  -- never dispatch a batch for a seq the callback just superseded
+  if exec_seq ~= seq_before then return end
   local group_opts = vim.tbl_extend("keep", opts or {}, { connection = g.connection })
   M.run_async(g.entries, group_opts, {
     on_start = callbacks.on_start,

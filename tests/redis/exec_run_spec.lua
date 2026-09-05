@@ -434,3 +434,77 @@ describe("poste-redis exec_run", function()
     vim.api.nvim_buf_delete(src, { force = true })
   end)
 end)
+
+--- Regression: dispatch_group evaluated the stale guard at CALLBACK time
+--- (`guarded(exec_seq, ...)` compared the seq with itself), so a canceled
+--- run kept dispatching its remaining USE groups and rendering their results.
+describe("poste-redis exec_run group chain", function()
+  local entries_buf
+
+  before_each(function()
+    entries_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(entries_buf, 0, -1, false, { "USE a", "GET 1", "USE b", "GET 2" })
+  end)
+
+  after_each(function()
+    vim.api.nvim_buf_delete(entries_buf, { force = true })
+  end)
+
+  local function run_file(callbacks)
+    return exec_run.run_file_async(entries_buf, {
+      connection = "redis://fallback",
+      resolve_url = function() return "redis://resolved", nil end,
+    }, callbacks)
+  end
+
+  it("cancel during on_group stops the remaining group chain", function()
+    local orig_run_async = cli.run_async
+    local dispatched = 0
+    cli.run_async = function(_cmd, _opts)
+      dispatched = dispatched + 1
+      return 4242
+    end
+    local results, done_fired = {}, false
+    local groups_seen = 0
+    run_file({
+      on_group = function()
+        groups_seen = groups_seen + 1
+        exec_run.cancel()  -- supersede while the chain is between groups
+      end,
+      on_result = function(ev) results[#results + 1] = ev end,
+      on_done = function() done_fired = true end,
+    })
+    vim.wait(50)
+    cli.run_async = orig_run_async
+    assert.equals(0, dispatched, "no batch may run after the cancel")
+    assert.equals(0, #results, "no results may render after the cancel")
+    assert.is_false(done_fired, "the canceled run must not report done")
+  end)
+
+  it("a newer file run supersedes the previous run's pending results", function()
+    local orig_run_async = cli.run_async
+    cli.run_async = function(_cmd, opts)
+      -- complete synchronously with one result + summary
+      vim.schedule(function()
+        pcall(opts.on_stdout, {
+          vim.json.encode({ type = "result", seq = 1, command = "GET", status = "OK", latency_ms = 1 }),
+          vim.json.encode({ type = "summary", total = 1, failed = 0, elapsed_ms = 1 }),
+        })
+        pcall(opts.on_exit, 0)
+      end)
+      return 4242
+    end
+    local run1_results = {}
+    local run1_done = false
+    run_file({
+      on_result = function(ev) run1_results[#run1_results + 1] = ev end,
+      on_done = function() run1_done = true end,
+    })
+    -- supersede before the scheduled events land
+    exec_run.cancel()
+    vim.wait(50)
+    cli.run_async = orig_run_async
+    assert.equals(0, #run1_results, "superseded run's results must drop")
+    assert.is_false(run1_done)
+  end)
+end)
