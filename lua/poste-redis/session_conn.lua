@@ -204,9 +204,17 @@ function M.execute(conn_url, command, callbacks, bufnr, opts)
   opts = opts or {}
   local session = M.get(conn_url, bufnr, opts)
   if not session then
+    -- the caller's error path must fire even when no process could start
+    -- (missing binary): scan loops otherwise leave nodes loading forever
+    if callbacks.on_error then
+      pcall(callbacks.on_error, "redis session unavailable (start failed)", nil)
+    end
     return "start_failed"
   end
   if not session.alive then
+    if callbacks.on_error then
+      pcall(callbacks.on_error, "redis session is not running", nil)
+    end
     return "not_running"
   end
 

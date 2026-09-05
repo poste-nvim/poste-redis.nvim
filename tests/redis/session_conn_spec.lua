@@ -212,6 +212,8 @@ describe("poste-redis session_conn", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
+
+
   it("handles stdout split across chunks without a trailing newline", function()
     local session = session_conn.get(URL)
     local responses = {}
@@ -229,4 +231,32 @@ describe("poste-redis session_conn", function()
     assert.equals(1, #responses)
     assert.equals("PONG", responses[1].status)
   end)
+
+  it("execute fires on_error when the session cannot start", function()
+    cli.binary = function() return nil end  -- no binary: start() fails
+    local errors = {}
+    local status = session_conn.execute(URL, { "GET", "k" }, {
+      on_error = function(msg) errors[#errors + 1] = msg end,
+    })
+    assert.equals("start_failed", status)
+    assert.equals(1, #errors, "on_error must fire on start failure")
+    assert.truthy(errors[1]:find("unavailable"))
+  end)
+
+  it("execute fires on_error when a dead session cannot be restarted", function()
+    cli.binary = function() return nil end
+    local errors = {}
+    -- a dead pooled session makes get() try a restart; with no binary that
+    -- fails and the caller's on_error must still fire
+    session_conn._test.pool[URL] = {
+      job_id = 1, conn_url = URL, bufs = {}, seq = 0, pending = {},
+      buffer = "", alive = false, created_at = os.time(), last_active = os.time(),
+    }
+    local status = session_conn.execute(URL, { "GET", "k" }, {
+      on_error = function(msg) errors[#errors + 1] = msg end,
+    })
+    assert.equals("start_failed", status)
+    assert.equals(1, #errors, "on_error must fire when the session is dead")
+  end)
+
 end)
