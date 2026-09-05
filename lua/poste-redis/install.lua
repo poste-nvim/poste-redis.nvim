@@ -67,8 +67,11 @@ function M.compile_one(grammar)
   local src_path = grammar_dir .. "/" .. grammar.src
   local obj_path = parser_dir_path .. "/" .. grammar.name .. ".o"
   local include_path = grammar_dir .. "/src"
-  local cmd_obj = string.format("%s -c -I%s -fPIC -O2 -o %s %s", c, include_path, obj_path, src_path)
-  local cmd_so = string.format("%s -shared -o %s %s", c, so_path, obj_path)
+  -- shell-quote every path: a plugin root with spaces broke the compile
+  local cmd_obj = string.format("%s -c -I%s -fPIC -O2 -o %s %s", c,
+    vim.fn.shellescape(include_path), vim.fn.shellescape(obj_path), vim.fn.shellescape(src_path))
+  local cmd_so = string.format("%s -shared -o %s %s", c,
+    vim.fn.shellescape(so_path), vim.fn.shellescape(obj_path))
 
   local out = vim.fn.system(cmd_obj)
   if vim.v.shell_error ~= 0 then

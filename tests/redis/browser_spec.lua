@@ -2300,11 +2300,11 @@ describe("poste-redis browser async flush", function()
     bst.multi_select.selected = { [stale] = true }
     -- select_db needs a context; without a connection it returns early
     bst.current_conn = { name = "stub", url = "redis://stub:6379/0" }
-    local scan = require("poste-redis.browser.scan")
-    local orig_scan_keys = scan.scan_keys
-    scan.scan_keys = function() end  -- no transport in this spec
+    local scan_mod = require("poste-redis.browser.scan")
+    local orig_scan_keys = scan_mod.scan_keys
+    scan_mod.scan_keys = function() end  -- no transport in this spec
     require("poste-redis.browser.init")._test.select_db(0)
-    scan.scan_keys = orig_scan_keys
+    scan_mod.scan_keys = orig_scan_keys
     assert.is_false(bst.multi_select.active)
     assert.equals(0, #vim.tbl_keys(bst.multi_select.selected))
   end)

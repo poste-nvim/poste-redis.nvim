@@ -198,6 +198,13 @@ function M.render_grid(tab)
   local footer = build_footer(tab)
   local lines, pmeta = grid.render_page(tab.grid, tab.layout, tab.page, tab.page_size, footer)
 
+  -- clamp the focused row to the page actually rendered: a short LAST page
+  -- left cursor.row past its row count and the cell highlight vanished
+  -- until the next movement
+  if pmeta.row_count > 0 and tab.cursor.row > pmeta.row_count then
+    tab.cursor.row = pmeta.row_count
+  end
+
   -- The in-buffer header is replaced by a blank line at line 1: the floating
   -- header overlays that blank, leaving every data row visible below it.
   -- Offsets are unchanged (header and blank both occupy line 1), so pmeta's
@@ -227,6 +234,16 @@ function M.render_grid(tab)
   M.position_cursor(tab)
 end
 
+--- Clear every grid overlay namespace (cell highlight, value colors, search
+--- matches) — text tabs have no grid, and extmarks left over from the
+--- previous grid tab would highlight the text at stale positions.
+local function clear_grid_overlays()
+  if not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then return end
+  vim.api.nvim_buf_clear_namespace(state.buf, cell_ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(state.buf, value_ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(state.buf, search_ns, 0, -1)
+end
+
 --- Render the active tab into the buffer + winbar + header float.
 function M.render_active()
   if not state.is_open() then return end
@@ -235,6 +252,7 @@ function M.render_active()
     M.render_grid(tab)
   else
     header.close()
+    clear_grid_overlays()
     local lines = tab and tab.lines or { "" }
     vim.api.nvim_set_option_value("modifiable", true, { buf = state.buf })
     vim.api.nvim_buf_set_lines(state.buf, 0, vim.api.nvim_buf_line_count(state.buf), false, lines)

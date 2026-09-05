@@ -42,7 +42,7 @@ end
 
 --- Push a run / write into history.
 --- @param entry table { command, connection, status, latency_ms, error,
----   lines, kind ("exec"|"write"), yank (executable form for `y`), count }
+---   lines, kind ("exec"|"write"), yank, count, db }
 function M.push(entry)
   history[#history + 1] = {
     command = entry.command or "",
@@ -54,6 +54,7 @@ function M.push(entry)
     kind = entry.kind or "exec",
     yank = entry.yank,
     count = entry.count,
+    db = entry.db,
     ts = entry.ts or os.time(),
   }
   trim()
