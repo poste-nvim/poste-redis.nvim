@@ -230,3 +230,58 @@ describe("poste-redis runner indicators", function()
     assert.is_false(has_sign(src, 0, "PosteIndicatorSuccess"))
   end)
 end)
+
+--- Regression: the visual <CR> keymap used to read the '< '> marks, which
+--- are only written AFTER visual mode ends — a fresh buffer's first selection
+--- read 0/0 ("No command at cursor") and any later run executed the PREVIOUS
+--- selection's lines (stale indicators). The keymap now captures the live `v`
+--- mark + cursor, so feedkeys drives the real capture path here.
+describe("poste-redis visual keymap capture", function()
+  local buffer_setup = require("poste-redis.buffer_setup")
+  local orig_find_binary = state.find_poste_binary
+  local orig_run_selection = exec_run.run_selection_async
+  local src
+
+  before_each(function()
+    src = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, {
+      "ZADD leaderboard:test:demo 920 \"player_a\"",
+      "ZADD leaderboard:test:demo 850 \"player_b\"",
+      "ZADD leaderboard:test:demo 780 \"player_c\"",
+    })
+    vim.api.nvim_set_current_buf(src)
+    buffer_setup.setup_buffer_keymaps(src)
+    state.find_poste_binary = function() return "poste" end
+  end)
+
+  after_each(function()
+    state.find_poste_binary = orig_find_binary
+    exec_run.run_selection_async = orig_run_selection
+  end)
+
+  local function run_keys(keys)
+    local captured
+    exec_run.run_selection_async = function(_buf, mode, opts, _cbs)
+      captured = { mode = mode, entries = opts.entries }
+      return nil
+    end
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), "mtx", false)
+    return captured
+  end
+
+  it("first-ever selection on a fresh buffer runs the selected lines", function()
+    local captured = run_keys("ggVjj<CR>")
+    assert.is_not_nil(captured, "visual keymap did not fire")
+    assert.equals("visual", captured.mode)
+    assert.equals(3, #captured.entries, "all three selected statements ran")
+    assert.equals("ZADD", captured.entries[1].command)
+  end)
+
+  it("bottom-up selection runs the same lines, in file order", function()
+    local captured = run_keys("GVkk<CR>")
+    assert.is_not_nil(captured, "visual keymap did not fire")
+    assert.equals(3, #captured.entries)
+    assert.equals('"player_a"', captured.entries[1].tokens[4])
+    assert.equals('"player_c"', captured.entries[3].tokens[4])
+  end)
+end)

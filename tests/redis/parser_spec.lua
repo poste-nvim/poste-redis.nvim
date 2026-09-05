@@ -163,6 +163,15 @@ describe("poste-redis parser", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
+  it("visual_entries treats zero lines as 'no range' (unset marks)", function()
+    -- Lua 0 is truthy: a bare `not s_line` check let a fresh buffer's unset
+    -- '< '>' marks (line 0) skip the fallback and match nothing
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "GET a" })
+    assert.equals(0, #parser.visual_entries(buf, { start_line = 0, end_line = 0 }))
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
   it("uses the current connection directive until a later USE overrides it", function()
     -- no state in the parser itself; this documents that USE ordering is a
     -- caller concern (exec_run groups by connection). Just verify extraction.

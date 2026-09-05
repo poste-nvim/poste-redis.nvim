@@ -211,7 +211,9 @@ function M.cursor_entry(buf)
 end
 
 --- Entries covered by a visual selection (ordered, deduped).
---- Falls back to current '< '>' marks when no range given.
+--- Falls back to current '< '>' marks when no range given. Zero/negative
+--- lines count as "no range" — Lua 0 is truthy, so a bare `not s_line` let
+--- an unset mark (line 0) slip through and match nothing.
 --- @param buf number
 --- @param opts? table { start_line = number, end_line = number }
 --- @return table[]
@@ -219,12 +221,13 @@ function M.visual_entries(buf, opts)
   opts = opts or {}
   local s_line = opts.start_line
   local e_line = opts.end_line
-  if not s_line or not e_line then
+  if not s_line or s_line < 1 or not e_line or e_line < 1 then
     local start_pos = vim.fn.getpos("'<")
     local end_pos = vim.fn.getpos("'>")
     s_line = start_pos[2]
     e_line = end_pos[2]
   end
+  if not s_line or s_line < 1 or not e_line or e_line < 1 then return {} end
   if e_line < s_line then s_line, e_line = e_line, s_line end
   local entries = M.buffer_entries(buf)
   local result = {}

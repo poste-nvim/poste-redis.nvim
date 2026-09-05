@@ -45,14 +45,15 @@ function M.setup_buffer_keymaps(buf)
   if k then
     vim.keymap.set("n", k, function() runner.run_selection("cursor") end, km)
     vim.keymap.set("v", k, function()
-      -- Capture the selection while it is still live: inside a visual-mode
-      -- callback the '< '>' marks are not readable until visual mode ends, so
-      -- relying on parser.visual_entries' mark fallback dropped the whole
-      -- range and only the cursor's statement ran. poste-db reads the marks
-      -- synchronously at the top of the callback for the same reason.
+      -- The '< '> marks are NOT written while visual mode is live (they hold
+      -- the PREVIOUS selection until it ends — 0 on a fresh buffer), so
+      -- reading them here ran the last selection instead of this one: the
+      -- first-ever selection errored "No command at cursor" and later runs
+      -- showed stale indicators. The `v` mark + the cursor are readable
+      -- mid-visual and track both selection directions, so capture those.
       local range = {
-        start_line = vim.fn.line("'<"),
-        end_line = vim.fn.line("'>"),
+        start_line = vim.fn.line("v"),
+        end_line = vim.fn.line("."),
       }
       runner.run_selection("visual", range)
     end, km)
