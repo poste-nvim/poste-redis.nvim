@@ -68,4 +68,61 @@ describe("poste-redis value viewer", function()
     buffer.next_tab()
     assert.equals(1, #buffer._tabs())
   end)
+
+  it("stream pages advance via the exclusive last id and stop on a short page", function()
+    -- Regression: the stream branch was missing from the page handler, so a
+    -- stream rendered exactly one page and was marked done — the footer's
+    -- paging hint never had a next page behind it.
+    local cmds = {}
+    local pages_served = 0
+    local function ids(n, start)
+      local out = {}
+      for i = start, start + n - 1 do
+        out[#out + 1] = { id = tostring(i) .. "-1", fields = { { "k", "v" } } }
+      end
+      return out
+    end
+    session_conn.execute = function(_url, cmd, cbs)
+      cmds[#cmds + 1] = cmd
+      pages_served = pages_served + 1
+      if pages_served == 1 then
+        cbs.on_response({ value = { type = "stream", value = ids(500, 1), len = 803 } })
+      else
+        cbs.on_response({ value = { type = "stream", value = ids(303, 501), len = 803 } })
+      end
+      return "dispatched"
+    end
+
+    value.view(make_node("st", "stream"), nil, nil)
+    assert.equals(1, #buffer._tabs())
+    buffer.next_tab()  -- lands on the last page: fetches page 2
+    assert.equals(2, pages_served, "the next stream page must be fetched")
+    -- page 2 continues from the exclusive last id of page 1 (Redis 6.2 `(`)
+    assert.same({ "XRANGE", "st", "(500-1", "+", "COUNT", "500" }, cmds[2])
+    assert.equals(2, #buffer._tabs())
+  end)
+
+  it("a slow fetch for a superseded view never lands in the new view's tabs", function()
+    -- Regression: add_page bound to the current global view, so a response
+    -- from key A arriving after key B was opened appended A's page (labeled
+    -- with B's key) into B's tab list.
+    local deferred = nil
+    session_conn.execute = function(_url, _cmd, cbs)
+      if deferred == nil then
+        deferred = cbs  -- key A's fetch: held until the test releases it
+      else
+        cbs.on_response({ value = { type = "string", value = "B" } })
+      end
+      return "dispatched"
+    end
+
+    value.view(make_node("a", "string"), nil, nil)
+    value.view(make_node("b", "string"), nil, nil)
+    assert.equals(1, #buffer._tabs(), "only B's page so far")
+    assert.equals("b", buffer.active_tab().meta.key)
+
+    deferred.on_response({ value = { type = "string", value = "A" } })
+    assert.equals(1, #buffer._tabs(), "A's late page must be dropped")
+    assert.equals("b", buffer.active_tab().meta.key)
+  end)
 end)

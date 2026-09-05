@@ -2,7 +2,8 @@
 ---
 --- TYPE-first rendering with pagination for large collections:
 ---   hash → HSCAN cursor pages, set → SSCAN, zset → ZSCAN
----   list → LRANGE window pages, string → GET (truncated at preview_max_bytes)
+---   list → LRANGE window pages, stream → XRANGE pages (exclusive last id)
+---   string → GET (truncated at preview_max_bytes)
 --- Each page renders as one tab in the result panel; <Tab>/<S-Tab> flip
 --- pages. The page footer shows "loaded N / total M" when the count is
 --- known. Truncated strings show the byte total and a load-full hint.
@@ -91,19 +92,23 @@ local function footer(loaded, total, opts)
 end
 
 --- Render one page event into the view's tab list and update the panel.
+--- Bound to the owning view `v`, not the current global: a fetch from a
+--- previously opened key can land after a new view replaced `view`, and
+--- appending it to the new view's pages would mix two keys in one panel.
+--- @param v table  the view this fetch belongs to
 --- @param ev table result event
 --- @param label string  tab title (page number / type)
-local function add_page(ev, label)
-  if not view then return end
+local function add_page(v, ev, label)
+  if view ~= v then return end
   local out = format.format_result(ev)
   out.meta.title = label
-  out.meta.key = view.key
-  out.meta.connection = view.conn_name
-  out.meta.db = view.db
+  out.meta.key = v.key
+  out.meta.connection = v.conn_name
+  out.meta.db = v.db
   -- append the loaded/total footer: table grids carry it in meta (rendered
   -- under the table), text pages append it to the body lines
-  local f = footer(view.loaded, view.total, {
-    cursor = view.cursor,
+  local f = footer(v.loaded, v.total, {
+    cursor = v.cursor,
     truncated = (ev.value and ev.value.truncated) or false,
   })
   if f ~= "" then
@@ -113,15 +118,15 @@ local function add_page(ev, label)
       out.lines[#out.lines + 1] = f
     end
   end
-  view.pages[#view.pages + 1] = out
+  v.pages[#v.pages + 1] = out
   -- Re-render all pages as tabs (render_tabs replaces the tab set); the
   -- viewer stays on the newest page so a progressive <Tab> fetch advances
   -- to it instead of yanking the user back to page 1
-  buffer.render_tabs(view.pages, { render = true, active = #view.pages })
+  buffer.render_tabs(v.pages, { render = true, active = #v.pages })
   -- fire the one-shot first-render hook (tests / browser focus restore)
-  if view.first_hook then
-    local h = view.first_hook
-    view.first_hook = nil
+  if v.first_hook then
+    local h = v.first_hook
+    v.first_hook = nil
     pcall(h)
   end
 end
@@ -146,7 +151,7 @@ function M.next_page()
       if v.cursor == "0" then v.done = true end
       v.loaded = v.loaded + #entries
       v.total = ev.value and ev.value.len or nil
-      add_page(ev, ("%s [hash · page %d]"):format(v.key, #v.pages + 1))
+      add_page(v, ev, ("%s [hash · page %d]"):format(v.key, #v.pages + 1))
       -- the footer lives in meta; append the loaded/total line to the page
     elseif v.type == "set" or v.type == "zset" then
       local items = ev.value and ev.value.value or {}
@@ -154,19 +159,34 @@ function M.next_page()
       if v.cursor == "0" then v.done = true end
       v.loaded = v.loaded + #items
       v.total = ev.value and ev.value.len or nil
-      add_page(ev, ("%s [%s · page %d]"):format(v.key, v.type, #v.pages + 1))
+      add_page(v, ev, ("%s [%s · page %d]"):format(v.key, v.type, #v.pages + 1))
     elseif v.type == "list" then
       local items = ev.value and ev.value.value or {}
       v.cursor = tostring((tonumber(v.cursor) or 0) + #items)
       v.loaded = v.loaded + #items
       if #items < page_size() then v.done = true end
-      add_page(ev, ("%s [list · page %d]"):format(v.key, #v.pages + 1))
+      add_page(v, ev, ("%s [list · page %d]"):format(v.key, #v.pages + 1))
+    elseif v.type == "stream" then
+      -- XRANGE pages by exclusive last id (Redis 6.2 `(` prefix); an empty
+      -- follow-up page (total was an exact page multiple) ends the view
+      -- without appending an empty tab
+      local items = ev.value and ev.value.value or {}
+      v.loaded = v.loaded + #items
+      if #items < page_size() then
+        v.done = true
+      else
+        local last = items[#items]
+        v.cursor = "(" .. (last and last.id or "0")
+      end
+      if #items > 0 or #v.pages == 0 then
+        add_page(v, ev, ("%s [stream · page %d]"):format(v.key, #v.pages + 1))
+      end
     elseif v.type == "string" then
       v.done = true
-      add_page(ev, ("%s [string]"):format(v.key))
+      add_page(v, ev, ("%s [string]"):format(v.key))
     else
       v.done = true
-      add_page(ev, ("%s [%s]"):format(v.key, v.type))
+      add_page(v, ev, ("%s [%s]"):format(v.key, v.type))
     end
   end
 
