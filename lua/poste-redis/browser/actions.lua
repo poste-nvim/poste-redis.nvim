@@ -405,10 +405,11 @@ end
 
 --- Show / edit the TTL of a key. `t` prompts for seconds:
 ---   positive → EXPIRE; 0 → DEL-equivalent expiry; -1 → PERSIST.
+--- Takes the shared action ctx ({ db_node, render }) for signature parity —
+--- EXPIRE never touches the tree, so neither field is read.
 --- @param node table key node
---- @param ctx table { db_node, render }
-function M.set_ttl(node, ctx)
-  ctx = ctx or {}
+--- @param ctx table|nil unused
+function M.set_ttl(node, _ctx)
   local key = node.meta and node.meta.key
   local url, err = conn_url_for(node)
   if not key or not url then
