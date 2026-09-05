@@ -191,4 +191,55 @@ describe("poste-redis browser actions", function()
     assert.truthy(e.yank:find("redis-cli --scan --pattern 'cache:*'", 1, true),
       "prefix globs yank as scan pipelines")
   end)
+
+  it("delete_key detaches only the deleted node (no db-wide rescan)", function()
+    local parent = tree.make_group_node("user", "stubconn", 0)
+    parent.meta.url = "redis://h:6379/0"
+    parent.loaded = true
+    local k1 = key_node("user:1", "stubconn", 0)
+    local k2 = key_node("user:2", "stubconn", 0)
+    k1.meta.url = "redis://h:6379/0"
+    k1.parent, k2.parent = parent, parent
+    parent.children = { k1, k2 }
+    actions.delete_key(k1, {})
+    assert.is_true(wait_for(function() return #parent.children == 1 end))
+    assert.equals(k2, parent.children[1])
+    for _, c in ipairs(calls) do
+      if c.cmd then
+        assert.not_equals("SCAN", c.cmd[1], "a single delete must not rescan the db")
+      end
+    end
+  end)
+
+  it("deleting a group's last key prunes the emptied loaded group", function()
+    local db_node = tree.make_db_node({ db = 0 }, "stubconn")
+    local parent = tree.make_group_node("user", "stubconn", 0)
+    parent.loaded = true
+    parent.parent = db_node
+    local k1 = key_node("user:1", "stubconn", 0)
+    k1.meta.url = "redis://h:6379/0"
+    k1.parent = parent
+    parent.children = { k1 }
+    db_node.children = { parent }
+    actions.delete_key(k1, {})
+    assert.is_true(wait_for(function() return #(db_node.children or {}) == 0 end))
+  end)
+
+  it("set_ttl leaves the tree alone (EXPIRE never changes the keyspace)", function()
+    local node = key_node("user:1", "stubconn", 0)
+    node.meta.url = "redis://h:6379/0"
+    actions.set_ttl(node, {})
+    assert.is_true(wait_for(function()
+      for _, c in ipairs(calls) do
+        if c.cmd and c.cmd[1] == "EXPIRE" then return true end
+      end
+      return false
+    end))
+    vim.wait(100, function() return false end, 5)
+    for _, c in ipairs(calls) do
+      if c.cmd then
+        assert.not_equals("SCAN", c.cmd[1], "TTL edit must not rescan the db")
+      end
+    end
+  end)
 end)

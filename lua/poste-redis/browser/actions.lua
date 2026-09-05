@@ -52,12 +52,11 @@ local function confirm(question)
   return confirm_impl(question)
 end
 
---- Refresh the db node's key list after a mutation.
+--- Full db rescan of the db node's key list — the refresh fallback for when
+--- a targeted in-place edit cannot be trusted (active search results).
 --- @param db_node table
 --- @param render fun()|nil
 local function reload(db_node, render)
-  -- mutations invalidate completion's key-prefix cache
-  pcall(function() require("poste-redis.completion.data").clear_key_cache() end)
   if not db_node then
     if render then render() end
     return
@@ -70,6 +69,54 @@ local function reload(db_node, render)
   local scan = require("poste-redis.browser.scan")
   db_node.children = nil
   scan.scan_keys(db_node, url, db_node.meta.connection)
+end
+
+--- Refresh the tree after a mutation. Targeted by default: the caller mutates
+--- the tree in place (detach) and only a render runs — a full db-wide rescan
+--- for a one-key delete re-walked the whole keyspace. Falls back to a full
+--- rescan while search results replace the tree: the mutation may live in the
+--- results copy, and only scan_keys rebuilds both sides consistently.
+--- @param db_node table|nil
+--- @param render fun()|nil
+--- @param mutate fun()|nil  in-place tree edit (nil = render-only refresh)
+--- @return boolean targeted  true when the in-place path ran
+local function refresh_tree(db_node, render, mutate)
+  -- mutations invalidate completion's key-prefix cache
+  pcall(function() require("poste-redis.completion.data").clear_key_cache() end)
+  local bst = require("poste-redis.browser.state")
+  if bst.current_db_node and bst.current_db_node._search_results then
+    reload(db_node, render)
+    return false
+  end
+  if mutate then mutate() end
+  if render then render() end
+  return true
+end
+
+--- Remove a node from its parent's child list (and the parent's seg maps).
+--- Prunes a LOADED group left empty, walking up, so `user:` disappears from
+--- the tree when its last key is deleted — without rescanning the db.
+--- @param node table
+local function detach_node(node)
+  local parent = node.parent
+  if not parent or not parent.children then return end
+  local kept = {}
+  for _, ch in ipairs(parent.children) do
+    if ch ~= node then kept[#kept + 1] = ch end
+  end
+  parent.children = kept
+  for _, field in ipairs({ "_segs", "_nsegs" }) do
+    local segs = parent[field]
+    if segs then
+      for seg, g in pairs(segs) do
+        if g == node then segs[seg] = nil end
+      end
+    end
+  end
+  -- the db display root never goes away; only loaded groups collapse
+  if parent.node_type == "group" and parent.loaded and #parent.children == 0 then
+    detach_node(parent)
+  end
 end
 
 ----------------------------------------------------------------------
@@ -96,7 +143,7 @@ function M.delete_key(node, ctx)
       local n = ev.value and ev.value.value
       notify(("Deleted %s (%s key(s))"):format(key, tostring(n or 0)))
       record("DEL " .. key, { connection = node.meta and node.meta.connection, db = node.meta and node.meta.db })
-      reload(ctx.db_node, ctx.render)
+      refresh_tree(ctx.db_node, ctx.render, function() detach_node(node) end)
     end,
     on_error = function(msg)
       notify("DEL failed: " .. tostring(msg), vim.log.levels.ERROR)
@@ -143,7 +190,8 @@ function M.delete_prefix(node, ctx)
             count = #key_list,
             yank = scan_pipeline(prefix),
           })
-          reload(db_node, ctx.render)
+          -- the prefix's whole subtree is gone: drop its row, no rescan
+          refresh_tree(db_node, ctx.render, function() detach_node(node) end)
           return
         end
         session_conn.execute(url, { "DEL", key_list[i] }, {
@@ -198,17 +246,8 @@ function M.delete_node(node, ctx)
           count = #key_list,
           yank = scan_pipeline(prefix),
         })
-        -- drop the node from its parent; reload() re-scans empty groups away
-        local parent = node.parent
-        if parent and parent.children then
-          local kept = {}
-          for _, ch in ipairs(parent.children) do
-            if ch ~= node then kept[#kept + 1] = ch end
-          end
-          parent.children = kept
-          if parent._segs then parent._segs[prefix] = nil end
-        end
-        reload(db_node, ctx.render)
+        -- drop the node from its parent (detach_node prunes emptied groups)
+        refresh_tree(db_node, ctx.render, function() detach_node(node) end)
         return
       end
       session_conn.execute(url, { "DEL", key_list[i] }, {
@@ -310,16 +349,9 @@ function M.delete_nodes(nodes, ctx)
           yank = table.concat(yank_lines, "\n"),
         })
         for _, job in ipairs(jobs) do
-          local parent = job.node.parent
-          if parent and parent.children then
-            local kept = {}
-            for _, ch in ipairs(parent.children) do
-              if ch ~= job.node then kept[#kept + 1] = ch end
-            end
-            parent.children = kept
-          end
+          detach_node(job.node)
         end
-        reload(db_node, ctx.render)
+        refresh_tree(db_node, ctx.render, nil)
         if ctx.on_done then ctx.on_done() end
         return
       end
@@ -411,7 +443,8 @@ function M.set_ttl(node, ctx)
             record(table.concat(cmd, " "), {
               connection = node.meta and node.meta.connection, db = db,
             })
-            reload(ctx.db_node, ctx.render)
+            -- EXPIRE/PERSIST never change the keyspace: the tree stays valid,
+            -- no rescan (a full db scan here froze the browser on every `t`)
           end,
           on_error = function(msg)
             notify("TTL update failed: " .. tostring(msg), vim.log.levels.ERROR)
