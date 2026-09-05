@@ -600,6 +600,10 @@ function M.open(opts)
     vim.cmd(split_command(pos, width))
     state.opened_width = width
     state.browser_win = vim.api.nvim_get_current_win()
+    -- A new split copies the CURRENT window's window-local options: opened
+    -- from the redis_result panel it inherited winhl=Normal:PosteRedisResultMeta
+    -- (the panel's gray meta ink) and every node name rendered gray. Reset it.
+    vim.api.nvim_set_option_value("winhl", "", { win = state.browser_win })
     vim.api.nvim_win_set_buf(state.browser_win, buf)
     vim.api.nvim_set_option_value("winfixwidth", true, { win = state.browser_win })
     -- one row per key: rows clip right instead of wrapping (auto-width grows
