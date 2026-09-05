@@ -7,6 +7,7 @@ local M = {}
 
 --- Show the keymap help for a source buffer in a float.
 local function show_help(buf)
+  local ui = require("poste-redis.ui")
   local items = {
     "poste-redis source keymaps:",
     "  " .. config.format_keymap("redis_source", "run") .. "   run command under cursor / selection",
@@ -25,26 +26,11 @@ local function show_help(buf)
     "  " .. config.format_keymap("redis_result", "sort_column") .. "   sort by the cursor column (none → desc → asc → none)",
     "  " .. config.format_keymap("redis_result", "show_search") .. "   search in results",
   }
-  local width = math.min(72, vim.o.columns - 4)
-  local height = #items + 2
-  local b = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, items)
-  vim.api.nvim_set_option_value("modifiable", false, { buf = b })
-  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = b })
-  local w = vim.api.nvim_open_win(b, true, {
-    relative = "editor",
-    width = width,
-    height = math.min(height, vim.o.lines - 4),
-    row = math.floor((vim.o.lines - math.min(height, vim.o.lines - 4)) / 2),
-    col = math.floor((vim.o.columns - width) / 2),
-    style = "minimal",
-    border = "rounded",
+  ui.centered_float(items, {
     title = "poste-redis help",
-    title_pos = "center",
+    width = math.min(72, vim.o.columns - 4),
+    height = math.min(#items + 2, vim.o.lines - 4),
   })
-  local km = { buffer = b, noremap = true, silent = true }
-  vim.keymap.set("n", "q", function() pcall(vim.api.nvim_win_close, w, true) end, km)
-  vim.keymap.set("n", "<Esc>", function() pcall(vim.api.nvim_win_close, w, true) end, km)
   vim.cmd.redraw()
 end
 

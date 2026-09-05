@@ -8,7 +8,6 @@
 --- bare `DEL prefix:*` glob is not executable), <CR> re-renders a stored
 --- result snapshot (exec runs only).
 local constants = require("poste-redis.constants")
-local config = require("poste-redis.config")
 local util = require("poste-redis.util")
 
 local M = {}
@@ -193,31 +192,21 @@ function M.open()
     vim.api.nvim_set_current_win(win)
     return
   end
-  local width = math.min(60, vim.o.columns - 4)
-  local height = math.min(20, M.count() + 2)
-  buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
-  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
-  vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
-  win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = math.max(3, height),
-    row = math.floor((vim.o.lines - math.max(3, height)) / 2),
-    col = math.floor((vim.o.columns - width) / 2),
-    style = "minimal",
-    border = "rounded",
+  local ui = require("poste-redis.ui")
+  win, buf = ui.centered_float({ "" }, {
     title = "History",
-    title_pos = "center",
+    width = math.min(60, vim.o.columns - 4),
+    height = math.max(3, math.min(20, M.count() + 2)),
+    cursorline = true,
+    keymaps = {
+      { key = "j", fn = function() move(1) end },
+      { key = "k", fn = function() move(-1) end },
+      { key = "<CR>", fn = activate_and_close },
+      { key = "y", fn = yank_and_stay },
+      { key = "q", fn = M.close },
+      { key = "<Esc>", fn = M.close },
+    },
   })
-  vim.api.nvim_set_option_value("cursorline", true, { win = win })
-  local km = { buffer = buf, noremap = true, silent = true }
-  vim.keymap.set("n", "j", function() move(1) end, km)
-  vim.keymap.set("n", "k", function() move(-1) end, km)
-  vim.keymap.set("n", "<CR>", activate_and_close, km)
-  vim.keymap.set("n", "y", yank_and_stay, km)
-  vim.keymap.set("n", "q", M.close, km)
-  vim.keymap.set("n", "<Esc>", M.close, km)
   refresh()
   set_cursor(1)
 end

@@ -3,6 +3,7 @@
 --- tabs). Pure display — mutates nothing; callers pass in the panel state.
 local constants = require("poste-redis.constants")
 local format = require("poste-redis.format")
+local ui = require("poste-redis.ui")
 
 local M = {}
 
@@ -32,35 +33,18 @@ local function pretty_print_json(s)
 end
 
 local function float(lines, title, filetype)
-  local width = math.min(
-    constants.FLOAT_MAX_WIDTH,
-    math.floor(vim.o.columns * constants.FLOAT_WIDTH_RATIO)
-  )
-  local height = math.min(
-    math.floor(vim.o.lines * constants.FLOAT_HEIGHT_RATIO),
-    math.max(6, #lines + 2)
-  )
-  local b = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = b })
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
-  vim.api.nvim_set_option_value("modifiable", false, { buf = b })
-  if filetype then
-    vim.api.nvim_set_option_value("filetype", filetype, { buf = b })
-  end
-  local w = vim.api.nvim_open_win(b, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = math.floor((vim.o.lines - height) / 2),
-    col = math.floor((vim.o.columns - width) / 2),
-    style = "minimal",
-    border = "rounded",
+  ui.centered_float(lines, {
     title = title or "preview",
-    title_pos = "center",
+    width = math.min(
+      constants.FLOAT_MAX_WIDTH,
+      math.floor(vim.o.columns * constants.FLOAT_WIDTH_RATIO)
+    ),
+    height = math.min(
+      math.floor(vim.o.lines * constants.FLOAT_HEIGHT_RATIO),
+      math.max(6, #lines + 2)
+    ),
+    filetype = filetype,
   })
-  local km = { buffer = b, noremap = true, silent = true }
-  vim.keymap.set("n", "q", function() pcall(vim.api.nvim_win_close, w, true) end, km)
-  vim.keymap.set("n", "<Esc>", function() pcall(vim.api.nvim_win_close, w, true) end, km)
 end
 
 --- Show the raw JSON of a result value in a float.
