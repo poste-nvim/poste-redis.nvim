@@ -25,6 +25,7 @@ local function show_help(buf)
     "  " .. config.format_keymap("redis_result", "prev_page") .. " / " .. config.format_keymap("redis_result", "next_page") .. "   previous / next page",
     "  " .. config.format_keymap("redis_result", "sort_column") .. "   sort by the cursor column (none → desc → asc → none)",
     "  " .. config.format_keymap("redis_result", "show_search") .. "   search in results",
+    "  " .. config.format_keymap("redis_result", "history") .. "   history sidebar (j/k previews entries here)",
   }
   ui.centered_float(items, {
     title = "poste-redis help",

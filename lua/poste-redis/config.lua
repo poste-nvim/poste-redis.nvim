@@ -109,6 +109,8 @@ M.defaults = {
       sort_column = "s",
       -- reveal this tab's key in the browser tree (jumps to the node)
       reveal_key = "gd",
+      -- execution history sidebar (floats over this panel's left edge)
+      history = "<leader>rh",
       -- grid editing (poste-db dataset pattern)
       edit_cell = "i",
       add_row = "o",

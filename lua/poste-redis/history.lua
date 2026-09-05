@@ -2,11 +2,16 @@
 --- redis lands here: .redis executions (runner), dataset cell/row writes
 --- (browser/grid_edit), and browser mutations (browser/actions) — batch
 --- deletes aggregate into ONE entry (`DEL prefix:*`) instead of one line per
---- key. Toggling opens a float list: command left-aligned + highlighted,
---- execution time right-aligned in gray; `y` yanks the command (`yank`
---- wins over `command` — batch deletes yank a redis-cli pipeline, since a
---- bare `DEL prefix:*` glob is not executable), <CR> re-renders a stored
---- result snapshot (exec runs only).
+--- key. Toggling opens a sidebar float anchored to the redis_result panel's
+--- left edge (poste-db's <leader>ph pattern — it never covers the statusline):
+---   j/k   move the selection; the entry's result snapshot renders LIVE into
+---         the result panel. Write commands (browser deletes/TTL) have no
+---         snapshot — the panel shows a hint instead.
+---   <CR>  activate the entry (panel keeps it) and close the sidebar
+---   y     yank the command (`yank` wins over `command` — batch deletes yank
+---         a redis-cli pipeline, since a bare `DEL prefix:*` glob is not
+---         executable)
+---   q/<Esc> close
 local constants = require("poste-redis.constants")
 local util = require("poste-redis.util")
 
@@ -18,6 +23,8 @@ local max_entries = constants.HISTORY_MAX
 local buf = nil
 local win = nil
 local hl_ns = vim.api.nvim_create_namespace("poste_redis_history")
+
+local SIDEBAR_WIDTH = 42
 
 --- Set the cap (config.history_max).
 --- @param n number
@@ -69,24 +76,36 @@ function M.clear()
   history = {}
 end
 
---- History index → panel renderer. Entries without a stored snapshot (write
---- commands) have nothing to re-render — point at `y` instead.
+--- Render entry `idx` into the result panel. Entries with a stored snapshot
+--- re-render it; write commands (browser mutations) store no result set, so
+--- the panel shows a hint pointing at `y` instead.
 --- @param idx number  1-based into M.list() (newest first)
-function M.activate(idx)
-  local items = M.list()
-  local entry = items[idx]
-  if not entry then return end
-  if not entry.lines or #entry.lines == 0 then
-    vim.notify("This entry has no result snapshot (write command) — press y to yank it",
-      vim.log.levels.INFO, { title = constants.TITLE })
+--- @param enter boolean|nil  false keeps focus where it is (live j/k preview)
+function M.activate(idx, enter)
+  local e = M.list()[idx]
+  if not e then return end
+  local buffer = require("poste-redis.buffer")
+  if not e.lines or #e.lines == 0 then
+    buffer.render_snapshot({
+      "No result snapshot for this entry.",
+      "",
+      "  " .. tostring(e.command or ""),
+      "",
+      "Write commands (browser mutations) store no result set —",
+      "press y in the history sidebar to yank an executable form.",
+    }, {
+      command = e.command,
+      status = e.status,
+      error = e.error,
+    }, { enter = enter })
     return
   end
-  require("poste-redis.buffer").render_snapshot(entry.lines, {
-    command = entry.command,
-    status = entry.status,
-    latency_ms = entry.latency_ms,
-    error = entry.error,
-  })
+  buffer.render_snapshot(e.lines, {
+    command = e.command,
+    status = e.status,
+    latency_ms = e.latency_ms,
+    error = e.error,
+  }, { enter = enter })
 end
 
 --- Yank an entry's command (the executable `yank` form when present).
@@ -102,7 +121,7 @@ function M.yank(idx)
 end
 
 -----------------------------------------------------------------------
--- Float list
+-- Sidebar float (anchored to the redis_result panel's left edge)
 -----------------------------------------------------------------------
 
 --- Render the float body: `✓ <command padded>  <HH:MM:SS>` — the command
@@ -156,6 +175,11 @@ local function refresh()
         offset - 1, span.time[1], span.time[2])
     end
   end
+  -- the selection under the cursor (linked preview target)
+  local lnum = vim.api.nvim_win_get_cursor(win)[1]
+  if lnum >= 1 and lnum <= #history then
+    vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisHistoryCurrent", lnum - 1, 0, -1)
+  end
 end
 
 local function set_cursor(lnum)
@@ -167,13 +191,17 @@ local function move(rel)
   if not win or not vim.api.nvim_win_is_valid(win) then return end
   local cur = vim.api.nvim_win_get_cursor(win)[1]
   set_cursor(cur + rel)
+  -- linked preview: the result panel shows the entry under the cursor
+  -- (focus stays in the sidebar). Write entries render the hint.
+  M.activate(vim.api.nvim_win_get_cursor(win)[1], false)
+  refresh()
 end
 
 local function activate_and_close()
   if not win or not vim.api.nvim_win_is_valid(win) then return end
   local lnum = vim.api.nvim_win_get_cursor(win)[1]
   if lnum >= 1 and lnum <= M.count() then
-    M.activate(lnum)
+    M.activate(lnum)  -- enter: the panel takes focus after the float closes
   end
   M.close()
 end
@@ -191,21 +219,41 @@ function M.open()
     vim.api.nvim_set_current_win(win)
     return
   end
-  local ui = require("poste-redis.ui")
-  win, buf = ui.centered_float({ "" }, {
-    title = "History",
-    width = math.min(60, vim.o.columns - 4),
-    height = math.max(3, math.min(20, M.count() + 2)),
-    cursorline = true,
-    keymaps = {
-      { key = "j", fn = function() move(1) end },
-      { key = "k", fn = function() move(-1) end },
-      { key = "<CR>", fn = activate_and_close },
-      { key = "y", fn = yank_and_stay },
-      { key = "q", fn = M.close },
-      { key = "<Esc>", fn = M.close },
-    },
+  -- anchor to the result panel's left edge, poste-db sidebar style: inside
+  -- the panel window, so the statusline stays visible underneath
+  local buffer = require("poste-redis.buffer")
+  if not buffer.is_open() then buffer.show_panel(false) end
+  local panel_win = buffer.win()
+  if not panel_win then return end
+
+  local panel_h = vim.api.nvim_win_get_height(panel_win)
+  local winbar_rows = vim.api.nvim_get_option_value("winbar", { win = panel_win }) ~= "" and 1 or 0
+  local height = math.max(2, panel_h - winbar_rows - 3)
+  local width = math.max(20, math.min(SIDEBAR_WIDTH, vim.o.columns - 2))
+
+  buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+  vim.api.nvim_buf_set_name(buf, "poste://redis_history")
+  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  win = vim.api.nvim_open_win(buf, true, {
+    relative = "win",
+    win = panel_win,
+    row = 0,
+    col = 0,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
   })
+  vim.api.nvim_set_option_value("cursorline", true, { win = win })
+  local km = { buffer = buf, noremap = true, silent = true }
+  vim.keymap.set("n", "j", function() move(1) end, km)
+  vim.keymap.set("n", "k", function() move(-1) end, km)
+  vim.keymap.set("n", "<CR>", activate_and_close, km)
+  vim.keymap.set("n", "y", yank_and_stay, km)
+  vim.keymap.set("n", "q", M.close, km)
+  vim.keymap.set("n", "<Esc>", M.close, km)
+
   refresh()
   set_cursor(1)
 end
@@ -233,6 +281,16 @@ function M.is_open()
   return win ~= nil and vim.api.nvim_win_is_valid(win)
 end
 
-M._test = { build = build }
+--- Sidebar window handle (tests).
+function M.win()
+  return win
+end
+
+--- Sidebar buffer handle (tests).
+function M.buf()
+  return buf
+end
+
+M._test = { build = build, sidebar_width = SIDEBAR_WIDTH }
 
 return M

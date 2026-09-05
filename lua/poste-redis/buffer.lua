@@ -401,12 +401,15 @@ end
 --- Opens the panel if needed.
 --- @param lines string[]
 --- @param meta table|nil
-function M.render_snapshot(lines, meta)
+--- @param opts table|nil { enter = boolean|nil } — false leaves focus where
+---   it is (the history sidebar's live j/k preview must not steal focus)
+function M.render_snapshot(lines, meta, opts)
+  opts = opts or {}
   meta = meta or {}
   state.tabs = { { kind = "text", lines = lines or { "" }, meta = meta } }
   state.active = 1
   state.last_value = meta.value
-  M.show_panel()
+  M.show_panel(opts.enter)
   view.render_active()
   fetch_ttl()
 end
@@ -534,6 +537,9 @@ function setup_keymaps()
   if k then vim.keymap.set("n", k, function() M.sort_column() end, km) end
   k = config.get_keymap("redis_result", "reveal_key", "gd")
   if k then vim.keymap.set("n", k, function() M.reveal_current() end, km) end
+  -- history sidebar: floats over this panel's left edge, j/k previews entries
+  k = config.get_keymap("redis_result", "history", "<leader>rh")
+  if k then vim.keymap.set("n", k, function() require("poste-redis.history").toggle() end, km) end
 
   -- Grid editing (poste-db dataset pattern): i edit cell, o add row, dd delete
   local grid_edit = require("poste-redis.browser.grid_edit")

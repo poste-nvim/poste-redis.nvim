@@ -36,8 +36,8 @@ fallback — see `requirements.md`.
 | `buffer/sort.lua` | Column sort on `s` (none → desc → asc → none): numeric-aware stable re-order of grid rows, cursor follows the focused record, sort icon byte-range in the rendered header (link @number) |
 | `result/grid.lua` | **Pure table-grid renderer**: `build_layout` (display widths + right-align), `render_page` (borderless `│` rows + col byte maps + pagination), `compute_matches` / `cell_match_range` (search). No vim ops — reusable in poste.nvim later |
 | `result/header.lua` | Floating fixed header for grid tabs (1-line float over the panel following horizontal scroll, per-char viewport slicing) |
-| `ui.lua` | Shared centered modal float (scratch buffer + rounded border + q/Esc close) — used by the result preview, source help and history list |
-| `history.lua` | In-memory command history: .redis runs + dataset/grid_edit writes + browser mutations (batch deletes aggregate to one `DEL prefix:*`, `yank` carries an executable redis-cli pipeline). Float list (j/k/CR/y/q): command left + highlighted, exec time right-aligned gray |
+| `ui.lua` | Shared centered modal float (scratch buffer + rounded border + q/Esc close) — used by the result preview and source help |
+| `history.lua` | In-memory command history: .redis runs + dataset/grid_edit writes + browser mutations (batch deletes aggregate to one `DEL prefix:*`, `yank` carries an executable redis-cli pipeline). Sidebar float anchored to the result panel's left edge (poste-db `<leader>ph` style): j/k previews the entry's snapshot live in the panel (write commands render a no-snapshot hint), `<CR>` commits + closes, `y` yanks, `q`/`<Esc>` close; command left + highlighted, exec time right-aligned gray |
 
 ### Key browser (`browser/`)
 
