@@ -111,6 +111,7 @@ fallback — see `requirements.md`.
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/completion_spec.lua` | P2-4: ctx detection, command table, conn names, SCAN key-prefix fetch+cache (stubbed session), orchestrator dispatch |
 | `redis/value_spec.lua` | value viewer: per-type page commands, progressive pagination (done from the updated cursor, `<Tab>` fetches the next page, exhausted cursor stops) |
+| `redis/ai_spec.lua` | AI context: confirm gate (dangerous ask + refusal), execute_redis error reporting + idempotent cleanup |
 | `redis/context_spec.lua` | window-scoped context: `entries_context` USE/SELECT walk, `display` formatting (host redaction), `resolve` priority chain (panel/browser/.redis/global) |
 | `redis/docs_spec.lua` | docs data parity with COMMANDS + entry shape, `build_lines` markdown, `resolve_command`, float track_key re-focus, show_doc keymap |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |
