@@ -264,6 +264,43 @@ describe("poste-redis exec_run", function()
     vim.api.nvim_buf_delete(src, { force = true })
   end)
 
+  it("run_file_async keeps each USE group's connection even with a default URL", function()
+    -- Regression: dispatch_group merged the group connection with "keep", so
+    -- opts.connection (the pre-USE default) overrode every USE group and the
+    -- whole file ran against the default connection.
+    local payloads = {}
+    local orig_run_async = cli.run_async
+    cli.run_async = function(_cmd, opts)
+      payloads[#payloads + 1] = vim.json.decode(opts.stdin).connection
+      vim.schedule(function()
+        pcall(opts.on_stdout, {
+          vim.json.encode({ type = "result", seq = 1, command = "GET", status = "OK", latency_ms = 1 }),
+          vim.json.encode({ type = "summary", total = 1, failed = 0, elapsed_ms = 1 }),
+        })
+        pcall(opts.on_exit, 0)
+      end)
+      return 4242
+    end
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "GET pre", "USE a", "GET 1", "USE b", "GET 2" })
+    local done = {}
+    exec_run.run_file_async(src, {
+      connection = "redis://default:6379/0",
+      resolve_url = function(name) return "redis://" .. name .. ":6379/0", nil end,
+    }, {
+      on_done = function() done[#done + 1] = true end,
+    })
+    assert.equals(true, wait_for(done))
+    assert.same({
+      "redis://default:6379/0",  -- commands before any USE
+      "redis://a:6379/0",        -- USE a group keeps its own URL
+      "redis://b:6379/0",        -- USE b group keeps its own URL
+    }, payloads)
+    cli.run_async = orig_run_async
+    vim.api.nvim_buf_delete(src, { force = true })
+    exec_run.cancel()
+  end)
+
   it("run_selection_async resolves connection from USE when opts omit it", function()
     stub_emit({})
     local connections = require("poste-redis.connections")

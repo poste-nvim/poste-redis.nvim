@@ -153,7 +153,7 @@ function M.run_async(entries, opts, callbacks)
   if max_bytes then cmd[#cmd + 1] = "--max-bytes"; cmd[#cmd + 1] = tostring(max_bytes) end
 
   exec_seq = exec_seq + 1
-  local my_seq = exec_seq
+  local run_seq = exec_seq
   busy = true
 
   local results = {}
@@ -168,7 +168,7 @@ function M.run_async(entries, opts, callbacks)
         local ev = decode_line(line)
         if not ev then goto continue end
         if ev.type == "progress" then
-          guarded(my_seq, callbacks.on_progress, ev.index, ev.total, ev.command)()
+          guarded(run_seq, callbacks.on_progress, ev.index, ev.total, ev.command)()
         elseif ev.type == "result" then
           payload_idx = payload_idx + 1
           local is_injected = opts.db and payload_idx == 1
@@ -181,11 +181,11 @@ function M.run_async(entries, opts, callbacks)
           end
           if opts.db then ev.seq = #results + 1 end  -- renumber past the SELECT
           results[#results + 1] = ev
-          guarded(my_seq, callbacks.on_result, ev)()
+          guarded(run_seq, callbacks.on_result, ev)()
         elseif ev.type == "summary" then
           summary = ev
           saw_summary = true
-          guarded(my_seq, callbacks.on_summary, ev)()
+          guarded(run_seq, callbacks.on_summary, ev)()
         end
         ::continue::
       end
@@ -196,16 +196,16 @@ function M.run_async(entries, opts, callbacks)
       end
     end,
     on_exit = function(code)
-      if my_seq ~= exec_seq then return end
-      active[my_seq] = nil
+      if run_seq ~= exec_seq then return end
+      active[run_seq] = nil
       busy = false
       if saw_summary then
-        guarded(my_seq, callbacks.on_done, results, summary)()
+        guarded(run_seq, callbacks.on_done, results, summary)()
       else
         local msg = #stderr > 0 and table.concat(stderr, "\n")
           or ("redis-exec exited with code " .. code)
-        guarded(my_seq, callbacks.on_error, msg, table.concat(stderr, "\n"))()
-        guarded(my_seq, callbacks.on_done, results, summary)()
+        guarded(run_seq, callbacks.on_error, msg, table.concat(stderr, "\n"))()
+        guarded(run_seq, callbacks.on_done, results, summary)()
       end
     end,
   })
@@ -213,15 +213,15 @@ function M.run_async(entries, opts, callbacks)
   if job_id == nil or job_id < 0 then
     busy = false
     exec_seq = exec_seq + 1
-    guarded(my_seq, callbacks.on_error,
+    guarded(run_seq, callbacks.on_error,
       "Failed to start redis-exec — is the poste binary built? Run cargo build --release in poste.nvim", "")()
     return nil
   end
 
-  active[my_seq] = job_id
-  guarded(my_seq, callbacks.on_start, my_seq, job_id)()
+  active[run_seq] = job_id
+  guarded(run_seq, callbacks.on_start, run_seq, job_id)()
 
-  return my_seq
+  return run_seq
 end
 
 -----------------------------------------------------------------------
@@ -353,7 +353,10 @@ local function dispatch_group(groups, index, opts, callbacks, all_results, all_s
   guarded(exec_seq, callbacks.on_group, g)()
   -- never dispatch a batch for a seq the callback just superseded
   if exec_seq ~= seq_before then return end
-  local group_opts = vim.tbl_extend("keep", opts or {}, { connection = g.connection })
+  -- "force": the group's USE-resolved connection must win over the run-level
+  -- default — "keep" let opts.connection override every later USE group, so
+  -- a default URL silently ran the whole file against one connection
+  local group_opts = vim.tbl_extend("force", opts or {}, { connection = g.connection })
   M.run_async(g.entries, group_opts, {
     on_start = callbacks.on_start,
     on_progress = callbacks.on_progress,
@@ -402,7 +405,7 @@ end
 function M.run_selection_async(buf, mode, opts, callbacks)
   opts = opts or {}
   callbacks = callbacks or {}
-  local my_seq = exec_seq
+  local run_seq = exec_seq
   local entries = opts.entries
   if not entries then
     -- derive from the buffer; callers that precompute entries (runner's
@@ -418,7 +421,7 @@ function M.run_selection_async(buf, mode, opts, callbacks)
     end
   end
   if #entries == 0 then
-    guarded(my_seq, callbacks.on_error, "No command at cursor", "")()
+    guarded(run_seq, callbacks.on_error, "No command at cursor", "")()
     return nil
   end
   -- Context inheritance, symmetric with USE: a selection run spawns a fresh
@@ -439,7 +442,7 @@ function M.run_selection_async(buf, mode, opts, callbacks)
     end
   end
   if not opts.connection then
-    guarded(my_seq, callbacks.on_error,
+    guarded(run_seq, callbacks.on_error,
       "No connection resolved — run :PosteRedisConnection or add a USE line", "")()
     return nil
   end
