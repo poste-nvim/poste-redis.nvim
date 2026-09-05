@@ -51,22 +51,48 @@ local function expand(node)
     return
   end
   node.expanded = true
-  if state.render then state.render() end
+  -- no render here: the walk defers rendering and renders once at the end
+end
+
+--- Focus + finish. Kept separate from the walk so a deferred render can
+--- re-enter here (render_tree → resume) without redoing the walk.
+local function finish(node, key)
+  -- no window yet (start() runs before the facade's M.open): stay pending —
+  -- the render that M.open triggers re-enters resume and focuses then
+  if not state.window() then return end
+  if M.reveal_focus(node) then
+    state.reveal_state = nil
+    vim.notify("Revealed " .. key, vim.log.levels.INFO, { title = redis_state.TITLE })
+  end
 end
 
 --- Advance the pending walk by one step. Called from render_tree (facade)
---- after every render, so scan-end renders naturally drive it. Kept pending
---- whenever the key's row is not rendered yet.
+--- after every render, so scan-end renders naturally drive it.
+---
+--- Render discipline: descending ALREADY-LOADED folders is free (no render)
+--- and every expansion only marks the walk dirty — ONE render at the end
+--- materializes all of them, instead of a full render per path level. Lazy
+--- folders scan first; their own flush renders resume the walk.
 local function resume()
   local st = state.reveal_state
   if not st then return end
+
+  -- the deferred render ran: park the cursor on the row we found
+  if st.found then
+    finish(st.found, st.key)
+    return
+  end
+
   local root = state.current_db_node
   if not root or not state.current_conn or root.loading then return end
   local node = st.node or root
   if node ~= root and node.loading then return end  -- a scan on the path streams
 
   if node.children == nil then
-    expand(node)  -- lazy folder: scan; walk resumes on render
+    -- lazy folder: scan; the flush's render resumes the walk
+    scan.scan_group(node, state.current_conn.url, state.current_conn.name)
+    node.expanded = true
+    st.dirty = true
     return
   end
 
@@ -78,17 +104,20 @@ local function resume()
     return
   end
   if child.node_type == "key" then
-    -- focus only lands when the key's row is rendered; until the flush
-    -- paints the expanded folder, keep the walk pending (render_tree retries)
-    if M.reveal_focus(child) then
-      state.reveal_state = nil
-      vim.notify("Revealed " .. st.key, vim.log.levels.INFO, { title = redis_state.TITLE })
+    st.found = child
+    if st.dirty then
+      -- one render materializes every expansion made during the walk;
+      -- render_tree re-enters resume, which takes the finish branch
+      if state.render then state.render() end
+    else
+      resume()  -- nothing changed: the row is already on screen
     end
     return
   end
-  -- a folder on the path: open it, then descend (expand renders → resume)
+  -- a folder on the path: open it (no render), then descend
   if not child.expanded or child.children == nil then
     expand(child)
+    st.dirty = true
   end
   st.node = child
   resume()
@@ -133,8 +162,6 @@ function M.start(opts)
     state.conn_picker.active = false
     state.conn_picker.nodes = {}
     state.select_db(db)
-  else
-    if state.render then state.render() end
   end
   resume()
   return true

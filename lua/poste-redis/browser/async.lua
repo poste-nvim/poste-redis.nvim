@@ -410,7 +410,9 @@ function M.search_clear(db_node)
   if not db_node or not db_node._search_results then return end
   db_node.epoch = (db_node.epoch or 0) + 1
   db_node._search_results = nil
-  M.schedule_render()
+  -- no scheduled render: every caller renders synchronously right after
+  -- (searchbar.clear / toggle_view re-scan / commit), and a debounced render
+  -- here made search_clear's tree restoration lag a frame behind the call
 end
 
 --- Load the connection list from connections.toml (redis dialect only).

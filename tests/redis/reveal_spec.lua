@@ -107,6 +107,24 @@ describe("poste-redis browser reveal", function()
     assert.equals("plain", node.meta.key)
   end)
 
+  it("re-revealing in an already expanded tree costs no full render", function()
+    browser.reveal({ key = "user:1", connection = "stub", db = 0 })
+    wait_revealed()
+    local renders = 0
+    local orig = async.render_hook
+    async.render_hook = function()
+      renders = renders + 1
+      orig()
+    end
+    -- the user folder is already expanded and user:2 already on screen:
+    -- the walk descends without expanding anything, so no render is needed
+    browser.reveal({ key = "user:2", connection = "stub", db = 0 })
+    local node = wait_revealed()
+    async.render_hook = orig
+    assert.equals("user:2", node.meta.key)
+    assert.equals(0, renders, "an already-materialized path must not re-render")
+  end)
+
   it("gives up with a notice when the key is not in the tree", function()
     local notified
     vim.notify = function(msg) notified = msg end

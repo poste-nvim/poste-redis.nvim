@@ -145,11 +145,22 @@ M.cancel = search_cancel
 
 --- Clear any active search results and restore the tree. The facade exposes
 --- this as M.search_clear (public <Esc> binding + programmatic use).
+--- Renders only when the display actually changes: async.search_clear
+--- schedules its own restoring render when results existed, and a no-op
+--- clear (no results, bar idle) leaves the tree untouched.
 function M.clear()
+  local was_active = state.search_active
   state.search_active = false
   state.search_query = ""
-  if state.current_db_node then async.search_clear(state.current_db_node) end
-  if state.render then state.render() end
+  local node = state.current_db_node
+  local had_results = node ~= nil and node._search_results ~= nil
+  local needs_render = was_active or had_results
+  if node then
+    async.search_clear(node)
+  end
+  -- synchronous restore: a debounced render made search_clear's tree
+  -- restoration lag a frame behind the call (visible as stale rows)
+  if needs_render and state.render then state.render() end
   M.clamp_cursor()  -- the caret may sit on the pinned bar row after <CR>/<Esc>
 end
 
