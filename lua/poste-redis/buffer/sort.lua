@@ -109,8 +109,10 @@ end
 --- header line. Positions come from walking the `│` separators — widths
 --- cannot be accumulated arithmetically because multibyte glyphs (the nerd
 --- icons) make byte lengths differ from display widths. The sorted column's
---- cell renders as `<space> <name> <icon> <pad> <space>`: the icon is the
---- last `#icon` bytes before the cell's trailing space.
+--- cell renders as `<space> <name> <icon> <pad> <space>`: the pad after the
+--- icon is whatever the column width has left over, so the icon is located
+--- by plain find inside the cell region, not by counting back from the end
+--- (counting back highlighted padding on any column wider than its header).
 --- @param header_line string  the rendered header line (tab.header_padded)
 --- @param sort table|nil { col, dir }
 --- @return table|nil { start, end_ }
@@ -120,17 +122,19 @@ function M.icon_range(header_line, sort)
   if not icon then return nil end
   -- sep[1] closes the left padding; the sorted column's cell sits between
   -- sep[col] and sep[col + 1]
-  local region_end = nil  -- 0-based byte of sep[col + 1]
+  local sep_col, region_end = nil, nil  -- 1-based byte of sep[col], 0-based of sep[col + 1]
   local from = 1
-  for _ = 1, sort.col + 1 do
+  for i = 1, sort.col + 1 do
     local s = header_line:find("│", from, true)
     if not s then return nil end
+    if i == sort.col then sep_col = s end
     region_end = s - 1
     from = s + 3  -- "│" is 3 bytes
   end
-  if not region_end then return nil end
-  local e = region_end - 1  -- exclusive end: skip the cell's trailing space
-  return { e - #icon, e }
+  if not sep_col or not region_end then return nil end
+  local s = header_line:find(icon, sep_col, true)
+  if not s or s - 1 >= region_end then return nil end
+  return { s - 1, s - 1 + #icon }
 end
 
 --- Decorated header columns: the sorted column's name gains ` <icon>` so the

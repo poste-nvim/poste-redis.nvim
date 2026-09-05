@@ -275,6 +275,20 @@ describe("poste-redis result grid", function()
       assert.equals("value", tab.layout.columns[3])
     end)
 
+    it("the sort icon highlight survives header right-padding (wide data cells)", function()
+      -- a data cell wider than "value ▼" leaves pad between the icon and the
+      -- cell's trailing space; counting back from the separator highlighted
+      -- that padding instead of the icon bytes
+      open_grid({ { "bob", "a-very-long-value-wider-than-header" }, { "alice", "99" } })
+      local tab = buffer.active_tab()
+      buffer.move_cell(0, 1)  -- value column
+      buffer.sort_column()
+      local icon = sort.icon(tab.sort.dir)
+      local hl = tab.sort_icon_hl
+      assert.equals(icon, tab.header_padded:sub(hl[1] + 1, hl[2]),
+        "icon range must land on the icon, not on the cell's padding")
+    end)
+
     it("s on the index column does nothing", function()
       open_grid({ { "a", "1" }, { "b", "2" } })
       local tab = buffer.active_tab()
