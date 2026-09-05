@@ -31,21 +31,35 @@ local M = {}
 --- (and restarts the db scope), each SELECT within the current section picks
 --- the nearest db. An entry ON the cursor line counts, so sitting on a
 --- `USE foo` / `SELECT 3` line already previews what it establishes.
+---
+--- Entries are sorted by start_line (the parser walks lines in order), so
+--- the cut point is found by binary search and the effective context by a
+--- short backward scan (the last USE/SELECT at or above the cursor decides;
+--- a SELECT contributes its db, then the nearest USE above contributes the
+--- connection) — O(log n + distance) instead of walking every entry above
+--- the cursor on each statusline redraw.
 --- @param entries table[] parser entries
 --- @param line_1 number 1-based line (context of this line and below)
 --- @return { connection = string|nil, db = number|nil }
 function M.entries_context(entries, line_1)
   entries = entries or {}
+  -- binary search: lo = first entry fully past the cursor
+  local lo, hi = 1, #entries + 1
+  while lo < hi do
+    local mid = math.floor((lo + hi) / 2)
+    local e = entries[mid]
+    if e.start_line and e.start_line <= line_1 then lo = mid + 1 else hi = mid end
+  end
+
   local conn, db
-  for _, e in ipairs(entries) do
-    if not (e.start_line and e.start_line <= line_1) then break end
+  for i = lo - 1, 1, -1 do
+    local e = entries[i]
     if e.kind == "use" then
-      -- a bare USE (selector prompt) unpins: falls back to the global context
       conn = e.connection
-      db = nil
+      break  -- the nearest USE above decides; its db scope restarts here
     elseif e.kind == "command" and e.command == "SELECT" and e.tokens and e.tokens[2] then
       local n = tonumber(e.tokens[2])
-      if n then db = n end
+      if n and db == nil then db = n end  -- the nearest SELECT below the USE
     end
   end
   return { connection = conn, db = db }
@@ -55,20 +69,42 @@ end
 -- Buffer level (cached parse)
 -----------------------------------------------------------------------
 
-local entry_cache = {}  -- buf -> { tick, entries }
+local entry_cache = {}  -- buf -> { tick, entries, parsed_upto }
 local drop_group
 
 --- Parse a buffer's entries, cached on changedtick (statuslines/winbars
---- resolve on every cursor move; re-parsing a large file each time is waste).
+--- resolve on every cursor move / keystroke; re-parsing a large file each
+--- time is waste). The parse is also bounded by the cursor line and extends
+--- incrementally: an edit re-parses lines 1..cursor, cursor moves down parse
+--- only the extension, cursor moves up are free.
 --- @param buf number
+--- @param line_1 number
 --- @return table[]
-local function buffer_entries_cached(buf)
+local function buffer_entries_cached(buf, line_1)
   if not vim.api.nvim_buf_is_valid(buf) then return {} end
   local tick = vim.api.nvim_buf_get_changedtick(buf)
   local c = entry_cache[buf]
-  if c and c.tick == tick then return c.entries end
-  local entries = parser.buffer_entries(buf)
-  entry_cache[buf] = { tick = tick, entries = entries }
+  if c and c.tick == tick and line_1 <= c.parsed_upto then
+    return c.entries
+  end
+  local entries
+  if c and c.tick == tick and line_1 > c.parsed_upto then
+    -- extend: parse ONLY the extension and shift its line numbers; the
+    -- prefix entries stay untouched. A continuation line at the boundary
+    -- parses as a standalone fragment, which is harmless — fragments are
+    -- never USE/SELECT.
+    entries = c.entries
+    local ext_lines = vim.api.nvim_buf_get_lines(buf, c.parsed_upto, line_1, false)
+    local more = parser.extract_entries(table.concat(ext_lines, "\n"))
+    for _, e in ipairs(more) do
+      e.start_line = e.start_line and (e.start_line + c.parsed_upto) or e.start_line
+      e.end_line = e.end_line and (e.end_line + c.parsed_upto) or e.end_line
+      entries[#entries + 1] = e
+    end
+  else
+    entries = parser.buffer_entries(buf, { max_line = line_1 })
+  end
+  entry_cache[buf] = { tick = tick, entries = entries, parsed_upto = math.max(line_1, c and c.parsed_upto or 0) }
   if not drop_group then
     drop_group = vim.api.nvim_create_augroup("PosteRedisCtxCache", { clear = true })
     vim.api.nvim_create_autocmd("BufDelete", {
@@ -85,7 +121,7 @@ end
 --- @param line_1 number
 --- @return { connection = string|nil, db = number|nil }
 function M.file_context(buf, line_1)
-  return M.entries_context(buffer_entries_cached(buf), line_1)
+  return M.entries_context(buffer_entries_cached(buf, line_1), line_1)
 end
 
 -----------------------------------------------------------------------

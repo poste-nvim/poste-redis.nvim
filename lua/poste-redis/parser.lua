@@ -181,11 +181,22 @@ local function entry_index_at(entries, lnum)
   return nil
 end
 
---- Extract entries from a buffer's lines.
+--- Extract entries from a buffer's lines. Hot callers (context resolution
+--- re-resolves on every cursor move / keystroke) can pass `max_line` to skip
+--- parsing everything past it — entries beyond the cursor cannot affect the
+--- effective USE/SELECT at it. A continuation line at the boundary parses as
+--- a standalone fragment, which is harmless: fragments are never USE/SELECT.
 --- @param buf number
+--- @param opts? table { max_line = number }  parse only lines 1..max_line
 --- @return table[]
-function M.buffer_entries(buf)
-  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+function M.buffer_entries(buf, opts)
+  opts = opts or {}
+  local lines
+  if opts.max_line then
+    lines = vim.api.nvim_buf_get_lines(buf, 0, opts.max_line, false)
+  else
+    lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  end
   return M.extract_entries(table.concat(lines, "\n"))
 end
 

@@ -172,3 +172,22 @@ describe("poste-redis parser", function()
     assert.equals("b", entries[3].connection)
   end)
 end)
+
+describe("poste-redis parser bounded buffer_entries", function()
+  it("parses only lines 1..max_line when bounded", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      "USE prod",
+      "SELECT 3",
+      "SET k v",
+      "GET k",
+    })
+    local bounded = parser.buffer_entries(buf, { max_line = 2 })
+    assert.equals(2, #bounded)
+    assert.equals("use", bounded[1].kind)
+    assert.equals("SELECT", bounded[2].command)
+    -- unbounded still sees everything
+    assert.equals(4, #parser.buffer_entries(buf))
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)

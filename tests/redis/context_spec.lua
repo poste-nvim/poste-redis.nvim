@@ -198,3 +198,47 @@ describe("poste-redis context", function()
     end)
   end)
 end)
+
+describe("poste-redis context file_context cache", function()
+  local parser = require("poste-redis.parser")
+
+  it("parses once for cursor moves within the parsed range; extends downward", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      "USE prod",
+      "SELECT 3",
+      "SET a:1 v",
+      "GET a:1",
+      "GET a:2",
+    })
+    local calls = 0
+    local orig_extract = parser.extract_entries
+    parser.extract_entries = function(content)
+      calls = calls + 1
+      return orig_extract(content)
+    end
+
+    local ctx = require("poste-redis.context").file_context(buf, 5)
+    assert.equals("prod", ctx.connection)
+    assert.equals(3, ctx.db)
+    assert.equals(1, calls, "first resolve parses once")
+
+    -- cursor moves UP: free (the parsed prefix already covers it)
+    require("poste-redis.context").file_context(buf, 2)
+    assert.equals(1, calls, "moving up must not re-parse")
+
+    -- cursor moves DOWN past the parsed range: parse only the extension
+    vim.api.nvim_buf_set_lines(buf, 5, 5, false, { "GET a:3" })  -- new line 6
+    require("poste-redis.context").file_context(buf, 6)
+    assert.equals(2, calls, "extension parses only the new lines")
+
+    -- an edit invalidates the whole cache: bounded by the cursor line
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "USE staging" })
+    local ctx2 = require("poste-redis.context").file_context(buf, 6)
+    assert.equals(3, calls)
+    assert.equals("staging", ctx2.connection)
+
+    parser.extract_entries = orig_extract
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)

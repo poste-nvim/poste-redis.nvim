@@ -2263,8 +2263,6 @@ end)
 
 describe("poste-redis browser async flush", function()
   it("coalesces queued appends to the same node into one append call", function()
-    local async = require("poste-redis.browser.async")
-    local tree = require("poste-redis.browser.tree")
     -- drain any dirty flag left by earlier tests: the flush prefers a full
     -- render over queued appends (correctly — the nodes are already in
     -- node.children), which would discard this test's own queue

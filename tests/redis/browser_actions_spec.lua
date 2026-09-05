@@ -73,7 +73,6 @@ describe("poste-redis browser actions", function()
   it("delete_key confirms then DELs the key", function()
     local node = key_node("user:1", "my-redis", 0)
     node.meta.url = "redis://h:6379/0"
-    local deleted = false
     actions.delete_key(node, {})
     assert.is_true(wait_for(function() return #calls >= 1 end))
     assert.same({ "DEL", "user:1" }, calls[1].cmd)
