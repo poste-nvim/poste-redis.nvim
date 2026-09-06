@@ -47,7 +47,7 @@ describe("poste-redis history", function()
     history.set_max_history(200)
   end)
 
-  it("toggle opens a float window; an open toggle re-focuses and close tears it down", function()
+  it("toggle opens a sidebar window; an open toggle re-focuses and close tears it down", function()
     history.push(entry())
     assert.is_false(history.is_open())
     history.toggle()
@@ -166,29 +166,28 @@ describe("poste-redis history", function()
     buffer.close()
   end)
 
-  it("toggle opens the sidebar anchored beside the result panel", function()
+  it("toggle opens the sidebar beside the result panel", function()
     history.push(entry())
     local buffer = require("poste-redis.buffer")
     history.toggle()
     assert.is_true(history.is_open())
     local panel_win = buffer.win()
     assert.is_not_nil(panel_win)
+    -- the sidebar is a REAL vertical split of the panel window: a full-width
+    -- bottom split cannot be narrowed any other way (nvim_win_set_width
+    -- silently no-ops on a frame row without a vertical split), so the freed
+    -- columns are real and the panel's data stays fully visible
     local config = vim.api.nvim_win_get_config(history.win())
-    assert.equals("win", config.relative, "sidebar anchors to the result panel window")
-    assert.equals(panel_win, config.win)
-    -- nvim returns the col as a number or a { [anchor] = col } table
-    local col = type(config.col) == "table" and config.col[false] or config.col
-    assert.equals(vim.api.nvim_win_get_width(panel_win), col,
-      "pinned just past the panel's (narrowed) right edge")
-    -- the panel is a full-width split: it narrows while the sidebar is open
-    -- so the float lands in freed columns instead of covering data
+    assert.equals("", config.relative, "sidebar is a real split, not a float")
     assert.is_true(vim.api.nvim_win_get_width(panel_win) < vim.o.columns,
       "panel narrowed to make room for the sidebar")
-    -- never reaches the panel's bottom edge, so the statusline stays visible
-    local panel_h = vim.api.nvim_win_get_height(panel_win)
-    assert.is_true(vim.api.nvim_win_get_height(history.win()) < panel_h)
-    -- floats inherit the anchor's window options at open time: without the
-    -- reset the sidebar picked up the panel's gray meta winhl
+    assert.equals(vim.o.columns,
+      vim.api.nvim_win_get_width(panel_win)
+        + 1  -- the split's vertical separator column
+        + vim.api.nvim_win_get_width(history.win()),
+      "panel + separator + sidebar span the panel's row")
+    -- a vsplit inherits the panel's window-local options: without the reset
+    -- the sidebar picked up the panel's gray meta winhl
     assert.equals("Normal:Normal",
       vim.api.nvim_get_option_value("winhl", { win = history.win() }))
     history.close()

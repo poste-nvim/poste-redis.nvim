@@ -2,10 +2,12 @@
 --- redis lands here: .redis executions (runner), dataset cell/row writes
 --- (browser/grid_edit), and browser mutations (browser/actions) — batch
 --- deletes aggregate into ONE entry (`DEL prefix:*`) instead of one line per
---- key. Toggling opens a sidebar float beside the redis_result panel: the
---- panel is a full-width split, so while the sidebar is open the panel is
---- NARROWED by the sidebar's footprint and the float anchors in the freed
---- columns — the panel's data stays fully visible (width restored on close):
+--- key. Toggling opens a sidebar beside the redis_result panel as a REAL
+--- vertical split of the panel window: a full-width bottom split cannot be
+--- narrowed any other way (`nvim_win_set_width` silently no-ops on a frame
+--- row without a vertical split), so only frame mechanics free the columns —
+--- the panel is narrowed while the sidebar is open and gets its width back
+--- automatically on close, its data staying fully visible:
 ---   j/k   move the selection; the entry's result snapshot renders LIVE into
 ---         the result panel. Write commands (browser deletes/TTL) have no
 ---         snapshot — the panel shows a hint instead.
@@ -30,8 +32,6 @@ local win = nil
 local hl_ns = vim.api.nvim_create_namespace("poste_redis_history")
 
 local SIDEBAR_WIDTH = 42
--- Panel width borrowed by the open sidebar (restored on close).
-local panel_orig_width = nil
 
 --- Set the cap (config.history_max).
 --- @param n number
@@ -154,7 +154,7 @@ function M.yank(idx)
 end
 
 -----------------------------------------------------------------------
--- Sidebar float (beside the result panel, which narrows to make room)
+-- Sidebar (beside the result panel as a real split of the panel row)
 -----------------------------------------------------------------------
 
 --- Render the float body: `✓ <command padded>  <HH:MM:SS>` — the command
@@ -252,46 +252,51 @@ function M.open()
     vim.api.nvim_set_current_win(win)
     return
   end
-  -- anchor beside the result panel: the panel is a full-width bottom split,
-  -- so ANY float over it would cover data — narrow the panel by the sidebar's
-  -- footprint and anchor the float in the freed columns (width restored on
-  -- close). Skipped when the panel is already too narrow to give up space.
+  -- Anchor beside the result panel: the panel is a full-width bottom split,
+  -- so ANY float over it would cover data — and the panel cannot be narrowed
+  -- for a float either (`nvim_win_set_width` no-ops on a frame row without a
+  -- vertical split). So the sidebar IS the freed columns: a real vertical
+  -- split of the panel window. Closing it makes the panel fill its row again
+  -- by itself (no width bookkeeping).
   local buffer = require("poste-redis.buffer")
   if not buffer.is_open() then buffer.show_panel(false) end
   local panel_win = buffer.win()
   if not panel_win then return end
 
-  local panel_h = vim.api.nvim_win_get_height(panel_win)
-  local winbar_rows = vim.api.nvim_get_option_value("winbar", { win = panel_win }) ~= "" and 1 or 0
-  local height = math.max(2, panel_h - winbar_rows - 3)
   local width = math.max(20, math.min(SIDEBAR_WIDTH, vim.o.columns - 2))
 
-  panel_orig_width = nil
-  local panel_w = vim.api.nvim_win_get_width(panel_win)
-  if panel_w - (width + 1) >= 20 then
-    panel_orig_width = panel_w
-    vim.api.nvim_win_set_width(panel_win, panel_w - width - 1)
-  end
-
   buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+  vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+  -- `:q` on the sidebar window wipes this scratch buffer, but a crashed
+  -- session can leave the name alive; drop the stale one first (same E95
+  -- dance as the result panel in buffer.show_panel).
+  local stale = vim.fn.bufnr("poste://redis_history")
+  if stale ~= -1 then
+    pcall(vim.api.nvim_buf_delete, stale, { force = true })
+  end
   vim.api.nvim_buf_set_name(buf, "poste://redis_history")
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
-  win = vim.api.nvim_open_win(buf, true, {
-    relative = "win",
-    win = panel_win,
-    row = 0,
-    col = vim.api.nvim_win_get_width(panel_win),
-    width = width,
-    height = height,
-    style = "minimal",
-    border = "rounded",
-  })
-  vim.api.nvim_set_option_value("cursorline", true, { win = win })
-  -- floats inherit the CURRENT window's options at open time; opened from
-  -- the result panel that means winhl=Normal:PosteRedisResultMeta and the
-  -- sidebar's text rendered in the panel's gray meta ink
+
+  vim.api.nvim_set_current_win(panel_win)
+  vim.cmd("rightbelow vsplit")
+  win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf)
+  vim.api.nvim_win_set_width(win, width)
+  -- a vsplit inherits the panel's window-local options: drop the result
+  -- winbar and grid chrome so the sidebar reads as a plain list (the float
+  -- needed the same winhl reset for inheriting the panel's gray meta ink)
+  vim.api.nvim_set_option_value("winbar", "", { win = win })
   pcall(vim.api.nvim_set_option_value, "winhl", "Normal:Normal", { win = win })
+  vim.api.nvim_set_option_value("number", false, { win = win })
+  vim.api.nvim_set_option_value("relativenumber", false, { win = win })
+  vim.api.nvim_set_option_value("signcolumn", "no", { win = win })
+  vim.api.nvim_set_option_value("foldcolumn", "0", { win = win })
+  vim.api.nvim_set_option_value("wrap", false, { win = win })
+  vim.api.nvim_set_option_value("spell", false, { win = win })
+  vim.api.nvim_set_option_value("colorcolumn", "", { win = win })
+  vim.api.nvim_set_option_value("cursorline", true, { win = win })
   local km = { buffer = buf, noremap = true, silent = true }
   vim.keymap.set("n", "j", function() move(1) end, km)
   vim.keymap.set("n", "k", function() move(-1) end, km)
@@ -331,14 +336,6 @@ function M.close()
     pcall(vim.api.nvim_buf_delete, buf, { force = true })
   end
   buf = nil
-  -- give the panel its columns back
-  if panel_orig_width then
-    local pw = require("poste-redis.buffer").win()
-    if pw and vim.api.nvim_win_is_valid(pw) then
-      pcall(vim.api.nvim_win_set_width, pw, panel_orig_width)
-    end
-    panel_orig_width = nil
-  end
 end
 
 function M.is_open()
