@@ -190,6 +190,10 @@ describe("poste-redis history", function()
     -- the sidebar picked up the panel's gray meta winhl
     assert.equals("Normal:Normal",
       vim.api.nvim_get_option_value("winhl", { win = history.win() }))
+    -- the panel carries a winbar; the sidebar reserves the matching row so
+    -- its first text row starts where the panel's text does (not one row up,
+    -- on the panel's winbar line)
+    assert.equals(" ", vim.api.nvim_get_option_value("winbar", { win = history.win() }))
     history.close()
     assert.is_false(history.is_open())
     assert.equals(vim.o.columns, vim.api.nvim_win_get_width(panel_win),

@@ -291,8 +291,11 @@ function M.open()
   vim.api.nvim_win_set_width(win, width)
   -- a vsplit inherits the panel's window-local options: drop the result
   -- winbar and grid chrome so the sidebar reads as a plain list (the float
-  -- needed the same winhl reset for inheriting the panel's gray meta ink)
-  vim.api.nvim_set_option_value("winbar", "", { win = win })
+  -- needed the same winhl reset for inheriting the panel's gray meta ink).
+  -- The panel carries a winbar; reserve the matching row (empty) so the
+  -- sidebar's first text row starts where the panel's text does — without
+  -- it the sidebar's content sits one row up, on the panel's winbar line.
+  vim.api.nvim_set_option_value("winbar", " ", { win = win })
   pcall(vim.api.nvim_set_option_value, "winhl", "Normal:Normal", { win = win })
   vim.api.nvim_set_option_value("number", false, { win = win })
   vim.api.nvim_set_option_value("relativenumber", false, { win = win })
