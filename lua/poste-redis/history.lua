@@ -263,7 +263,12 @@ function M.open()
   local panel_win = buffer.win()
   if not panel_win then return end
 
-  local width = math.max(20, math.min(SIDEBAR_WIDTH, vim.o.columns - 2))
+  -- cap the sidebar by the columns the panel can actually give up: when a
+  -- neighbor split (the key browser column) has already taken most of the
+  -- row's width, a full-width sidebar would crush the panel to a sliver
+  local width = math.max(20,
+    math.min(SIDEBAR_WIDTH, vim.o.columns - 2,
+      vim.api.nvim_win_get_width(panel_win) - 21))
 
   buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })

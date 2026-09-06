@@ -16,6 +16,7 @@
 
 local M = {}
 
+local constants = require("poste-redis.constants")
 local tree = require("poste-redis.browser.tree")
 
 local fbuf = nil          -- overlay scratch buffer (mirror of header lines 1-2)
@@ -23,20 +24,6 @@ local fwin = nil          -- the overlay float window
 local anchored_win = nil  -- browser window the float is pinned to
 
 local guard_group = nil
-
---- Close the overlay when its anchor window goes away (:q on the browser
---- splits the float loose — it stays valid and would linger on screen).
-local function ensure_anchor_guard()
-  if guard_group then return end
-  guard_group = vim.api.nvim_create_augroup("PosteRedisBrowserHeaderBar", { clear = true })
-  vim.api.nvim_create_autocmd("WinClosed", {
-    group = guard_group,
-    callback = function()
-      local closed = tonumber(vim.fn.expand("<amatch>"))
-      if closed and closed == anchored_win then M.close() end
-    end,
-  })
-end
 
 --- Overlay geometry for the browser window: the window's first two TEXT rows,
 --- full window width. relative="win" row 0 is the first text row — the
@@ -54,6 +41,41 @@ local function geometry(win)
     width = vim.api.nvim_win_get_width(win),
     height = tree.HEADER_LINES,
   }
+end
+
+--- Close the overlay when its anchor window goes away (:q on the browser
+--- splits the float loose — it stays valid and would linger on screen), and
+--- keep the overlay's rect equal to its anchor's first rows on every resize:
+--- a resize landing between syncs (browser auto-width, a neighbor split)
+--- used to leave the float WIDER than its anchor — nvim then clamps it back
+--- over the neighboring windows, and a float paints above normal windows no
+--- matter its z-index, so the stale bar covered the result panel / history
+--- sidebar / source rows.
+local function ensure_anchor_guard()
+  if guard_group then return end
+  guard_group = vim.api.nvim_create_augroup("PosteRedisBrowserHeaderBar", { clear = true })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = guard_group,
+    callback = function()
+      local closed = tonumber(vim.fn.expand("<amatch>"))
+      if closed and closed == anchored_win then M.close() end
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinResized", {
+    group = guard_group,
+    callback = function()
+      if not (fwin and vim.api.nvim_win_is_valid(fwin)) then return end
+      if not (anchored_win and vim.api.nvim_win_is_valid(anchored_win)) then return end
+      local g = geometry(anchored_win)
+      local cfg = vim.api.nvim_win_get_config(fwin)
+      if cfg.width ~= g.width or cfg.height ~= g.height then
+        vim.api.nvim_win_set_config(fwin, {
+          relative = "win", win = anchored_win,
+          row = g.row, col = g.col, width = g.width, height = g.height,
+        })
+      end
+    end,
+  })
 end
 
 --- (Re)pin the overlay to the browser window's top and mirror its current
@@ -83,7 +105,7 @@ function M.sync(browser_buf, opts)
       relative = "win", win = win,
       row = g.row, col = g.col, width = g.width, height = g.height,
       style = "minimal", border = "none", focusable = false, mouse = false,
-      zindex = 40, noautocmd = true,
+      zindex = constants.ZINDEX_BROWSER, noautocmd = true,
     })
     -- Floats inherit window options from the CURRENT window at open time: an
     -- inherited winbar would shift the mirrored bar down a row, wrap would

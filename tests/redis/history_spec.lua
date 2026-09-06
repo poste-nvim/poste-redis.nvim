@@ -196,6 +196,28 @@ describe("poste-redis history", function()
       "panel gets its full width back when the sidebar closes")
   end)
 
+  it("sidebar caps its width so the panel keeps usable columns beside a neighbor split", function()
+    history.push(entry())
+    local buffer = require("poste-redis.buffer")
+    buffer.show_panel(true)
+    -- stand-in for the key browser column: a full-height split that has
+    -- already taken most of the editor width
+    vim.cmd("botright 35vsplit")
+    local neighbor = vim.api.nvim_get_current_win()
+    local panel_win = buffer.win()
+
+    history.toggle()
+    assert.is_true(history.is_open())
+    -- the exact row split is nvim's call (the resize may borrow from the
+    -- neighbor column) — the guarantee is the panel's usable minimum
+    assert.is_true(vim.api.nvim_win_get_width(panel_win) >= 20,
+      "panel never gets crushed to a sliver by the sidebar")
+    assert.is_true(vim.api.nvim_win_get_width(history.win())
+      <= history._test.sidebar_width, "sidebar never exceeds its width cap")
+    history.close()
+    vim.api.nvim_win_close(neighbor, true)
+  end)
+
   it("j/k in the sidebar previews the entry under the cursor in the panel", function()
     history.push(entry({ command = "GET a", lines = { '"a"' } }))
     history.push(entry({ command = "GET b", lines = { '"b"' } }))

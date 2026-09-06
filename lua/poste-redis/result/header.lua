@@ -4,6 +4,8 @@
 --- while the column names stay in view. No poste deps.
 local M = {}
 
+local constants = require("poste-redis.constants")
+
 local float_buf = nil
 local float_win = nil
 local cache_leftcol = nil
@@ -183,7 +185,7 @@ function M.update(win, padded_header, index, type_hl, icon_hl)
     style = "minimal",
     border = "none",
     focusable = false,
-    zindex = 40,
+    zindex = constants.ZINDEX_RESULT,
     noautocmd = true,
   })
   pcall(vim.api.nvim_set_option_value, "winhl", "Normal:PosteRedisResultHeader", { win = float_win })

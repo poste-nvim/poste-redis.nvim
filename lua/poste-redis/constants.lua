@@ -26,6 +26,15 @@ M.SCAN_COUNT = 500
 --- History (in-memory) cap.
 M.HISTORY_MAX = 200
 
+--- Floating-chrome z-index tiers. The browser's pinned header overlay sits
+--- BELOW every result/history float, so an overlap never lets browser chrome
+--- paint over result/history chrome. (The result panel and history sidebar
+--- themselves are real split windows — floats always layer above normal
+--- windows, which is why the browser overlay must also never outgrow its
+--- anchor; shared poste.nvim dialogs own 49+.)
+M.ZINDEX_BROWSER = 40
+M.ZINDEX_RESULT = 45
+
 --- Connection URL scheme detection.
 --- @param url string
 --- @return boolean

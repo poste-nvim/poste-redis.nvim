@@ -69,6 +69,12 @@ describe("poste-redis browser header bar overlay", function()
     local cfg = vim.api.nvim_win_get_config(fwin)
     assert.equals("win", cfg.relative)
     assert.equals(win, cfg.win, "overlay must be anchored to the browser window")
+    -- the overlay sits on the browser z-index tier, strictly below the result
+    -- panel's floating grid header: an overlap never lets browser chrome
+    -- paint over result/history chrome (floats above normal windows are the
+    -- geometry's job, not the z-index's — see constants.ZINDEX_*)
+    assert.equals(require("poste-redis.constants").ZINDEX_BROWSER, cfg.zindex)
+    assert.truthy(cfg.zindex < require("poste-redis.constants").ZINDEX_RESULT)
     -- relative="win" row 0 is the window's first TEXT row (the winbar is
     -- excluded from float anchoring): row 1 would land the overlay one row
     -- low — the bar duplicates on screen and real rows hide under it
