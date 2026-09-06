@@ -58,7 +58,7 @@ local DOCS = {
     example = { "MOVE mykey 1" },
   },
   OBJECT = {
-    category = "Keys", syntax = "OBJECT SUBCOMMAND key", 
+    category = "Keys", syntax = "OBJECT SUBCOMMAND key",
     desc = "Inspect key internals: ENCODING, REFCOUNT, IDLETIME, or FREQ.",
     example = { "OBJECT ENCODING user:1000", "OBJECT IDLETIME session:abc" },
   },

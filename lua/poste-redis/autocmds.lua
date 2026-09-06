@@ -1,6 +1,5 @@
 --- FileType wiring for poste_redis buffers: syntax + keymaps + existing
 --- buffers at setup time.
-local config = require("poste-redis.config")
 local buffer_setup = require("poste-redis.buffer_setup")
 
 local M = {}

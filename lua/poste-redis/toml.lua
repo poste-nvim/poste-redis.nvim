@@ -78,32 +78,34 @@ function M.parse(content)
 
   for line in content:gmatch("([^\n]*)\n?") do
     local trimmed = trim(line)
-    if trimmed == "" or trimmed:sub(1, 1) == "#" then
-    elseif trimmed:sub(1, 1) == "[" then
-      local close = trimmed:find("]", 2)
-      if not close then
-        return nil, "Invalid table header: " .. line
+    local skipped = trimmed == "" or trimmed:sub(1, 1) == "#"
+    if not skipped then
+      if trimmed:sub(1, 1) == "[" then
+        local close = trimmed:find("]", 2)
+        if not close then
+          return nil, "Invalid table header: " .. line
+        end
+        local name = trim(trimmed:sub(2, close - 1))
+        if name == "" then
+          return nil, "Empty table header"
+        end
+        if not result[name] then
+          result[name] = {}
+        end
+        section = result[name]
+      else
+        local eq = trimmed:find("=", 1, true)
+        if not eq then
+          return nil, "Invalid key=value line: " .. line
+        end
+        local key = trim(trimmed:sub(1, eq - 1))
+        local val, err = parse_value(trimmed:sub(eq + 1))
+        if err then return nil, err end
+        if key == "" then
+          return nil, "Empty key in line: " .. line
+        end
+        section[key] = val
       end
-      local name = trim(trimmed:sub(2, close - 1))
-      if name == "" then
-        return nil, "Empty table header"
-      end
-      if not result[name] then
-        result[name] = {}
-      end
-      section = result[name]
-    else
-      local eq = trimmed:find("=", 1, true)
-      if not eq then
-        return nil, "Invalid key=value line: " .. line
-      end
-      local key = trim(trimmed:sub(1, eq - 1))
-      local val, err = parse_value(trimmed:sub(eq + 1))
-      if err then return nil, err end
-      if key == "" then
-        return nil, "Empty key in line: " .. line
-      end
-      section[key] = val
     end
   end
 

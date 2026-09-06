@@ -461,7 +461,7 @@ function M._connection_for(buf)
   local entries = parser.buffer_entries(buf)
   for i = #entries, 1, -1 do
     if entries[i].kind == "use" and entries[i].connection then
-      local url, err = connections.resolve(entries[i].connection)
+      local url = connections.resolve(entries[i].connection)
       if url then
         connections.apply_connection(entries[i].connection, url)
         return url, entries[i].connection

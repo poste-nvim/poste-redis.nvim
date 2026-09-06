@@ -126,13 +126,13 @@ function M.run_selection(mode, range)
     end
   end
 
-  local ok, indicators = pcall(require, "poste.indicators")
-  if ok then indicators.clear_all(src) end
+  local indicators = select(2, pcall(require, "poste.indicators"))
+
+  if indicators then indicators.clear_all(src) end
 
   exec_run.run_selection_async(src, mode, { range = range, entries = entries }, {
     on_start = function(seq, _)
-      local ok, indicators = pcall(require, "poste.indicators")
-      if ok then
+      if indicators then
         for _, line_0 in ipairs(batch_lines) do
           indicators.set_indicator(src, line_0, "running")
         end

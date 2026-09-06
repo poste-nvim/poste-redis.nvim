@@ -97,13 +97,11 @@ function M:get_completions(blink_ctx, callback)
   local my_gen = completion_gen
 
   local buf = vim.api.nvim_get_current_buf()
-  local cursor_line, cursor_col, line
+  local cursor_col, line
   if blink_ctx and blink_ctx.cursor then
-    cursor_line = blink_ctx.cursor[1]
     cursor_col = blink_ctx.cursor[2]
     line = blink_ctx.line or ""
   else
-    cursor_line = vim.fn.line(".")
     cursor_col = vim.fn.col(".")
     line = vim.api.nvim_get_current_line()
   end
