@@ -1,8 +1,9 @@
 --- Redis key browser window (M2, P1-1/P1-2) — the FACADE.
 ---
 --- Layout (v5):
----   winbar              <- db scope (orange), display-only chrome; <Space>
----                          pops the db picker dropdown anywhere in the buffer
+---   winbar              <- plain connection name + db scope (orange), both
+---                          right-aligned chrome; <Space> pops the db picker
+---                          dropdown anywhere in the buffer
 ---   <search>            <- search bar (line 1): <leader>/ focuses it, <CR>
 ---                          runs async.search on the selected db, empty + <CR>
 ---                          clears it. The bar is a fixed icon prefix; the
@@ -60,11 +61,11 @@ local function db_select_text()
   return "\239\135\128 db " .. tostring(state.current_db)
 end
 
---- Paint the connection + db scope into the browser window's winbar: the
---- connection name left of the `%=` split (colored with its connections.toml
---- color when one is configured, plain otherwise), the orange db scope right
---- (the same PosteRedisBrowserWinbarDb used before). The window handle is
---- re-resolved via state.window() — browser_win can be stale after :q /
+--- Paint the connection + db scope into the browser window's winbar: both
+--- sit right of the `%=` split — the plain connection name hugging the orange
+--- db scope. No connections.toml color here: that highlight belongs to the
+--- statusline, and a colored winbar read as query chrome. The window handle
+--- is re-resolved via state.window() — browser_win can be stale after :q /
 --- split churn. All text is plugin-generated, no %-escaping needed.
 local function update_winbar()
   local win = state.window()
@@ -74,13 +75,11 @@ local function update_winbar()
     -- no scope yet: the right side names the pending choice instead of a db
     parts[#parts + 1] = "%=%#PosteRedisBrowserWinbarDb#select connection %*"
   else
+    parts[#parts + 1] = "%="
     if state.current_conn and state.current_conn.name then
-      local ok_st, statusline = pcall(require, "poste-redis.statusline")
-      local left_hl = ok_st and statusline.get_ctx_color(state.current_conn.name) or nil
-      parts[#parts + 1] = left_hl and ("%#" .. left_hl .. "# " .. state.current_conn.name .. " %*")
-        or state.current_conn.name
+      parts[#parts + 1] = state.current_conn.name .. "  "
     end
-    parts[#parts + 1] = "%=%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. " %*"
+    parts[#parts + 1] = "%#PosteRedisBrowserWinbarDb#" .. db_select_text() .. " %*"
   end
   vim.api.nvim_set_option_value("winbar", table.concat(parts), { win = win })
 end

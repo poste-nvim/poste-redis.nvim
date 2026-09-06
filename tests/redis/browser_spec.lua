@@ -2246,7 +2246,11 @@ describe("poste-redis browser connections picker (first open)", function()
       return #l > 3 and l[1] == "" and l[2]:find("^%-+$") ~= nil
         and table.concat(l, "\n"):find("plain", 1, true) ~= nil
     end, 5), "tree layout did not render after choosing")
-    assert.match("db 0", vim.api.nvim_get_option_value("winbar", { win = win }))
+    -- the connection name rides the RIGHT of the %= split, plain (the
+    -- connections.toml highlight belongs to the statusline), hugging the
+    -- orange db scope (whose text carries the db icon U+F1C0)
+    assert.match("^%%=stub  %%#PosteRedisBrowserWinbarDb#\239\135\128 db 0 %%%*$",
+      vim.api.nvim_get_option_value("winbar", { win = win }))
   end)
 
   it("parks the cursor on the current context's connection row", function()
