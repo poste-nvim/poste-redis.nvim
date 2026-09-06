@@ -2285,6 +2285,61 @@ describe("poste-redis browser connections picker (first open)", function()
       vim.api.nvim_get_option_value("winbar", { win = win }))
   end)
 
+  it("o re-opens the connections list; <CR> switches the connection", function()
+    stub_connections({
+      tree.make_connection_node({ name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis" }),
+      tree.make_connection_node({ name = "other", url = "redis://b:6380/0", dialect = "redis" }),
+    })
+    session_conn.execute = function(_, cmd, cbs)
+      if cbs and cbs.on_response then
+        cbs.on_response({ value = { value = { "user:1", "plain" }, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+    async.set_view_mode("flatten")
+
+    browser.open()
+    local buf = browser.info().buffer
+    assert.is_true(wait_picker(buf), "connections picker did not render")
+    local win = vim.fn.bufwinid(buf)
+    vim.api.nvim_set_current_win(win)
+    -- sorted rows: other (3), stub (4) — connect stub first
+    vim.api.nvim_win_set_cursor(win, { 4, 0 })
+    browser._test.toggle_node()
+    assert.is_true(vim.wait(2000, function()
+      return browser.current_scope().connection == "stub"
+    end, 5), "did not connect to stub")
+
+    -- o swaps the tree back for the connections list (public API + keymap
+    -- ride the same path; the keymap is exercised here via feedkeys)
+    vim.api.nvim_feedkeys(
+      vim.api.nvim_replace_termcodes("o", true, false, true), "mx", false)
+    assert.is_true(vim.wait(2000, function()
+      local l = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      return browser._test.conn_picker_state().active
+        and l[1]:find("Select a connection", 1, true) ~= nil
+    end, 5), "connections list did not re-open on o")
+
+    -- <CR> on the other row switches the scope AND the global context
+    vim.api.nvim_win_set_cursor(win, { 3, 0 })
+    browser._test.toggle_node()
+    assert.is_true(vim.wait(2000, function()
+      return browser.current_scope().connection == "other"
+        and redis_state.context.connection == "other"
+    end, 5), "did not switch to other")
+  end)
+
+  it("pick_connection opens the browser on the list when it is closed", function()
+    stub_connections({
+      tree.make_connection_node({ name = "stub", url = "redis://127.0.0.1:16479/0", dialect = "redis" }),
+    })
+    browser.pick_connection()
+    assert.is_true(vim.wait(2000, function()
+      return browser.info().window ~= nil
+        and browser._test.conn_picker_state().active
+    end, 5), "pick_connection did not open the browser on the connections list")
+  end)
+
   it("parks the cursor on the current context's connection row", function()
     local poste_state = require("poste.state")
     poste_state.connection = "beta"  -- set by USE / :PosteRedisConnection

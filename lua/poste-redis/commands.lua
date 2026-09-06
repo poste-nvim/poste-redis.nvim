@@ -30,6 +30,10 @@ function M.setup()
     require("poste-redis.browser.init").open()
   end, { desc = "Open the redis key browser" })
 
+  vim.api.nvim_create_user_command("PosteRedisBrowserConnection", function()
+    require("poste-redis.browser.init").pick_connection()
+  end, { desc = "Switch the key browser's connection (in-window picker)" })
+
   vim.api.nvim_create_user_command("PosteRedisBrowserView", function(args)
     local browser = require("poste-redis.browser.init")
     if args.args and args.args ~= "" then

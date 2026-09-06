@@ -126,6 +126,7 @@ M.defaults = {
       search = "<leader>/",
       search_clear = "<Esc>",
       db_select = "<Space>",
+      switch_connection = "o",
       close = "q",
       help = "g?",
       delete = "d",

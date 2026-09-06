@@ -464,6 +464,8 @@ local function setup_browser_buffer()
   end
   k = config.get_keymap("redis_browser", "db_select", "<Space>")
   if k then vim.keymap.set("n", k, pick_db, opts) end
+  k = config.get_keymap("redis_browser", "switch_connection", "o")
+  if k then vim.keymap.set("n", k, function() M.pick_connection() end, opts) end
   k = config.get_keymap("redis_browser", "close", "q")
   if k then vim.keymap.set("n", k, function() M.close() end, opts) end
 
@@ -541,6 +543,7 @@ local function setup_browser_buffer()
         "  (the filter bar is pinned above the tree; <leader>/ is the only",
         "   way into it — the cursor never rests on the bar rows)",
         "  <Space>  select database",
+        "  o     switch connection (back to the connections list)",
         "  d     delete key (confirm)",
         "  D     delete all keys under prefix (count + confirm)",
         "  <Tab> multi-select nodes (same db); D deletes all selected",
@@ -658,6 +661,17 @@ function M.close()
   if state.browser_buf and vim.api.nvim_buf_is_valid(state.browser_buf) then
     session_conn.cleanup_buf(state.browser_buf)
   end
+end
+
+--- Re-open the in-window connections picker (switch connection): the list
+--- replaces the tree until <CR> connects — the chosen connection becomes the
+--- browser's scope AND the global context, landing on db 0. An active search
+--- is cleared first so its results don't leak across the scope switch. The
+--- browser is opened when closed (keymap + :PosteRedisBrowserConnection).
+function M.pick_connection()
+  if not state.window() then M.open() end
+  if state.search_active then searchbar.clear() end
+  picker.show()
 end
 
 --- Toggle between flatten (方案A: one folder per first `:`-segment, keys flat
