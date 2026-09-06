@@ -17,6 +17,9 @@ local type_ns = vim.api.nvim_create_namespace("poste_redis_grid_header_type")
 local sort_ns = vim.api.nvim_create_namespace("poste_redis_grid_header_sort")
 local SEP = "│"
 
+local last_args = nil   -- { win, header, index, type_hl, icon_hl } of the last render
+local resize_group = nil
+
 --- Per-char display index of a line: byte range + display range per char.
 --- CJK/emoji never split; `│` separators are just 1-width chars here.
 --- @param line string
@@ -116,7 +119,32 @@ local function apply_sort_hl(bf, icon_hl)
     icon_hl[1], icon_hl[2])
 end
 
---- Re-render the header float for the current viewport of `win`.
+--- Keep the header float in step with layout changes: on any resize,
+--- re-render from the cached args for the anchor window's fresh width and
+--- scroll (leftcol) — or drop the float when its anchor is gone.
+local function ensure_resize_guard()
+  if resize_group then return end
+  resize_group = vim.api.nvim_create_augroup("PosteRedisResultHeaderResize", { clear = true })
+  vim.api.nvim_create_autocmd("WinResized", {
+    group = resize_group,
+    callback = function()
+      if not (float_win and vim.api.nvim_win_is_valid(float_win)) then return end
+      local a = last_args
+      if not a or not a.win or not vim.api.nvim_win_is_valid(a.win) then
+        M.close()
+        return
+      end
+      M.update(a.win, a.header, a.index, a.type_hl, a.icon_hl)
+    end,
+  })
+end
+
+--- Re-render the header float for the current viewport of `win`. The float's
+--- width must track its anchor window on EVERY layout change, not just on
+--- grid renders: opening the browser (or any split) narrows the panel
+--- between renders, and a too-wide float overhangs into the neighbor — a
+--- float paints above normal windows at any z-index, so the stale header
+--- covered a browser row (WinResized re-renders from the cached args).
 --- @param win number  the result window the float is anchored to
 --- @param padded_header string  full padded header line (with left padding)
 --- @param index table[]|nil  cached per-char index (built when nil)
@@ -126,6 +154,7 @@ function M.update(win, padded_header, index, type_hl, icon_hl)
   if not win or not vim.api.nvim_win_is_valid(win) then M.close(); return end
   if not padded_header then M.close(); return end
   index = index or build_index(padded_header)
+  ensure_resize_guard()
 
   local win_width = vim.api.nvim_win_get_width(win)
   if win_width <= 0 then return end
@@ -150,6 +179,13 @@ function M.update(win, padded_header, index, type_hl, icon_hl)
   cache_header = padded_header
 
   local text = slice_to_win(leftcol, win_width, padded_header, index)
+  -- last_args is set at BOTH exits below: the recreate path runs M.close(),
+  -- which resets the cache — an assignment made before it would be lost by
+  -- the time the float is back (and the resize guard would see nil)
+  local function remember_args()
+    last_args = { win = win, header = padded_header, index = index,
+      type_hl = type_hl, icon_hl = icon_hl }
+  end
 
   if float_buf and vim.api.nvim_buf_is_valid(float_buf) then
     vim.api.nvim_set_option_value("modifiable", true, { buf = float_buf })
@@ -163,6 +199,7 @@ function M.update(win, padded_header, index, type_hl, icon_hl)
         and vim.api.nvim_win_get_width(float_win) ~= win_width then
       vim.api.nvim_win_set_config(float_win, { width = win_width })
     end
+    remember_args()
     return
   end
 
@@ -189,12 +226,16 @@ function M.update(win, padded_header, index, type_hl, icon_hl)
     noautocmd = true,
   })
   pcall(vim.api.nvim_set_option_value, "winhl", "Normal:PosteRedisResultHeader", { win = float_win })
+  remember_args()
 end
 
 M._test = {
   build_index = build_index,
   slice_to_win = slice_to_win,
   close = M.close,
+  float_win = function()
+    return (float_win and vim.api.nvim_win_is_valid(float_win)) and float_win or nil
+  end,
 }
 
 return M

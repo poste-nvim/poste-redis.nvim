@@ -169,6 +169,25 @@ describe("poste-redis result grid", function()
       assert.is_nil(joined:find("field", 1, true))  -- header is not in the body
     end)
 
+    it("the floating header follows the panel's width when a split narrows it", function()
+      open_grid({ { "a", "1" }, { "b", "2" } })
+      local fw = header._test.float_win()
+      assert.is_truthy(fw, "header float did not open")
+      local wide = vim.api.nvim_win_get_config(fw).width
+
+      -- stand-in for the browser column: a right split narrows the panel
+      -- between grid renders; the float must not keep the stale (wider)
+      -- width — it would overhang into the neighbor and paint over a
+      -- browser row (floats layer above normal windows at any z-index)
+      vim.cmd("botright 35vsplit")
+      vim.api.nvim_exec_autocmds("WinResized", {})
+      local panel_win = buffer.win()
+      local cfg = vim.api.nvim_win_get_config(fw)
+      assert.equals(vim.api.nvim_win_get_width(panel_win), cfg.width,
+        "header float must track the narrowed panel's width")
+      assert.is_true(cfg.width < wide, "float must have narrowed with the panel")
+    end)
+
     it("moves the cell cursor with move_cell and clamps (index column skipped)", function()
       open_grid({ { "a", "1" }, { "b", "2" } })
       local tab = buffer.active_tab()
