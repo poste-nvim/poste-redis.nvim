@@ -47,13 +47,60 @@ describe("poste-redis history", function()
     history.set_max_history(200)
   end)
 
-  it("toggle opens a float window and close tears it down", function()
+  it("toggle opens a float window; an open toggle re-focuses and close tears it down", function()
     history.push(entry())
     assert.is_false(history.is_open())
     history.toggle()
     assert.is_true(history.is_open())
+    -- already open: toggle focuses instead of closing, so the browse flow
+    -- (sidebar ⇄ panel via <Tab>/<leader>rh) never loses the selection
+    vim.api.nvim_set_current_win(0)
     history.toggle()
+    assert.is_true(history.is_open())
+    assert.equals(history.win(), vim.api.nvim_get_current_win())
+    history.close()
     assert.is_false(history.is_open())
+  end)
+
+  it("<Tab> in the sidebar jumps focus to the result panel and keeps the sidebar open", function()
+    history.push(entry())
+    local buffer = require("poste-redis.buffer")
+    history.toggle()
+    assert.is_true(history.is_open())
+    history.focus_panel()
+    assert.equals(buffer.win(), vim.api.nvim_get_current_win())
+    assert.is_true(history.is_open(), "sidebar stays open while the panel is focused")
+    -- and <leader>rh (toggle) comes back to the sidebar
+    history.toggle()
+    assert.equals(history.win(), vim.api.nvim_get_current_win())
+  end)
+
+  it("activate rebuilds a real grid tab from the stored raw value", function()
+    history.push(entry({
+      command = "LRANGE k 0 -1",
+      value = { type = "list", value = { "a", "b" }, len = 2 },
+    }))
+    local buffer = require("poste-redis.buffer")
+    history.activate(1)
+    assert.is_true(buffer.is_open())
+    local tab = buffer.active_tab()
+    -- a real grid: floating header, columns, key-stamped meta — not a text
+    -- snapshot (which cannot show the grid header at all)
+    assert.equals("table", tab.kind)
+    assert.equals("value", tab.grid.columns[2])
+    assert.equals("k", tab.meta.key)
+    assert.equals("my-redis", tab.meta.connection)
+    buffer.close()
+  end)
+
+  it("push stores the raw value and activate rides it into the snapshot meta", function()
+    history.push(entry({ value = { type = "string", value = "v" } }))
+    local buffer = require("poste-redis.buffer")
+    history.activate(1)
+    assert.is_true(buffer.is_open())
+    local tab = buffer.active_tab()
+    assert.same({ type = "string", value = "v" }, tab.meta.value)
+    buffer.close()
   end)
 
   it("build renders the command left and the exec time right-aligned", function()
@@ -131,7 +178,12 @@ describe("poste-redis history", function()
     assert.equals(panel_win, config.win)
     -- nvim returns the col as a number or a { [anchor] = col } table
     local col = type(config.col) == "table" and config.col[false] or config.col
-    assert.equals(0, col, "pinned to the panel's left edge")
+    assert.equals(vim.api.nvim_win_get_width(panel_win), col,
+      "pinned just past the panel's (narrowed) right edge")
+    -- the panel is a full-width split: it narrows while the sidebar is open
+    -- so the float lands in freed columns instead of covering data
+    assert.is_true(vim.api.nvim_win_get_width(panel_win) < vim.o.columns,
+      "panel narrowed to make room for the sidebar")
     -- never reaches the panel's bottom edge, so the statusline stays visible
     local panel_h = vim.api.nvim_win_get_height(panel_win)
     assert.is_true(vim.api.nvim_win_get_height(history.win()) < panel_h)
@@ -139,8 +191,10 @@ describe("poste-redis history", function()
     -- reset the sidebar picked up the panel's gray meta winhl
     assert.equals("Normal:Normal",
       vim.api.nvim_get_option_value("winhl", { win = history.win() }))
-    history.toggle()
+    history.close()
     assert.is_false(history.is_open())
+    assert.equals(vim.o.columns, vim.api.nvim_win_get_width(panel_win),
+      "panel gets its full width back when the sidebar closes")
   end)
 
   it("j/k in the sidebar previews the entry under the cursor in the panel", function()

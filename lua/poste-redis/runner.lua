@@ -12,12 +12,21 @@ local redis_state = require("poste-redis.state")
 local M = {}
 
 --- Collect the panel's current rendered lines for the history snapshot.
+--- The grid's header lives in a floating window — in-buffer line 1 is a
+--- blank placeholder — so the real header is prepended and the placeholder
+--- dropped; a snapshot without it would show the table headless.
 local function buffer_lines()
   local b = buffer.buf()
-  if b and vim.api.nvim_buf_is_valid(b) then
-    return vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  if not (b and vim.api.nvim_buf_is_valid(b)) then
+    return {}
   end
-  return {}
+  local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  local tab = buffer.active_tab()
+  if tab and tab.kind == "table" and tab.header_padded then
+    lines = vim.list_slice(lines, 2)
+    table.insert(lines, 1, tab.header_padded)
+  end
+  return lines
 end
 
 --- Render a batch of results into the panel and push one history entry.
@@ -54,6 +63,9 @@ local function present(results, summaries, opts)
     latency_ms = total_latency,
     error = any_failed,
     lines = buffer_lines(),
+    -- raw (transport-truncated) value of the first result — the panel's
+    -- default active tab — so `K` previews the entry's detail on replay
+    value = first and first.value or nil,
   })
   -- indicator: replace each running spinner with the per-statement result icon
   -- on the request buffer's sign column (never inside the result panel). Every

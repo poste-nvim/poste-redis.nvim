@@ -2,11 +2,16 @@
 --- redis lands here: .redis executions (runner), dataset cell/row writes
 --- (browser/grid_edit), and browser mutations (browser/actions) — batch
 --- deletes aggregate into ONE entry (`DEL prefix:*`) instead of one line per
---- key. Toggling opens a sidebar float anchored to the redis_result panel's
---- left edge (poste-db's <leader>ph pattern — it never covers the statusline):
+--- key. Toggling opens a sidebar float beside the redis_result panel: the
+--- panel is a full-width split, so while the sidebar is open the panel is
+--- NARROWED by the sidebar's footprint and the float anchors in the freed
+--- columns — the panel's data stays fully visible (width restored on close):
 ---   j/k   move the selection; the entry's result snapshot renders LIVE into
 ---         the result panel. Write commands (browser deletes/TTL) have no
 ---         snapshot — the panel shows a hint instead.
+---   <Tab> jump focus to the result panel (sidebar stays open): the preview
+---         is a live panel there — move the cursor, select, yank, and `K`
+---         shows the entry's raw value detail. <leader>rh returns here.
 ---   <CR>  activate the entry (panel keeps it) and close the sidebar
 ---   y     yank the command (`yank` wins over `command` — batch deletes yank
 ---         a redis-cli pipeline, since a bare `DEL prefix:*` glob is not
@@ -17,7 +22,7 @@ local util = require("poste-redis.util")
 
 local M = {}
 
-local history = {}   -- newest last: { command, connection, status, latency_ms, error, lines, ts, kind, yank, count }
+local history = {}   -- newest last: { command, connection, status, latency_ms, error, lines, value, ts, kind, yank, count }
 local max_entries = constants.HISTORY_MAX
 
 local buf = nil
@@ -25,6 +30,8 @@ local win = nil
 local hl_ns = vim.api.nvim_create_namespace("poste_redis_history")
 
 local SIDEBAR_WIDTH = 42
+-- Panel width borrowed by the open sidebar (restored on close).
+local panel_orig_width = nil
 
 --- Set the cap (config.history_max).
 --- @param n number
@@ -42,7 +49,9 @@ end
 
 --- Push a run / write into history.
 --- @param entry table { command, connection, status, latency_ms, error,
----   lines, kind ("exec"|"write"), yank, count, db }
+---   lines, value, kind ("exec"|"write"), yank, count, db }
+---   value: the raw (transport-truncated) result value — rides the snapshot
+---   so `K` in the panel can preview the entry's detail
 function M.push(entry)
   history[#history + 1] = {
     command = entry.command or "",
@@ -51,6 +60,7 @@ function M.push(entry)
     latency_ms = entry.latency_ms,
     error = entry.error,
     lines = entry.lines or {},
+    value = entry.value,
     kind = entry.kind or "exec",
     yank = entry.yank,
     count = entry.count,
@@ -77,15 +87,35 @@ function M.clear()
   history = {}
 end
 
---- Render entry `idx` into the result panel. Entries with a stored snapshot
---- re-render it; write commands (browser mutations) store no result set, so
---- the panel shows a hint pointing at `y` instead.
+--- Render entry `idx` into the result panel. Entries carrying the raw value
+--- re-render as a REAL result tab — full grid with the floating header, cell
+--- navigation, K and yank (a text snapshot can't show the grid header: it
+--- lives in a floating window, not in the buffer lines). Entries without a
+--- value fall back to the stored text snapshot; write commands (browser
+--- mutations) show a hint pointing at `y` instead.
 --- @param idx number  1-based into M.list() (newest first)
 --- @param enter boolean|nil  false keeps focus where it is (live j/k preview)
 function M.activate(idx, enter)
   local e = M.list()[idx]
   if not e then return end
   local buffer = require("poste-redis.buffer")
+  if e.value and type(e.value) == "table" and e.value.type then
+    local out = require("poste-redis.format").format_result({
+      command = e.command,
+      status = e.status,
+      latency_ms = e.latency_ms,
+      error = e.error,
+      value = e.value,
+    })
+    out.meta.connection = e.connection
+    out.meta.db = e.db
+    if out.kind == "table" then
+      out.meta.key = require("poste-redis.parser").key_arg(
+        require("poste-redis.parser").command_tokens(out.meta.command or ""))
+    end
+    buffer.render_tabs({ out }, { render = true, enter = enter and true or false })
+    return
+  end
   if not e.lines or #e.lines == 0 then
     buffer.render_snapshot({
       "No result snapshot for this entry.",
@@ -98,6 +128,7 @@ function M.activate(idx, enter)
       command = e.command,
       status = e.status,
       error = e.error,
+      value = e.value,
     }, { enter = enter })
     return
   end
@@ -106,6 +137,7 @@ function M.activate(idx, enter)
     status = e.status,
     latency_ms = e.latency_ms,
     error = e.error,
+    value = e.value,
   }, { enter = enter })
 end
 
@@ -122,7 +154,7 @@ function M.yank(idx)
 end
 
 -----------------------------------------------------------------------
--- Sidebar float (anchored to the redis_result panel's left edge)
+-- Sidebar float (beside the result panel, which narrows to make room)
 -----------------------------------------------------------------------
 
 --- Render the float body: `✓ <command padded>  <HH:MM:SS>` — the command
@@ -220,8 +252,10 @@ function M.open()
     vim.api.nvim_set_current_win(win)
     return
   end
-  -- anchor to the result panel's left edge, poste-db sidebar style: inside
-  -- the panel window, so the statusline stays visible underneath
+  -- anchor beside the result panel: the panel is a full-width bottom split,
+  -- so ANY float over it would cover data — narrow the panel by the sidebar's
+  -- footprint and anchor the float in the freed columns (width restored on
+  -- close). Skipped when the panel is already too narrow to give up space.
   local buffer = require("poste-redis.buffer")
   if not buffer.is_open() then buffer.show_panel(false) end
   local panel_win = buffer.win()
@@ -232,6 +266,13 @@ function M.open()
   local height = math.max(2, panel_h - winbar_rows - 3)
   local width = math.max(20, math.min(SIDEBAR_WIDTH, vim.o.columns - 2))
 
+  panel_orig_width = nil
+  local panel_w = vim.api.nvim_win_get_width(panel_win)
+  if panel_w - (width + 1) >= 20 then
+    panel_orig_width = panel_w
+    vim.api.nvim_win_set_width(panel_win, panel_w - width - 1)
+  end
+
   buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
   vim.api.nvim_buf_set_name(buf, "poste://redis_history")
@@ -240,7 +281,7 @@ function M.open()
     relative = "win",
     win = panel_win,
     row = 0,
-    col = 0,
+    col = vim.api.nvim_win_get_width(panel_win),
     width = width,
     height = height,
     style = "minimal",
@@ -254,6 +295,7 @@ function M.open()
   local km = { buffer = buf, noremap = true, silent = true }
   vim.keymap.set("n", "j", function() move(1) end, km)
   vim.keymap.set("n", "k", function() move(-1) end, km)
+  vim.keymap.set("n", "<Tab>", function() M.focus_panel() end, km)
   vim.keymap.set("n", "<CR>", activate_and_close, km)
   vim.keymap.set("n", "y", yank_and_stay, km)
   vim.keymap.set("n", "q", M.close, km)
@@ -263,12 +305,21 @@ function M.open()
   set_cursor(1)
 end
 
-function M.toggle()
-  if win and vim.api.nvim_win_is_valid(win) then
-    M.close()
-  else
-    M.open()
+--- Jump focus to the result panel, keeping the sidebar open: the previewed
+--- snapshot is a live panel there — cursor moves, `K` shows the entry's raw
+--- value detail, yank works. `<leader>rh` (toggle) returns to the sidebar.
+function M.focus_panel()
+  local w = require("poste-redis.buffer").win()
+  if w and vim.api.nvim_win_is_valid(w) then
+    vim.api.nvim_set_current_win(w)
   end
+end
+
+function M.toggle()
+  -- already open: (re)focus the sidebar instead of closing, so the browse
+  -- flow sidebar ⇄ panel (<Tab> out, <leader>rh back) never loses the
+  -- selection; closing lives on q/<Esc> inside the sidebar
+  M.open()
 end
 
 function M.close()
@@ -280,6 +331,14 @@ function M.close()
     pcall(vim.api.nvim_buf_delete, buf, { force = true })
   end
   buf = nil
+  -- give the panel its columns back
+  if panel_orig_width then
+    local pw = require("poste-redis.buffer").win()
+    if pw and vim.api.nvim_win_is_valid(pw) then
+      pcall(vim.api.nvim_win_set_width, pw, panel_orig_width)
+    end
+    panel_orig_width = nil
+  end
 end
 
 function M.is_open()

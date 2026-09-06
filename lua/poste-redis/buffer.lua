@@ -361,12 +361,15 @@ function M.render(results, opts)
   end
 end
 
---- Render a pre-formatted tab list (browser value viewer pages). Each tab is
---- a { lines, meta } or { grid, meta } pair already formatted.
+--- Render a pre-formatted tab list (browser value viewer pages, history
+--- replays). Each tab is a { lines, meta } or { grid, meta } pair already
+--- formatted.
 --- @param tab_list table[]
---- @param opts? table { render = boolean, active = number } — active (1-based)
----   selects which tab ends up focused (default 1; the value viewer's
----   progressive fetch passes the newest page so <Tab> advances to it)
+--- @param opts? table { render = boolean, active = number, enter = boolean }
+---   active (1-based) selects which tab ends up focused (default 1; the value
+---   viewer's progressive fetch passes the newest page so <Tab> advances to
+---   it); enter moves focus to the panel (default false — callers like the
+---   history sidebar's live j/k preview must not steal focus)
 function M.render_tabs(tab_list, opts)
   opts = opts or {}
   state.tabs = tab_list or {}
@@ -385,7 +388,7 @@ function M.render_tabs(tab_list, opts)
   state.last_value = state.tabs[state.active] and state.tabs[state.active].meta
     and state.tabs[state.active].meta.value
   if opts.render ~= false then
-    M.show_panel(false)
+    M.show_panel(opts.enter and true or false)
     view.render_active()
     fetch_ttl()
   end
@@ -552,9 +555,13 @@ function setup_keymaps()
   if k then vim.keymap.set("n", k, function() M.sort_column() end, km) end
   k = config.get_keymap("redis_result", "reveal_key", "gd")
   if k then vim.keymap.set("n", k, function() M.reveal_current() end, km) end
-  -- history sidebar: floats over this panel's left edge, j/k previews entries
+  -- history sidebar: floats beside this panel's right edge, j/k previews
+  -- entries live, <leader>rh re-focuses an already-open sidebar
   k = config.get_keymap("redis_result", "history", "<leader>rh")
-  if k then vim.keymap.set("n", k, function() require("poste-redis.history").toggle() end, km) end
+  if k then
+    vim.keymap.set("n", k, function() require("poste-redis.history").toggle() end, km)
+  end
+
 
   -- Grid editing (poste-db dataset pattern): i edit cell, o add row, dd delete
   local grid_edit = require("poste-redis.browser.grid_edit")

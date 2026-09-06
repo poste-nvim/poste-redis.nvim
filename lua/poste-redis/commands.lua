@@ -24,7 +24,7 @@ function M.setup()
 
   vim.api.nvim_create_user_command("PosteRedisHistory", function()
     require("poste-redis.history").toggle()
-  end, { desc = "Toggle the request history float" })
+  end, { desc = "Open/focus the request history float (q closes it)" })
 
   vim.api.nvim_create_user_command("PosteRedisBrowser", function()
     require("poste-redis.browser.init").open()
