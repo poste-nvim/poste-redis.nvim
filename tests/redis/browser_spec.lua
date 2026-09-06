@@ -2180,6 +2180,38 @@ describe("poste-redis browser connections picker (first open)", function()
     end, 5)
   end
 
+  it("g? opens the help float (a real window, not an nvim_echo dump)", function()
+    stub_connections({
+      tree.make_connection_node({ name = "stub", url = "redis://b:6380/0", dialect = "redis" }),
+    })
+    browser.open()
+    local buf = browser.info().buffer
+    assert.is_true(wait_picker(buf), "connections picker did not render")
+
+    -- g? must not raise (nvim_echo with plain strings raised E5108 "Invalid
+    -- 'chunk'") and must land in the shared centered help float
+    vim.api.nvim_set_current_win(vim.fn.bufwinid(buf))
+    vim.api.nvim_feedkeys(
+      vim.api.nvim_replace_termcodes("g?", true, false, true), "mx", false)
+    local help_win = -1
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if w ~= vim.fn.bufwinid(buf)
+          and vim.api.nvim_win_get_config(w).relative ~= ""
+          and vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, 1, false)[1]
+            == "poste-redis key browser" then
+        help_win = w
+        break
+      end
+    end
+    assert.is_truthy(help_win ~= -1, "help float did not open")
+    local hbuf = vim.api.nvim_win_get_buf(help_win)
+    assert.equals("poste-redis key browser",
+      vim.api.nvim_buf_get_lines(hbuf, 0, 1, false)[1])
+    vim.api.nvim_feedkeys(
+      vim.api.nvim_replace_termcodes("q", true, false, true), "mx", false)
+    assert.is_false(vim.api.nvim_win_is_valid(help_win), "q must close the help float")
+  end)
+
   it("first open lists connections in-window instead of auto-picking one", function()
     stub_connections({
       tree.make_connection_node({ name = "beta", url = "redis://b:6380/0", dialect = "redis" }),

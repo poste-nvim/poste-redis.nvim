@@ -554,7 +554,17 @@ local function setup_browser_buffer()
         "          nested  = folders nest per : segment (方案B)",
         "  (/ stays nvim's own buffer search)",
       }
-      vim.api.nvim_echo(lines, true, {})
+      -- ui.centered_float — the same help surface as the source buffer's g?
+      -- (buffer_setup.show_help). nvim_echo was wrong twice over: its chunks
+      -- must be [text, hl] arrays (a plain string list raised E5108 "Invalid
+      -- 'chunk': expected Array, got String"), and a help screen wants a
+      -- dismissible float, not a message-area dump.
+      require("poste-redis.ui").centered_float(lines, {
+        title = "poste-redis browser help",
+        width = math.min(72, vim.o.columns - 4),
+        height = math.min(#lines + 2, vim.o.lines - 4),
+      })
+      vim.cmd.redraw()
     end, opts)
   end
 
