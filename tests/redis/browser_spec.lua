@@ -291,6 +291,12 @@ describe("poste-redis browser async grouping", function()
     assert.equals("key", node_map[3].node_type)
     assert.equals("a:b:c:d:x", node_map[3].meta.key,
       "display shortens, canonical key stays full")
+    -- The fold must live on a COPIED display list: writing the folded
+    -- descendant back into the caller's arrays rewired the MODEL (the parent
+    -- groups were replaced by their fold target in the real children lists).
+    assert.equals(a, db.children[1], "db keeps its real group child")
+    assert.same({ b }, a.children, "a keeps its real child")
+    assert.same({ c }, b.children, "b keeps its real child")
   end)
 
   it("nested view keeps lone-key folders as expandable groups", function()

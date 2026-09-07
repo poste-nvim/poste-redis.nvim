@@ -206,11 +206,18 @@ function M.flatten_tree(nodes, depth, multi_select, budget, ctx)
   -- expand/load/delete all keep real semantics. The display root itself is
   -- never folded (its status/loader rendering and its children-at-depth-0
   -- contract stay intact — e.g. the search results node, which is a group).
+  -- Folded onto a COPIED display list: `nodes` often IS a real children array
+  -- (the model graph), and writing fold_walk(n) back into nodes[i] replaced
+  -- the parent group with its folded descendant in the MODEL — display state
+  -- leaking into the tree structure. Folds are recomputed every render, so it
+  -- worked by accident; the caller's list keeps its real nodes now.
+  local display = {}
   for i = 1, #nodes do
     local n = nodes[i]
     if nested and n.node_type == "group" and n ~= M.display_root then
-      local f = fold_walk(n)
-      if f ~= n then nodes[i] = f end
+      display[i] = fold_walk(n)
+    else
+      display[i] = n
     end
   end
   local lines = {}
@@ -238,7 +245,7 @@ function M.flatten_tree(nodes, depth, multi_select, budget, ctx)
     return #child_lines
   end
 
-  for _, node in ipairs(nodes) do
+  for _, node in ipairs(display) do
     -- Hidden display root: emit no node line, render its children at depth 0
     -- so the tree top level is the selected db's groups/keys directly. While
     -- it loads (or after a failed scan) one status line IS emitted — the db
