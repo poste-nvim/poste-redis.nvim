@@ -213,7 +213,10 @@ function M.maybe_fetch_next(active_idx, tab_count)
 end
 
 --- Load the full value of a truncated string (bypasses preview_max_bytes via
---- a large --max-bytes exec run, rendered as a fresh single tab).
+--- a large --max-bytes exec run, rendered as a fresh single tab). Async: the
+--- run_sync version blocked the whole UI for the length of the fetch, so a
+--- near-cap value froze Neovim on `F`. Both callbacks drop stale events (the
+--- view may have been replaced mid-fetch) and clear the paging guard.
 function M.load_full()
   if not view or view.type ~= "string" then return end
   local v = view
@@ -224,22 +227,29 @@ function M.load_full()
   }
   -- exec path supports arbitrary --max-bytes; use a big cap for full load
   local exec_run = require("poste-redis.exec_run")
-  local ev, err = exec_run.run_sync(entry, {
+  v.busy = true  -- no interleaved <Tab> page fetch while the full load runs
+  exec_run.run_async({ entry }, {
     connection = v.url,
     max_bytes = 1024 * 1024 * 64,  -- 64 MiB cap for "full"
+  }, {
+    on_result = function(ev)
+      if view ~= v then return end
+      v.busy = false
+      local out = format.format_result(ev)
+      out.meta.title = v.key .. " [string · full]"
+      out.meta.key = v.key
+      out.meta.connection = v.conn_name
+      out.meta.db = v.db
+      v.pages = { out }
+      buffer.render_tabs(v.pages, { render = true })
+    end,
+    on_error = function(msg)
+      if view ~= v then return end
+      v.busy = false
+      vim.notify("Full load failed: " .. tostring(msg), vim.log.levels.ERROR,
+        { title = redis_state.TITLE })
+    end,
   })
-  if not ev then
-    vim.notify("Full load failed: " .. tostring(err), vim.log.levels.ERROR,
-      { title = redis_state.TITLE })
-    return
-  end
-  local out = format.format_result(ev)
-  out.meta.title = v.key .. " [string · full]"
-  out.meta.key = v.key
-  out.meta.connection = v.conn_name
-  out.meta.db = v.db
-  v.pages = { out }
-  buffer.render_tabs(v.pages, { render = true })
 end
 
 --- View a key's value in the result panel.

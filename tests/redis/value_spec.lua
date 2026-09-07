@@ -125,4 +125,57 @@ describe("poste-redis value viewer", function()
     assert.equals(1, #buffer._tabs(), "A's late page must be dropped")
     assert.equals("b", buffer.active_tab().meta.key)
   end)
+
+  it("load_full fetches via run_async and renders one full tab", function()
+    -- Regression: load_full used exec_run.run_sync, so fetching a near-cap
+    -- value blocked the whole UI on `F`.
+    local exec_run = require("poste-redis.exec_run")
+    local orig_run_async = exec_run.run_async
+    local captured = nil
+    exec_run.run_async = function(entries, opts, cbs)
+      captured = { entries = entries, opts = opts, cbs = cbs }
+      return 1
+    end
+
+    session_conn.execute = function(_url, _cmd, cbs)
+      cbs.on_response({ value = { type = "string", value = "trunc…" } })
+      return "dispatched"
+    end
+    value.view(make_node("big", "string"), nil, nil)
+
+    value.load_full()
+    assert.is_not_nil(captured, "the exec run must be dispatched async")
+    assert.same({ "GET", "big" }, captured.entries[1].tokens)
+    assert.equals(1024 * 1024 * 64, captured.opts.max_bytes)
+    assert.equals(1, #buffer._tabs(), "nothing rendered before the reply")
+
+    captured.cbs.on_result({ value = { type = "string", value = "the whole value" } })
+    exec_run.run_async = orig_run_async
+    assert.equals(1, #buffer._tabs(), "the full load REPLACES the page list")
+    assert.equals("big [string · full]", buffer.active_tab().meta.title)
+    assert.equals("the whole value", buffer.active_tab().meta.value.value)
+  end)
+
+  it("load_full drops a reply for a superseded view and never renders it", function()
+    local exec_run = require("poste-redis.exec_run")
+    local orig_run_async = exec_run.run_async
+    local captured = nil
+    exec_run.run_async = function(entries, opts, cbs)
+      captured = cbs
+      return 1
+    end
+
+    session_conn.execute = function(_url, _cmd, cbs)
+      cbs.on_response({ value = { type = "string", value = "trunc…" } })
+      return "dispatched"
+    end
+    value.view(make_node("a", "string"), nil, nil)
+    value.load_full()
+    value.view(make_node("b", "string"), nil, nil)
+
+    captured.on_result({ value = { type = "string", value = "stale A" } })
+    exec_run.run_async = orig_run_async
+    assert.equals("b", buffer.active_tab().meta.key, "stale full load must not render")
+    assert.equals(1, #buffer._tabs())
+  end)
 end)
