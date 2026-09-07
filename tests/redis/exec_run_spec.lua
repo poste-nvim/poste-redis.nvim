@@ -332,6 +332,29 @@ describe("poste-redis exec_run", function()
     exec_run.cancel()
   end)
 
+  it("dispatch walks consecutive error groups in a loop — flat stack on a pathological file", function()
+    -- every bare USE becomes an error group; the old per-group recursion
+    -- nested one frame per group (same shape the es preflight fix removed)
+    stub_emit({})
+    local lines = {}
+    for i = 1, 3000 do lines[i] = "USE" end
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, lines)
+    local results, done_depth = {}, nil
+    exec_run.run_file_async(src, {}, {
+      on_result = function(ev) results[#results + 1] = ev end,
+      on_done = function()
+        local level = 1
+        while debug.getinfo(level, "") do level = level + 1 end
+        done_depth = level
+      end,
+    })
+    assert.equals(3000, #results)
+    assert.is_true(done_depth < 100)
+    vim.api.nvim_buf_delete(src, { force = true })
+    exec_run.cancel()
+  end)
+
   it("run_selection_async resolves connection from USE when opts omit it", function()
     stub_emit({})
     local connections = require("poste-redis.connections")

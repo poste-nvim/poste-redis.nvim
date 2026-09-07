@@ -315,10 +315,13 @@ end
 --- Run one group (per-connection batch), then dispatch the next — multi-USE
 --- files execute sequentially so batches never interleave in the UI.
 --- Chain validity: run_async's own captured-seq guards stop each batch when a
---- newer run supersedes it, so this recursion only ever continues while the
---- run is current. The one extra check covers the SYNCHRONOUS path — a
+--- newer run supersedes it, so this only ever continues while the run is
+--- current. The one extra check covers the SYNCHRONOUS path — a
 --- callbacks.on_group that cancels/supersedes mid-chain (fire-time guards
 --- here compare the seq with itself, so they cannot drop anything).
+--- Consecutive error groups advance in a while loop — a file of 10k failed
+--- USEs must not nest 10k stack frames; real batches re-enter on a fresh
+--- stack via their async on_done.
 --- @param groups table[]
 --- @param index number  1-based group to dispatch
 --- @param opts table
@@ -326,12 +329,9 @@ end
 --- @param all_results table[]  accumulated result events
 --- @param all_summaries table[]  accumulated summary events
 local function dispatch_group(groups, index, opts, callbacks, all_results, all_summaries)
-  if index > #groups then
-    guarded(exec_seq, callbacks.on_done, all_results, all_summaries)()
-    return
-  end
-  local g = groups[index]
-  if g.error then
+  while index <= #groups do
+    local g = groups[index]
+    if not g.error then break end
     local err_ev = {
       type = "result",
       status = "error",
@@ -344,11 +344,14 @@ local function dispatch_group(groups, index, opts, callbacks, all_results, all_s
     guarded(exec_seq, callbacks.on_result, err_ev)()
     -- the callback may have canceled/superseded the run; only continue the
     -- synchronous chain while the seq is unchanged
-    if exec_seq == seq_before then
-      dispatch_group(groups, index + 1, opts, callbacks, all_results, all_summaries)
-    end
+    if exec_seq ~= seq_before then return end
+    index = index + 1
+  end
+  if index > #groups then
+    guarded(exec_seq, callbacks.on_done, all_results, all_summaries)()
     return
   end
+  local g = groups[index]
   local seq_before = exec_seq
   guarded(exec_seq, callbacks.on_group, g)()
   -- never dispatch a batch for a seq the callback just superseded
