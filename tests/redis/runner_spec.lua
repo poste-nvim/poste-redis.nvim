@@ -112,7 +112,6 @@ describe("poste-redis runner indicators", function()
     -- (db stayed 0) and its phantom result/indicator cluttered the run
     local cli = require("poste.cli")
     local session_conn = require("poste-redis.session_conn")
-    local buffer = require("poste-redis.buffer")
     local orig_run_async = cli.run_async
     local orig_execute = session_conn.execute
     cli.run_async = function(_cmd, opts)

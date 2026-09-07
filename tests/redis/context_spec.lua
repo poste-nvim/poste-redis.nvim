@@ -200,7 +200,6 @@ describe("poste-redis context", function()
 end)
 
 describe("poste-redis context file_context cache", function()
-  local parser = require("poste-redis.parser")
 
   it("parses once for cursor moves within the parsed range; extends downward", function()
     local buf = vim.api.nvim_create_buf(false, true)

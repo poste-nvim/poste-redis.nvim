@@ -278,7 +278,7 @@ describe("poste-redis session_conn", function()
 
 
   it("handles stdout split across chunks without a trailing newline", function()
-    local session = session_conn.get(URL)
+    session_conn.get(URL)
     local responses = {}
     session_conn.execute(URL, { "PING" }, {
       on_response = function(ev) responses[#responses + 1] = ev end,

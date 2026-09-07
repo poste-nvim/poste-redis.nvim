@@ -621,7 +621,6 @@ describe("poste-redis browser search bar", function()
   end)
 
   it("separator tracks a narrowed window and stays on one line", function()
-    local browser = require("poste-redis.browser.init")
     local orig_load = async.load_connections
     async.load_connections = function(cb) cb({}) end
 
@@ -656,8 +655,8 @@ describe("poste-redis browser search bar", function()
 end)
 
 describe("poste-redis browser window", function()
+  local browser = require("poste-redis.browser.init")
   it("opens in a right-hand split without replacing the source buffer", function()
-    local browser = require("poste-redis.browser.init")
     local orig_load = async.load_connections
     local orig_render_hook = async.render_hook
     async.load_connections = function(cb) cb({}) end
@@ -695,7 +694,6 @@ describe("poste-redis browser window", function()
   end)
 
   it("<leader>/ search replaces the tree; committed query stays on the bar", function()
-    local browser = require("poste-redis.browser.init")
     local session_conn = require("poste-redis.session_conn")
 
     local orig_load = async.load_connections
@@ -771,7 +769,6 @@ describe("poste-redis browser window", function()
   end)
 
   it("search commits a query typed at the line end; the icon stays virt text", function()
-    local browser = require("poste-redis.browser.init")
     local session_conn = require("poste-redis.session_conn")
 
     local orig_load = async.load_connections
@@ -840,7 +837,6 @@ describe("poste-redis browser window", function()
   end)
 
   it("<leader>/ from a tree row jumps the caret to the search bar, not the row", function()
-    local browser = require("poste-redis.browser.init")
     local session_conn = require("poste-redis.session_conn")
 
     local orig_load = async.load_connections
@@ -885,7 +881,6 @@ describe("poste-redis browser window", function()
   end)
 
   it("h after l keeps the cursor on the collapsed group line", function()
-    local browser = require("poste-redis.browser.init")
     local session_conn = require("poste-redis.session_conn")
 
     local orig_load = async.load_connections
@@ -951,7 +946,6 @@ describe("poste-redis browser window", function()
   end)
 
   it("toggle_view keeps lazy (unexpanded) groups — re-scans instead of rebuilding", function()
-    local browser = require("poste-redis.browser.init")
     local session_conn = require("poste-redis.session_conn")
 
     local orig_load = async.load_connections
@@ -1010,6 +1004,7 @@ end)
 
 describe("poste-redis browser auto-width", function()
   local config = require("poste-redis.config")
+  local browser = require("poste-redis.browser.init")
 
   it("render_tree records the longest visible data row in display cells", function()
     local buf = vim.api.nvim_create_buf(false, true)
@@ -1041,7 +1036,6 @@ describe("poste-redis browser auto-width", function()
   end)
 
   it("grows the split past the default 30 to fit a long expanded key", function()
-    local browser = require("poste-redis.browser.init")
     local session_conn = require("poste-redis.session_conn")
 
     local orig_load = async.load_connections
@@ -1132,8 +1126,6 @@ describe("poste-redis browser e2e (live redis)", function()
 
   it("scan_keys builds lazy group headers; scan_group loads keys", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
-    local tree = require("poste-redis.browser.tree")
-    local async = require("poste-redis.browser.async")
     local session_conn = require("poste-redis.session_conn")
 
     -- ensure the fixture keys exist (the suite may have deleted some)
@@ -1184,8 +1176,6 @@ describe("poste-redis browser e2e (live redis)", function()
 
   it("search renders sub-path matches and search_clear removes them", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
-    local tree = require("poste-redis.browser.tree")
-    local async = require("poste-redis.browser.async")
     local session_conn = require("poste-redis.session_conn")
 
     -- seed nested sub-path keys
@@ -1233,8 +1223,6 @@ describe("poste-redis browser e2e (live redis)", function()
 
   it("nested view builds a:b:c → a/b folder tree through live redis", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
-    local tree = require("poste-redis.browser.tree")
-    local async = require("poste-redis.browser.async")
     local session_conn = require("poste-redis.session_conn")
     async.set_view_mode("nested")
 
@@ -1297,8 +1285,6 @@ describe("poste-redis browser e2e (live redis)", function()
 
   it("value.view renders a string key through the live session", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
-    local tree = require("poste-redis.browser.tree")
-    local value = require("poste-redis.browser.value")
     local buffer = require("poste-redis.buffer")
     local session_conn = require("poste-redis.session_conn")
 
@@ -1324,8 +1310,6 @@ describe("poste-redis browser e2e (live redis)", function()
 
   it("value.view renders a hash via HSCAN with a loaded footer", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
-    local tree = require("poste-redis.browser.tree")
-    local value = require("poste-redis.browser.value")
     local buffer = require("poste-redis.buffer")
     local session_conn = require("poste-redis.session_conn")
 
@@ -1376,7 +1360,6 @@ describe("poste-redis browser actions e2e (live redis)", function()
   it("set_ttl persists an EXPIRE through the live session", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
     local actions = require("poste-redis.browser.actions")
-    local tree = require("poste-redis.browser.tree")
     local session_conn = require("poste-redis.session_conn")
 
     -- self-seed the key (suite may run against a clean db)
@@ -1409,7 +1392,6 @@ describe("poste-redis browser actions e2e (live redis)", function()
   it("delete_key removes a key through the live session", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
     local actions = require("poste-redis.browser.actions")
-    local tree = require("poste-redis.browser.tree")
     local session_conn = require("poste-redis.session_conn")
 
     -- seed the key
@@ -1440,7 +1422,6 @@ describe("poste-redis browser actions e2e (live redis)", function()
   it("rename_key renames with EXISTS check through the live session", function()
     if not ok_avail then pending("REDIS_TEST_URL not reachable"); return end
     local actions = require("poste-redis.browser.actions")
-    local tree = require("poste-redis.browser.tree")
     local session_conn = require("poste-redis.session_conn")
 
     -- idempotent seed: clear both names, then create act:ren

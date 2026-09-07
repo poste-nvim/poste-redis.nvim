@@ -298,10 +298,6 @@ end)
 
 
 describe("poste-redis key completion (task 0903 #10)", function()
-  local data = require("poste-redis.completion.data")
-  local completion = require("poste-redis.completion.init")
-  local session_conn = require("poste-redis.session_conn")
-  local parser = require("poste-redis.parser")
 
   after_each(function()
     session_conn.execute = nil
@@ -310,7 +306,6 @@ describe("poste-redis key completion (task 0903 #10)", function()
 
   it("completes `GET ses` from SCAN MATCH ses* over the persistent session", function()
     local scanned
-    local exec_run = require("poste-redis.exec_run")
     local orig_conn_for = exec_run._connection_for
     exec_run._connection_for = function() return "redis://x", "stub" end
     session_conn.execute = function(url, cmd, cbs)

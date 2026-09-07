@@ -6,7 +6,6 @@ local redis_state = require("poste-redis.state")
 
 describe("poste-redis connections", function()
   local tmpdir
-  local dir
 
   before_each(function()
     tmpdir = vim.fn.tempname()
@@ -32,7 +31,6 @@ describe("poste-redis connections", function()
     connections._test.reset_caches()
     redis_state.context = { connection = nil, db = nil }
     redis_state.current_url = nil
-    dir = {}
   end
 
   before_each(reset)
@@ -267,7 +265,6 @@ end)
 
 describe("poste-redis context statusline", function()
   local statusline = require("poste-redis.statusline")
-  local redis_state = require("poste-redis.state")
 
   after_each(function()
     redis_state.context.connection = nil
@@ -275,7 +272,6 @@ describe("poste-redis context statusline", function()
   end)
 
   it("builds a per-connection highlight group from connections.toml color", function()
-    local connections = require("poste-redis.connections")
     local orig = connections.get_connection_config
     connections.get_connection_config = function(name)
       assert.equals("prod", name)
@@ -289,7 +285,6 @@ describe("poste-redis context statusline", function()
   end)
 
   it("returns nil when the connection has no color configured", function()
-    local connections = require("poste-redis.connections")
     local orig = connections.get_connection_config
     connections.get_connection_config = function() return { dialect = "redis", url = "redis://h/0" } end
     assert.is_nil(statusline.get_ctx_color("plain"))
@@ -297,7 +292,6 @@ describe("poste-redis context statusline", function()
   end)
 
   it("context text follows the applied connection", function()
-    local connections = require("poste-redis.connections")
     local orig = connections.get_connection_config
     connections.get_connection_config = function(name)
       return { dialect = "redis", url = "redis://h:6379/0", color = "#61afef" }

@@ -30,8 +30,8 @@ describe("poste-redis exec_run", function()
   local function stub_emit(events, code)
     events = events or {}
     code = code or 0
-    cli.run_async = function(_cmd, opts)
-      emitted = { cmd = _cmd, stdin = opts and opts.stdin }
+    cli.run_async = function(cmd, opts)
+      emitted = { cmd = cmd, stdin = opts and opts.stdin }
       vim.schedule(function()
         for _, ev in ipairs(events) do
           pcall(opts.on_stdout, { ev })
@@ -180,8 +180,8 @@ describe("poste-redis exec_run", function()
       vim.json.encode({ type = "result", seq = 1, command = "PING", status = "PONG", latency_ms = 1, value = { type = "string", value = "PONG" } }),
       vim.json.encode({ type = "summary", total = 1, failed = 0, elapsed_ms = 1 }),
     }, "\n")
-    cli.run = function(_cmd, opts)
-      emitted = { cmd = _cmd, stdin = opts and opts.stdin }
+    cli.run = function(cmd, opts)
+      emitted = { cmd = cmd, stdin = opts and opts.stdin }
       return out, nil
     end
     local ev, err = exec_run.run_sync(entry("PING"), { connection = "redis://h:6379/0" })
@@ -270,7 +270,7 @@ describe("poste-redis exec_run", function()
     -- whole file ran against the default connection.
     local payloads = {}
     local saved_run_async = cli.run_async
-    cli.run_async = function(_cmd, opts)
+    cli.run_async = function(cmd, opts)
       payloads[#payloads + 1] = vim.json.decode(opts.stdin).connection
       vim.schedule(function()
         pcall(opts.on_stdout, {
@@ -520,7 +520,7 @@ describe("poste-redis exec_run group chain", function()
 
   it("a newer file run supersedes the previous run's pending results", function()
     local orig_run_async = cli.run_async
-    cli.run_async = function(_cmd, opts)
+    cli.run_async = function(cmd, opts)
       -- complete synchronously with one result + summary
       vim.schedule(function()
         pcall(opts.on_stdout, {

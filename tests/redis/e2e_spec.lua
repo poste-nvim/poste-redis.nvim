@@ -1,7 +1,6 @@
 --- End-to-end spec: runs the real poste redis-exec against a live redis.
 --- Gated on REDIS_TEST_URL (set in CI / playground) — skipped otherwise.
 --- Exercises the full M1 loop: USE → parser → exec_run → buffer → history.
-local parser = require("poste-redis.parser")
 local exec_run = require("poste-redis.exec_run")
 local buffer = require("poste-redis.buffer")
 local history = require("poste-redis.history")

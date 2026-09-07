@@ -92,9 +92,8 @@ describe("poste-redis doc provider", function()
   end)
 
   it("open_doc_preview closes a different tracked window before opening a new one", function()
-    local b1 = nil
     local _, win1 = doc.open_doc_preview({ "a" }, { track_key = "cmd:GET" })
-    b1 = vim.api.nvim_win_get_buf(win1)
+    local b1 = vim.api.nvim_win_get_buf(win1)
     local _, win2, reused = doc.open_doc_preview({ "b" }, { track_key = "cmd:SET" })
     assert.is_false(reused)
     assert.truthy(win2 and vim.api.nvim_win_is_valid(win2))
