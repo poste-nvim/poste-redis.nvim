@@ -23,7 +23,7 @@ fallback — see `requirements.md`.
 |------|------|
 | `parser.lua` | **The only parser (D1)**: `extract_entries` (continuations joined, quote-aware comments, `USE`), `cursor_entry`, `visual_entries`, `file_entries`, `entry_args` `buffer_entries` takes { max_line } for bounded hot-path parses |
 | `exec_run.lua` | `run_async` (stdin JSON → `poste redis-exec` → NDJSON events), `run_file_async` (USE grouping, sequential batches, SELECT-aware db stamped as `ev.db`), `run_sync`, `run_selection_async`, stale-guard + busy bookkeeping |
-| `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`list`; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests; `opts.db` auto-SELECTs on db change |
+| `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`release`/`list`; `opts.owner` tags a logical owner, `release(owner)` stops solely-held sessions; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests; `opts.db` auto-SELECTs on db change |
 | `runner.lua` | `<CR>` / `:PosteRedisRunFile` entry: connects exec_run → buffer → history, spinner indicators, silently preselects the file's declared db for line/selection runs (SELECT result swallowed) |
 | `format.lua` | `format_result` → `{kind}` — "text" for nil/int/string/binary/stream/unknown/error; "table" grid for list/set/hash/zset (`columns` + raw `rows`, `to_display`/`to_copy`); `format_error`, `preview_json`, `status_summary` |
 | `buffer.lua` | Result panel facade: `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`, panel keymaps, `r` refresh, TTL probe + countdown. Stamps each tab's origin context (connection / db / key) so grid editing writes where the command ran. Delegates to `buffer/*` |
@@ -81,7 +81,7 @@ fallback — see `requirements.md`.
 | `highlights.lua` | `PosteRedis*` groups (source + result panel + history) |
 | `treesitter.lua` | parser availability probe, enable tree-sitter highlighting, keep regex fallback |
 | `install.lua` | compile tree-sitter-poste-redis/src/parser.c into `stdpath("data")/site/parser` (needs cc; silent no-op otherwise) |
-| `util.lua` | `redact_url`, `display_width`, `truncate_display`, `pad_*`, `escape_for_line`, `format_latency` |
+| `util.lua` | `redact_url`, `glob_escape`, `render_command`, `display_width`, `truncate_display`, `pad_*`, `escape_for_line`, `format_latency` |
 
 ### Completion (`completion/`, P2-4)
 

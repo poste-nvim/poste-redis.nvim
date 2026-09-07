@@ -657,10 +657,10 @@ function M.close()
     vim.api.nvim_win_close(state.browser_win, true)
     state.browser_win = nil
   end
-  -- sessions keyed by url survive; cleanup_buf stops empty ones
-  if state.browser_buf and vim.api.nvim_buf_is_valid(state.browser_buf) then
-    session_conn.cleanup_buf(state.browser_buf)
-  end
+  -- Sessions keyed by url survive the close: the browser drops its ownership
+  -- and only solely-held sessions stop — sessions the result panel still has
+  -- a buffer registered on (SELECT state kept) stay up.
+  session_conn.release("browser")
 end
 
 --- Re-open the in-window connections picker (switch connection): the list

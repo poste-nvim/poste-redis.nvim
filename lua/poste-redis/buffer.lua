@@ -118,7 +118,7 @@ function fetch_ttl()
       start_ttl_countdown()
     end,
     on_error = function() end,  -- best effort: the result itself still shows
-  }, nil, { db = tab.meta.db })
+  }, state.buf, { db = tab.meta.db })
   if dispatched ~= "dispatched" then stop_ttl_timer() end
 end
 
@@ -179,7 +179,7 @@ function M.refresh()
       vim.notify("Refresh failed: " .. tostring(msg), vim.log.levels.ERROR,
         { title = constants.TITLE })
     end,
-  }, nil, { db = tab.meta.db })
+  }, state.buf, { db = tab.meta.db })
   if dispatched ~= "dispatched" then
     vim.notify("Refresh failed: session not available (" .. tostring(dispatched) .. ")",
       vim.log.levels.ERROR, { title = constants.TITLE })

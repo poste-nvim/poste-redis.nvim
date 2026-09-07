@@ -86,7 +86,7 @@ local function exec(tab, url, cmd, db, on_ok)
     on_error = function(msg)
       notify(rendered .. " failed: " .. tostring(msg), vim.log.levels.ERROR)
     end,
-  }, nil, { db = db })
+  }, nil, { db = db, owner = "browser" })
 end
 
 --- Verify the value currently stored at a list index still matches the
@@ -107,7 +107,7 @@ local function verified_list_write(tab, url, key, idx_0, expected, build_cmd, db
     on_error = function(msg)
       notify("LINDEX failed: " .. tostring(msg), vim.log.levels.ERROR)
     end,
-  }, nil, { db = db })
+  }, nil, { db = db, owner = "browser" })
 end
 
 --- Edit the cell under the cursor (i). Index column is not editable.

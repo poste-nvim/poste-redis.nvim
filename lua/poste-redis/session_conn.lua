@@ -31,6 +31,7 @@ local DEFAULT_MAX_ITEMS = 100000
 --   job_id      = number,
 --   conn_url    = string,
 --   bufs        = { [bufnr] = true },
+--   owners      = { [string] = true },  -- logical owners (execute opts.owner)
 --   seq         = number,
 --   pending     = { [seq] = { on_response = fn, on_error = fn } },
 --   buffer      = string,   -- partial stdout line buffer
@@ -128,6 +129,7 @@ local function start(conn_url, opts)
     job_id = nil,
     conn_url = conn_url,
     bufs = {},
+    owners = {},
     seq = 0,
     pending = {},
     buffer = "",
@@ -175,7 +177,7 @@ end
 --- Get the session for a connection_url, starting one if needed.
 --- @param conn_url string
 --- @param bufnr number|nil buffer that will use this session
---- @param opts table|nil { max_items, max_bytes } passed at process start
+--- @param opts table|nil { max_items, max_bytes, owner } passed at process start
 --- @return table|nil session
 function M.get(conn_url, bufnr, opts)
   local session = pool[conn_url]
@@ -184,6 +186,7 @@ function M.get(conn_url, bufnr, opts)
     if not session then return nil end
   end
   if bufnr then session.bufs[bufnr] = true end
+  if opts and opts.owner then session.owners[opts.owner] = true end
   return session
 end
 
@@ -195,6 +198,9 @@ end
 --- @param bufnr number|nil
 --- @param opts table|nil
 ---   - max_items, max_bytes: process-level limits (start only)
+---   - owner: string|nil — tag this session as in use by a logical owner
+---     (e.g. "browser"). Owners are released with M.release; a session an
+---     owner still holds survives cleanup_buf of unrelated buffers.
 ---   - db: number|nil — if set and the session is not already on that db, a
 ---     SELECT is sent first so the command runs in the right database (the
 ---     long-lived connection keeps SELECT state, P1-5). A failed SELECT
@@ -292,12 +298,27 @@ function M.stop_all()
   end
 end
 
---- Remove a buffer from all sessions; close sessions with no remaining buffers.
+--- Drop a logical owner (an execute(opts.owner) tag) from every pooled
+--- session and stop the sessions nothing else still holds. This is what
+--- makes cleanup_buf precise: closing one consumer (the browser) no longer
+--- stops sessions other consumers registered buffers on.
+--- @param owner string
+function M.release(owner)
+  for conn_url, session in pairs(pool) do
+    session.owners[owner] = nil
+    if not next(session.bufs) and not next(session.owners) then
+      M.stop(conn_url)
+    end
+  end
+end
+
+--- Remove a buffer from all sessions; close sessions with no remaining buffers
+--- and no remaining owners.
 --- @param bufnr number
 function M.cleanup_buf(bufnr)
   for conn_url, session in pairs(pool) do
     session.bufs[bufnr] = nil
-    if not next(session.bufs) then
+    if not next(session.bufs) and not next(session.owners) then
       M.stop(conn_url)
     end
   end

@@ -6,6 +6,7 @@ local cli = require("poste.cli")
 local session_conn = require("poste-redis.session_conn")
 
 local URL = "redis://127.0.0.1:16379/0"
+local URL2 = "redis://127.0.0.1:16380/0"
 
 describe("poste-redis session_conn", function()
   local orig_jobstart
@@ -240,6 +241,35 @@ describe("poste-redis session_conn", function()
     local buf = vim.api.nvim_create_buf(false, true)
     session_conn.get(URL, buf)
     assert.equals(1, vim.tbl_count(session_conn.list()))
+    session_conn.cleanup_buf(buf)
+    assert.equals(0, vim.tbl_count(session_conn.list()))
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("execute registers an owner tag; the session survives cleanup_buf of another buffer", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    session_conn.execute(URL, { "PING" }, nil, nil, { owner = "browser" })
+    session_conn.get(URL, buf)
+    -- the buffer is gone, but the browser still holds the session
+    session_conn.cleanup_buf(buf)
+    assert.equals(1, vim.tbl_count(session_conn.list()))
+    session_conn.release("browser")
+    assert.equals(0, vim.tbl_count(session_conn.list()))
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("release stops solely-owned sessions but keeps ones another consumer holds", function()
+    -- Regression: browser close ran cleanup_buf, and since execute callers
+    -- never registered a buffer, EVERY pooled session (other connections
+    -- included) was stopped. The browser now tags itself and releases.
+    local buf = vim.api.nvim_create_buf(false, true)
+    session_conn.get(URL2, buf)  -- result panel: buffer-registered session
+    session_conn.execute(URL, { "PING" }, nil, nil, { owner = "browser" })
+    assert.equals(2, vim.tbl_count(session_conn.list()))
+    session_conn.release("browser")
+    assert.equals(1, vim.tbl_count(session_conn.list()))
+    assert.is_nil(session_conn.list()[URL], "browser-only session stops")
+    assert.is_not_nil(session_conn.list()[URL2], "panel-held session survives")
     session_conn.cleanup_buf(buf)
     assert.equals(0, vim.tbl_count(session_conn.list()))
     vim.api.nvim_buf_delete(buf, { force = true })

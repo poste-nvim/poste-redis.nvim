@@ -197,7 +197,7 @@ function M.next_page()
       vim.notify("Value fetch failed: " .. tostring(msg), vim.log.levels.ERROR,
         { title = redis_state.TITLE })
     end,
-  }, nil, { db = v.db })
+  }, nil, { db = v.db, owner = "browser" })
 end
 
 --- Called after a panel tab switch: when the user lands on the value view's
@@ -291,7 +291,7 @@ function M.view(node, root_nodes, render_hook)
       vim.notify("TYPE failed: " .. tostring(msg), vim.log.levels.ERROR,
         { title = redis_state.TITLE })
     end,
-  }, nil, { db = db })
+  }, nil, { db = db, owner = "browser" })
 end
 
 M._test = {

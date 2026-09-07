@@ -194,7 +194,7 @@ end
 --- @return table
 function M.scan_session_opts(db)
   local max_items = math.max(config.config.header_scan_count or 5000, config.config.scan_count or 500) + 1000
-  return { db = db, max_items = max_items }
+  return { db = db, max_items = max_items, owner = "browser" }
 end
 
 --- Render a batch delta: queue the nodes for an incremental append under
@@ -273,7 +273,7 @@ function M.fetch_types(key_nodes, conn_url, db, guard_node)
           in_flight = in_flight - 1
           finish(n, nil)
         end,
-      }, nil, { db = db })
+      }, nil, { db = db, owner = "browser" })
     end
   end
 

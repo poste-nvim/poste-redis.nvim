@@ -155,7 +155,7 @@ function M.delete_key(node, ctx)
     on_error = function(msg)
       notify("DEL failed: " .. tostring(msg), vim.log.levels.ERROR)
     end,
-  }, nil, { db = node.meta and node.meta.db })
+  }, nil, { db = node.meta and node.meta.db, owner = "browser" })
 end
 
 --- Delete all keys under a prefix (a group node) with count estimation and
@@ -204,7 +204,7 @@ function M.delete_prefix(node, ctx)
           notify(("DEL %s failed: %s"):format(key_list[i], tostring(msg)), vim.log.levels.ERROR)
           del_next(i + 1)
         end,
-      }, nil, { db = db })
+      }, nil, { db = db, owner = "browser" })
     end
     del_next(1)
   end
@@ -226,7 +226,7 @@ function M.delete_prefix(node, ctx)
       on_error = function(msg)
         notify("SCAN estimate failed: " .. tostring(msg), vim.log.levels.ERROR)
       end,
-    }, nil, { db = db })
+    }, nil, { db = db, owner = "browser" })
   end
 
   estimate_page("0")
@@ -278,7 +278,7 @@ function M.delete_node(node, ctx)
           notify(("DEL %s failed: %s"):format(key_list[i], tostring(msg)), vim.log.levels.ERROR)
           del_next(i + 1)
         end,
-      }, nil, { db = db })
+      }, nil, { db = db, owner = "browser" })
     end
     del_next(1)
   end
@@ -299,7 +299,7 @@ function M.delete_node(node, ctx)
       on_error = function(msg)
         notify("SCAN failed: " .. tostring(msg), vim.log.levels.ERROR)
       end,
-    }, nil, { db = db })
+    }, nil, { db = db, owner = "browser" })
   end
 
   next_page("0")
@@ -385,7 +385,7 @@ function M.delete_nodes(nodes, ctx)
           notify(("DEL %s failed: %s"):format(flat[i], tostring(msg)), vim.log.levels.ERROR)
           del_next(i + 1)
         end,
-      }, nil, { db = nodes[1].meta and nodes[1].meta.db })
+      }, nil, { db = nodes[1].meta and nodes[1].meta.db, owner = "browser" })
     end
     del_next(1)
   end
@@ -414,7 +414,7 @@ function M.delete_nodes(nodes, ctx)
             pending_scans = pending_scans - 1
             if pending_scans == 0 then confirm_and_run() end
           end,
-        }, nil, { db = db })
+        }, nil, { db = db, owner = "browser" })
       end
       scan_next("0")
     end
@@ -474,13 +474,13 @@ function M.set_ttl(node, _ctx)
           on_error = function(msg)
             notify("TTL update failed: " .. tostring(msg), vim.log.levels.ERROR)
           end,
-        }, nil, { db = db })
+        }, nil, { db = db, owner = "browser" })
       end)
     end,
     on_error = function(msg)
       notify("TTL query failed: " .. tostring(msg), vim.log.levels.ERROR)
     end,
-  }, nil, { db = db })
+  }, nil, { db = db, owner = "browser" })
 end
 
 ----------------------------------------------------------------------
@@ -523,12 +523,12 @@ function M.rename_key(node, ctx)
           on_error = function(msg)
             notify("RENAME failed: " .. tostring(msg), vim.log.levels.ERROR)
           end,
-        }, nil, { db = db })
+        }, nil, { db = db, owner = "browser" })
       end,
       on_error = function(msg)
         notify("EXISTS failed: " .. tostring(msg), vim.log.levels.ERROR)
       end,
-    }, nil, { db = db })
+    }, nil, { db = db, owner = "browser" })
   end)
 end
 

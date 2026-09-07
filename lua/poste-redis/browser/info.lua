@@ -73,7 +73,7 @@ local function key_info(node, url, cb)
         pending = pending - 1
         done()
       end,
-    }, nil, { db = db })
+    }, nil, { db = db, owner = "browser" })
   end
 
   one("type", { "TYPE", key }, function(v) return v and v.value end)
@@ -129,7 +129,7 @@ local function group_info(node, url, cb)
         pending_samples = pending_samples - 1
         maybe_done()
       end,
-    }, nil, { db = db })
+    }, nil, { db = db, owner = "browser" })
   end
 
   local function next_page(cursor)
@@ -150,7 +150,7 @@ local function group_info(node, url, cb)
         finished = true
         cb({ "### " .. prefix .. "/", "", "- scan failed: " .. tostring(msg) })
       end,
-    }, nil, { db = db })
+    }, nil, { db = db, owner = "browser" })
   end
 
   next_page("0")
@@ -177,7 +177,7 @@ function M.show(node, ctx)
         cb({ "### db " .. tostring(node.meta.db or 0), "",
           ("- keys: **%s**"):format(tostring(ev.value and ev.value.value)) })
       end,
-    }, nil, { db = node.meta.db })
+    }, nil, { db = node.meta.db, owner = "browser" })
   end
 end
 
