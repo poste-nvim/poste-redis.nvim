@@ -121,6 +121,24 @@ function M.glob_escape(s)
   return (s:gsub("[%*%?%[%]\\]", "\\%0"))
 end
 
+--- Render a command token list as the display/history line. Tokens that are
+--- empty or contain whitespace, a double quote or a backslash are double-
+--- quoted with escapes, so a key `a b` records as `DEL "a b"` instead of the
+--- ambiguous `DEL a b` (three args on read-back). Clean tokens stay verbatim.
+--- @param args table[]  token list (args[1] = command name)
+--- @return string
+function M.render_command(args)
+  local out = {}
+  for i, a in ipairs(args or {}) do
+    a = tostring(a)
+    if a == "" or a:find("[%s\"\\]") then
+      a = '"' .. a:gsub("\\", "\\\\"):gsub("\"", "\\\"") .. '"'
+    end
+    out[i] = a
+  end
+  return table.concat(out, " ")
+end
+
 --- Raw value for the clipboard (yank cell/column): keeps strings verbatim
 --- (no escape, no quotes), numbers as integers, tables as compact JSON.
 --- @param v any

@@ -27,11 +27,14 @@ local function notify(msg, level)
   vim.notify(msg, level or vim.log.levels.INFO, { title = redis_state.TITLE })
 end
 
---- Record a mutation in the command history. `yank` carries an executable
---- form for batch deletes (a bare `DEL prefix:*` glob cannot run as-is).
-local function record(command, opts)
+--- Record a mutation in the command history. `cmd` is the token list, rendered
+--- by util.render_command so keys containing whitespace record quoted (a key
+--- `a b` reads back as `DEL "a b"`, not the ambiguous `DEL a b`). `yank`
+--- carries an executable form for batch deletes (a bare `DEL prefix:*` glob
+--- cannot run as-is).
+local function record(cmd, opts)
   require("poste-redis.history").push(vim.tbl_extend("force", {
-    command = command,
+    command = util.render_command(cmd),
     kind = "write",
   }, opts or {}))
 end
@@ -146,7 +149,7 @@ function M.delete_key(node, ctx)
     on_response = function(ev)
       local n = ev.value and ev.value.value
       notify(("Deleted %s (%s key(s))"):format(key, tostring(n or 0)))
-      record("DEL " .. key, { connection = node.meta and node.meta.connection, db = node.meta and node.meta.db })
+      record({ "DEL", key }, { connection = node.meta and node.meta.connection, db = node.meta and node.meta.db })
       refresh_tree(ctx.db_node, ctx.render, function() detach_node(node) end)
     end,
     on_error = function(msg)
@@ -185,7 +188,7 @@ function M.delete_prefix(node, ctx)
       if i > #key_list then
         notify(("Deleted %d key(s) under %s:*"):format(#key_list, prefix))
         -- one history line for the whole batch, not one per key
-        record(("DEL %s:*"):format(prefix), {
+        record({ "DEL", prefix .. ":*" }, {
           connection = node.meta and node.meta.connection,
           db = db,
           count = #key_list,
@@ -259,7 +262,7 @@ function M.delete_node(node, ctx)
     local function del_next(i)
       if i > #key_list then
         notify(("Deleted node %s (%d key(s))"):format(prefix, #key_list))
-        record(("DEL %s:*"):format(prefix), {
+        record({ "DEL", prefix .. ":*" }, {
           connection = node.meta and node.meta.connection,
           db = db,
           count = #key_list,
@@ -361,7 +364,9 @@ function M.delete_nodes(nodes, ctx)
           end
         end
         if #lit > 0 then yank_lines[#yank_lines + 1] = "DEL " .. table.concat(lit, " ") end
-        record("DEL " .. table.concat(patterns, " "), {
+        local cmd_toks = { "DEL" }
+        vim.list_extend(cmd_toks, patterns)
+        record(cmd_toks, {
           connection = nodes[1].meta and nodes[1].meta.connection,
           db = nodes[1].meta and nodes[1].meta.db,
           count = #flat,
@@ -460,7 +465,7 @@ function M.set_ttl(node, _ctx)
         session_conn.execute(url, cmd, {
           on_response = function()
             notify(("TTL set on %s (%s)"):format(key, input))
-            record(table.concat(cmd, " "), {
+            record(cmd, {
               connection = node.meta and node.meta.connection, db = db,
             })
             -- EXPIRE/PERSIST never change the keyspace: the tree stays valid,
@@ -510,7 +515,7 @@ function M.rename_key(node, ctx)
         session_conn.execute(url, { "RENAME", key, new_key }, {
           on_response = function()
             notify(("Renamed %s → %s"):format(key, new_key))
-            record(("RENAME %s %s"):format(key, new_key), {
+            record({ "RENAME", key, new_key }, {
               connection = node.meta and node.meta.connection, db = db,
             })
             reload(ctx.db_node, ctx.render)

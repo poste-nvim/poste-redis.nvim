@@ -7,6 +7,7 @@
 --- always reflects the server.
 local session_conn = require("poste-redis.session_conn")
 local connections = require("poste-redis.connections")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -68,11 +69,14 @@ local function cursor_cell(tab)
 end
 
 local function exec(tab, url, cmd, db, on_ok)
+  -- Quoted render (util.render_command): edited values often carry whitespace,
+  -- and the raw join reads back as separate args in the history line.
+  local rendered = util.render_command(cmd)
   session_conn.execute(url, cmd, {
     on_response = function()
-      notify(table.concat(cmd, " ") .. " — OK")
+      notify(rendered .. " — OK")
       require("poste-redis.history").push({
-        command = table.concat(cmd, " "),
+        command = rendered,
         connection = tab and tab.meta and tab.meta.connection or "",
         db = db,
         kind = "write",
@@ -80,7 +84,7 @@ local function exec(tab, url, cmd, db, on_ok)
       on_ok()
     end,
     on_error = function(msg)
-      notify(table.concat(cmd, " ") .. " failed: " .. tostring(msg), vim.log.levels.ERROR)
+      notify(rendered .. " failed: " .. tostring(msg), vim.log.levels.ERROR)
     end,
   }, nil, { db = db })
 end

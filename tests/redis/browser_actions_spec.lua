@@ -79,6 +79,18 @@ describe("poste-redis browser actions", function()
     assert.equals(0, calls[1].opts.db)
   end)
 
+  it("delete_key records a quoted command for keys containing whitespace", function()
+    -- Regression: history lines were raw space-joins, so a key `a b` recorded
+    -- as `DEL a b` — ambiguous on display and copy (reads back as two keys).
+    local history = require("poste-redis.history")
+    history.clear()
+    local node = key_node("weird key", "my-redis", 0)
+    node.meta.url = "redis://h:6379/0"
+    actions.delete_key(node, {})
+    assert.is_true(wait_for(function() return history.count() > 0 end))
+    assert.equals('DEL "weird key"', history.list()[1].command)
+  end)
+
   it("delete_key skips the DEL when the user cancels", function()
     confirm_answer = 2
     local node = key_node("user:1", "my-redis", 0)
