@@ -357,6 +357,11 @@ local function dispatch_group(groups, index, opts, callbacks, all_results, all_s
   -- default — "keep" let opts.connection override every later USE group, so
   -- a default URL silently ran the whole file against one connection
   local group_opts = vim.tbl_extend("force", opts or {}, { connection = g.connection })
+  -- results ↔ entries are 1:1 per batch (greedy: failed commands still emit),
+  -- so stamp each result with its source entry's line. The binary's `seq`
+  -- restarts at 1 per batch — callers mapping seq onto a whole-file line list
+  -- misplace every group after the first in multi-USE files.
+  local group_result_idx = 0
   M.run_async(g.entries, group_opts, {
     on_start = callbacks.on_start,
     on_progress = callbacks.on_progress,
@@ -364,6 +369,9 @@ local function dispatch_group(groups, index, opts, callbacks, all_results, all_s
       -- which USE group produced this result (nil for the default URL) —
       -- the panel stamps it per tab so multi-USE files show real contexts
       ev.connection_name = g.connection_name
+      group_result_idx = group_result_idx + 1
+      local src_entry = g.entries[group_result_idx]
+      if src_entry and src_entry.start_line then ev.src_line = src_entry.start_line end
       all_results[#all_results + 1] = ev
       guarded(exec_seq, callbacks.on_result, ev)()
     end,

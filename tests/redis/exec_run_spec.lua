@@ -301,6 +301,37 @@ describe("poste-redis exec_run", function()
     exec_run.cancel()
   end)
 
+  it("run_file_async stamps each result with its source entry line across USE groups", function()
+    -- The binary's `seq` restarts at 1 per batch; a caller mapping seq onto
+    -- whole-file lines misplaces every group after the first. dispatch_group
+    -- now stamps ev.src_line from the parser entry (1-based file line).
+    local saved_run_async = cli.run_async
+    cli.run_async = function(cmd, opts)
+      vim.schedule(function()
+        pcall(opts.on_stdout, {
+          vim.json.encode({ type = "result", seq = 1, command = "GET", status = "OK", latency_ms = 1 }),
+          vim.json.encode({ type = "summary", total = 1, failed = 0, elapsed_ms = 1 }),
+        })
+        pcall(opts.on_exit, 0)
+      end)
+      return 4242
+    end
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE a", "GET one", "", "USE b", "GET two" })
+    local src_lines = {}
+    exec_run.run_file_async(src, {
+      resolve_url = function(name) return "redis://" .. name .. ":6379/0", nil end,
+    }, {
+      on_result = function(ev) src_lines[#src_lines + 1] = ev.src_line end,
+    })
+    assert.truthy(vim.wait(1000, function() return #src_lines >= 2 end))
+    -- "GET one" is file line 2, "GET two" is file line 5 — NOT seq 1 for both
+    assert.same({ 2, 5 }, src_lines)
+    cli.run_async = saved_run_async
+    vim.api.nvim_buf_delete(src, { force = true })
+    exec_run.cancel()
+  end)
+
   it("run_selection_async resolves connection from USE when opts omit it", function()
     stub_emit({})
     local connections = require("poste-redis.connections")

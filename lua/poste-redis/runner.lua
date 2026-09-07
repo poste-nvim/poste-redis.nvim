@@ -75,10 +75,15 @@ local function present(results, summaries, opts)
   if ok and src then
     for _, ev in ipairs(results or {}) do
       local line_0
-      if type(ev.seq) == "number" then
-        line_0 = batch_lines[ev.seq]
+      -- src_line (stamped by exec_run per USE group) is the exact executed
+      -- statement; the binary's per-batch `seq` is only meaningful against a
+      -- single-batch line list, so it is the LAST resort
+      if type(ev.src_line) == "number" then
+        line_0 = ev.src_line - 1
       elseif type(ev.start_line) == "number" then
         line_0 = ev.start_line - 1
+      elseif type(ev.seq) == "number" then
+        line_0 = batch_lines[ev.seq]
       end
       if line_0 ~= nil then
         if ev.status == "error" or ev.error then
