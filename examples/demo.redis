@@ -50,6 +50,8 @@ ZADD board 99 alice 87 bob
 ZREVRANGE board 0 -1 WITHSCORES   # member/score 表
 ZRANGE board 0 -1 WITHSCORES   # member/score 表
 
+# redis-cli --scan --pattern 'a:a_very_long_key:*' | xargs redis-cli del
+
 # ── 整数 / 状态 ──
 INCR counter:hits
 EXISTS session:abc       # 1 / 0
