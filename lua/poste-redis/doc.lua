@@ -13,6 +13,11 @@ local M = {}
 -- Track the most recently opened doc float for re-focus on repeated `K`.
 local hover_tracker = nil
 
+-- One shared augroup for every doc float's WinClosed autocmd. A per-float
+-- group ("PosteRedisDocWin_<win>", one per K popup) died with its autocmd but
+-- the group object itself accumulated forever.
+local doc_augroup = vim.api.nvim_create_augroup("PosteRedisDocWin", { clear = true })
+
 --- Open a markdown doc preview in a floating window (patterned after
 --- poste-http's `util.open_doc_preview`).
 --- Returns `float_buf, win, reused` where `reused` is true when an existing
@@ -52,9 +57,8 @@ function M.open_doc_preview(lines, opts)
 
   if opts.track_key then
     hover_tracker = { win = win, buf = float_buf, key = opts.track_key }
-    local hover_group = vim.api.nvim_create_augroup("PosteRedisDocWin_" .. win, { clear = true })
     vim.api.nvim_create_autocmd("WinClosed", {
-      group = hover_group,
+      group = doc_augroup,
       pattern = tostring(win),
       callback = function() hover_tracker = nil end,
     })

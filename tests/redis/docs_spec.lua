@@ -101,6 +101,22 @@ describe("poste-redis doc provider", function()
     assert.is_false(vim.api.nvim_buf_is_valid(b1))
     pcall(vim.api.nvim_win_close, win2, true)
   end)
+
+  it("tracked floats share ONE augroup (no per-float group accumulation)", function()
+    -- Regression: every tracked float created "PosteRedisDocWin_<win>" — the
+    -- autocmd died with the window but the group object accumulated forever.
+    local _, win1 = doc.open_doc_preview({ "a" }, { track_key = "cmd:GET" })
+    local _, win2 = doc.open_doc_preview({ "b" }, { track_key = "cmd:SET" })
+    local names = {}
+    for _, au in ipairs(vim.api.nvim_get_autocmds({ event = "WinClosed" })) do
+      if au.group_name and au.group_name:find("PosteRedisDocWin") then
+        names[au.group_name] = true
+      end
+    end
+    assert.equals(1, vim.tbl_count(names), "doc floats must share one augroup")
+    pcall(vim.api.nvim_win_close, win1, true)
+    pcall(vim.api.nvim_win_close, win2, true)
+  end)
 end)
 
 describe("poste-redis doc keymap", function()
