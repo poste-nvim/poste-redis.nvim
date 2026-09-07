@@ -94,21 +94,26 @@ local function start_ttl_countdown()
 end
 
 --- Best-effort `TTL <key>` probe for the active tab: needs a recorded
---- connection and a key-ish command (2nd token). -1 (persistent) / -2
---- (missing key) / errors display nothing. Fired after every tab render;
---- the winbar part itself is drawn by view.update_winbar from tab.ttl.
+--- connection and a key-ish command. The key comes from parser.key_arg, so
+--- server-scope commands (CONFIG/OBJECT/XINFO/…) never probe a non-key
+--- token; -1 (persistent) / -2 (missing key) / errors display nothing.
+--- Fired after every tab render; the winbar part itself is drawn by
+--- view.update_winbar from tab.ttl.
 function fetch_ttl()
   stop_ttl_timer()
   local tab = state.tabs[state.active]
   local conn_name = tab and tab.meta and tab.meta.connection
   local cmd = tab and tab.meta and tab.meta.command
   if not conn_name or conn_name == "" or not cmd or cmd == "" then return end
-  local ok, tokens = pcall(require("poste-redis.parser").command_tokens, cmd)
-  if not ok or type(tokens) ~= "table" or #tokens < 2 then return end
+  local parser_mod = require("poste-redis.parser")
+  local ok, tokens = pcall(parser_mod.command_tokens, cmd)
+  if not ok or type(tokens) ~= "table" then return end
+  local key = parser_mod.key_arg(tokens)
+  if not key then return end
   local url = resolve_connection_url(conn_name)
   if not url then return end
   local session_conn = require("poste-redis.session_conn")
-  local dispatched = session_conn.execute(url, { "TTL", tokens[2] }, {
+  local dispatched = session_conn.execute(url, { "TTL", key }, {
     on_response = function(ev)
       if state.tabs[state.active] ~= tab then return end  -- stale probe
       local n = ev.value and ev.value.value
