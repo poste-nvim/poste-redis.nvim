@@ -260,6 +260,20 @@ port = 6379
     assert.truthy(path)
     assert.match("connections%.toml$", path)
   end)
+
+  it("discovers a connections.toml created mid-session (no stale not-found)", function()
+    -- the old sticky `false` sentinel answered "not found" forever, so a file
+    -- created while nvim ran was invisible until restart
+    local search_dir = tmpdir .. "/sub"
+    vim.fn.mkdir(search_dir, "p")
+    connections._test.reset_caches()
+    assert.is_nil(connections.find_connections_toml(search_dir))
+    assert.is_nil(connections.find_connections_toml(search_dir))  -- cached miss
+    write("connections.toml", "[srv]\ndialect = \"redis\"\nurl = \"redis://h:6379/0\"\n")
+    assert.truthy(connections.find_connections_toml(search_dir))
+    local url = connections.resolve_redis_url("srv", { search_dir = search_dir })
+    assert.equals("redis://h:6379/0", url)
+  end)
 end)
 
 

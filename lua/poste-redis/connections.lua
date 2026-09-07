@@ -14,23 +14,38 @@ local M = {}
 local _config_search_cache = {}
 local _config_search_cache_mtime = {}
 
---- Walk up from `search_dir` to find connections.toml (mtime-cached).
+--- Walk up from `search_dir` to find connections.toml. The found path is
+--- mtime-cached; a "not found" result is NEVER served stale — every call
+--- re-walks, so a file created mid-session is discovered by every caller
+--- (resolve, listing, completion, browser), not only the picker paths that
+--- also call invalidate(). mtime invalidation alone can't do this: it has no
+--- answer for a file that did not exist when the cache was written (same
+--- rule as poste-es connections.lua).
 --- @param search_dir string|nil
 --- @return string|nil
 function M.find_connections_toml(search_dir)
   search_dir = search_dir or vim.fn.getcwd()
-  if _config_search_cache[search_dir] ~= nil then
-    local cached = _config_search_cache[search_dir]
-    if cached == false then return nil end
-    local mtime = vim.fn.getftime(cached)
-    if _config_search_cache_mtime[search_dir] == mtime then
-      return cached
-    end
-  end
   local result = util.find_file_upwards("connections.toml", search_dir)
-  _config_search_cache[search_dir] = result or false
-  _config_search_cache_mtime[search_dir] = result and vim.fn.getftime(result) or nil
+  if not result then
+    _config_search_cache[search_dir] = nil
+    _config_search_cache_mtime[search_dir] = nil
+    return nil
+  end
+  local mtime = vim.fn.getftime(result)
+  if _config_search_cache[search_dir] == result and _config_search_cache_mtime[search_dir] == mtime then
+    return result
+  end
+  _config_search_cache[search_dir] = result
+  _config_search_cache_mtime[search_dir] = mtime
   return result
+end
+
+--- Drop the file-discovery caches. Negative walk-up results re-probe on
+--- their own; this stays as the explicit re-probe hook for the pickers and
+--- as a spec reset.
+function M.invalidate()
+  _config_search_cache = {}
+  _config_search_cache_mtime = {}
 end
 
 --- Search dir for the current buffer (mirrors poste-db connections.lua).
@@ -355,6 +370,7 @@ end
 --- connection as the current context and notifies.
 function M.select_connection()
   local redis_util = require("poste-redis.util")
+  M.invalidate()  -- re-probe: the file may exist by now even if cached "not found"
   M.list_connections(function(list)
     if #list == 0 then
       vim.notify("No redis connections found in connections.toml",
@@ -395,6 +411,7 @@ end
 function M.select_context()
   local redis_util = require("poste-redis.util")
   local statusline = require("poste-redis.statusline")
+  M.invalidate()  -- re-probe: the file may exist by now even if cached "not found"
   M.list_connections(function(list)
     if #list == 0 then
       vim.notify("No redis connections found in connections.toml",
