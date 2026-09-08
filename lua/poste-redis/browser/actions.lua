@@ -343,7 +343,12 @@ function M.delete_nodes(nodes, ctx)
     end
     local flat = {}
     for _, job in ipairs(jobs) do
-      for _, k in ipairs(job.keys) do flat[#flat + 1] = k end
+      for _, k in ipairs(job.keys) do
+        -- carry the OWNING node's db: DELs must run against the same db the
+        -- SCAN collected the key from (multi-select is currently single-db,
+        -- but nothing here should silently depend on that)
+        flat[#flat + 1] = { key = k, db = job.node.meta and job.node.meta.db }
+      end
     end
     local function del_next(i)
       if i > #flat then
@@ -379,13 +384,13 @@ function M.delete_nodes(nodes, ctx)
         if ctx.on_done then ctx.on_done() end
         return
       end
-      session_conn.execute(url, { "DEL", flat[i] }, {
+      session_conn.execute(url, { "DEL", flat[i].key }, {
         on_response = function() del_next(i + 1) end,
         on_error = function(msg)
-          notify(("DEL %s failed: %s"):format(flat[i], tostring(msg)), vim.log.levels.ERROR)
+          notify(("DEL %s failed: %s"):format(flat[i].key, tostring(msg)), vim.log.levels.ERROR)
           del_next(i + 1)
         end,
-      }, nil, { db = nodes[1].meta and nodes[1].meta.db, owner = "browser" })
+      }, nil, { db = flat[i].db, owner = "browser" })
     end
     del_next(1)
   end

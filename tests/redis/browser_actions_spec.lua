@@ -240,6 +240,30 @@ describe("poste-redis browser actions", function()
       "prefix globs yank as scan pipelines")
   end)
 
+  it("delete_nodes runs each DEL against the owning node's db", function()
+    -- multi-select is currently single-db, but the DEL loop must not
+    -- silently depend on that: a key collected by a db-2 SCAN deleted with
+    -- db-1 selected would hit an unrelated key (or nothing)
+    local key_a = key_node("a:1", "stubconn", 1)
+    key_a.meta.url = "redis://h:6379/0"
+    local key_b = key_node("b:1", "stubconn", 2)
+    key_b.meta.url = "redis://h:6379/0"
+    actions.delete_nodes({ key_a, key_b }, {})
+    assert.is_true(wait_for(function() return #calls >= 2 end),
+      "batch delete did not finish")
+    local dels = {}
+    for _, c in ipairs(calls) do
+      if type(c) == "table" and c.cmd and c.cmd[1] == "DEL" then
+        dels[#dels + 1] = { key = c.cmd[2], db = c.opts.db }
+      end
+    end
+    assert.equals(2, #dels)
+    local by_key = {}
+    for _, d in ipairs(dels) do by_key[d.key] = d.db end
+    assert.equals(1, by_key["a:1"])
+    assert.equals(2, by_key["b:1"])
+  end)
+
   it("delete_key detaches only the deleted node (no db-wide rescan)", function()
     local parent = tree.make_group_node("user", "stubconn", 0)
     parent.meta.url = "redis://h:6379/0"
