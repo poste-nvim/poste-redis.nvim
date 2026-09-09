@@ -253,7 +253,13 @@ function M.render_active()
   else
     header.close()
     clear_grid_overlays()
-    local lines = tab and tab.lines or { "" }
+    local lines = {}
+    for _, l in ipairs(tab and tab.lines or { "" }) do lines[#lines + 1] = l end
+    -- the viewer's loaded/total footer rides meta.footer (same as grids):
+    -- appended at DISPLAY time so tab.lines stays the pure value and yank
+    -- never copies the chrome
+    local footer = tab and tab.meta and tab.meta.footer
+    if footer and footer ~= "" then lines[#lines + 1] = footer end
     vim.api.nvim_set_option_value("modifiable", true, { buf = state.buf })
     vim.api.nvim_buf_set_lines(state.buf, 0, vim.api.nvim_buf_line_count(state.buf), false, lines)
     vim.api.nvim_set_option_value("modifiable", false, { buf = state.buf })

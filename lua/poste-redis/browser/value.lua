@@ -105,18 +105,15 @@ local function add_page(v, ev, label)
   out.meta.key = v.key
   out.meta.connection = v.conn_name
   out.meta.db = v.db
-  -- append the loaded/total footer: table grids carry it in meta (rendered
-  -- under the table), text pages append it to the body lines
+  -- the loaded/total footer: carried in meta for BOTH kinds; the text render
+  -- appends it at display time, so tab.lines stays the pure value (yank / K
+  -- never pick up the "(loaded N / total M …)" chrome)
   local f = footer(v.loaded, v.total, {
     cursor = v.cursor,
     truncated = (ev.value and ev.value.truncated) or false,
   })
   if f ~= "" then
-    if out.kind == "table" then
-      out.meta.footer = f
-    else
-      out.lines[#out.lines + 1] = f
-    end
+    out.meta.footer = f
   end
   v.pages[#v.pages + 1] = out
   -- Re-render all pages as tabs (render_tabs replaces the tab set); the

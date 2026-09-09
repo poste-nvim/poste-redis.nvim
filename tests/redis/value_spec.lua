@@ -69,6 +69,23 @@ describe("poste-redis value viewer", function()
     assert.equals(1, #buffer._tabs())
   end)
 
+  it("a text page's loaded/total footer stays out of the yanked value", function()
+    -- The footer used to be appended straight into tab.lines, so `yank
+    -- current` on a string key copied "  (loaded 1 …)" along with the value.
+    session_conn.execute = function(_url, _cmd, cbs)
+      cbs.on_response({ value = { type = "string", value = "hello", len = 5 } })
+      return "dispatched"
+    end
+    value.view(make_node("greeting", "string"), nil, nil)
+    buffer.yank_current()
+    local reg = vim.fn.getreg('"')
+    assert.truthy(reg:find("hello", 1, true))
+    assert.is_nil(reg:find("loaded", 1, true))
+    -- but the panel still SHOWS the footer (render appends meta.footer)
+    local shown = table.concat(vim.api.nvim_buf_get_lines(buffer.buf(), 0, -1, false), "\n")
+    assert.truthy(shown:find("loaded", 1, true))
+  end)
+
   it("stream pages advance via the exclusive last id and stop on a short page", function()
     -- Regression: the stream branch was missing from the page handler, so a
     -- stream rendered exactly one page and was marked done — the footer's
