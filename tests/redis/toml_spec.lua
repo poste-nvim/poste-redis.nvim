@@ -41,6 +41,20 @@ password = "a\"b\\c"
     assert.equals('a"b\\c', out.srv.password)
   end)
 
+  it("decodes escapes in ONE pass (an escaped backslash never forms a new escape)", function()
+    -- sequential gsubs re-decode their own output: "D:\\tables\\notes" must
+    -- stay backslash + 't'/'n', not collapse into TAB/newline
+    local out = toml.parse('path = "D:\\\\tables\\\\notes"\n')
+    assert.equals("D:\\tables\\notes", out.path)
+    local pw = toml.parse('password = "a\\\\nb"\n')
+    assert.equals("a\\nb", pw.password)
+  end)
+
+  it("decodes real tab/newline escapes still", function()
+    local out = toml.parse('note = "a\\tb\\nc"\n')
+    assert.equals("a\tb\nc", out.note)
+  end)
+
   it("supports single-quoted literal strings", function()
     local out = toml.parse("path = 'a\\b'\n")
     assert.equals("a\\b", out.path)
