@@ -87,15 +87,25 @@ M.COMMANDS = COMMANDS
 ---------------------------------------------------------------------------
 
 local conn_names_cache = nil
+local conn_names_fp = nil  -- config-path + mtime fingerprint (invalidation hint)
 
---- Load redis connection names from connections.toml (cached, async cb).
+--- Load redis connection names from connections.toml (async cb). The cache
+--- invalidates when the config file's path or mtime changes — the pickers
+--- re-probe via invalidate(), but completion had no hook, so a
+--- connections.toml written mid-session stayed invisible here forever.
 --- @param callback fun(names: string[])
 function M.ensure_conn_names(callback)
-  if conn_names_cache then callback(conn_names_cache); return end
+  local path = connections.find_connections_toml()
+  local fp = tostring(path) .. "|" .. tostring(path and vim.fn.getftime(path) or nil)
+  if conn_names_cache and conn_names_fp == fp then
+    callback(conn_names_cache)
+    return
+  end
   vim.schedule(function()
     local names = connections.redis_connection_names()
     table.sort(names)
     conn_names_cache = names
+    conn_names_fp = fp
     callback(names)
   end)
 end
@@ -203,6 +213,7 @@ end
 --- Drop the connection-name cache (connections.toml changed).
 function M.clear_conn_names()
   conn_names_cache = nil
+  conn_names_fp = nil
 end
 
 M._test = {

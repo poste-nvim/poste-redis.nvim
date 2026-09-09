@@ -118,6 +118,7 @@ describe("poste-redis completion data", function()
     }, tmpdir .. "/connections.toml")
     local conns = require("poste-redis.connections")
     conns._test.reset_caches()
+    local orig_cwd = vim.fn.getcwd()
     vim.api.nvim_set_current_dir(tmpdir)
 
     data.clear_conn_names()
@@ -126,6 +127,53 @@ describe("poste-redis completion data", function()
     assert.equals(true, vim.wait(500, function() return names ~= nil end, 5))
     assert.same({ "my-redis" }, names)
 
+    -- restore BEFORE cleanup: a spec that leaves the suite chdir'd into a
+    -- dir it is about to delete poisons every later file (mail 09-08 lesson)
+    vim.api.nvim_set_current_dir(orig_cwd)
+    conns._test.reset_caches()
+    data.clear_conn_names()
+    pcall(vim.fn.delete, tmpdir, "rf")
+  end)
+
+  it("refreshes connection names when connections.toml changes mid-session", function()
+    local tmpdir = vim.fn.tempname()
+    vim.fn.mkdir(tmpdir, "p")
+    vim.fn.writefile({
+      "[first]",
+      'dialect = "redis"',
+      'url = "redis://127.0.0.1:6379/0"',
+    }, tmpdir .. "/connections.toml")
+    local conns = require("poste-redis.connections")
+    conns._test.reset_caches()
+    local orig_cwd = vim.fn.getcwd()
+    vim.api.nvim_set_current_dir(tmpdir)
+
+    data.clear_conn_names()
+    local names = nil
+    data.ensure_conn_names(function(n) names = n end)
+    assert.equals(true, vim.wait(500, function() return names ~= nil end, 5))
+    assert.same({ "first" }, names)
+
+    -- a second connection appears in the file (mtime forced forward so the
+    -- change is visible regardless of filesystem timestamp granularity)
+    local path = tmpdir .. "/connections.toml"
+    vim.fn.writefile({
+      "[first]",
+      'dialect = "redis"',
+      'url = "redis://127.0.0.1:6379/0"',
+      "",
+      "[second]",
+      'dialect = "redis"',
+      'url = "redis://127.0.0.1:6380/0"',
+    }, path)
+    vim.uv.fs_utime(path, os.time() + 10, os.time() + 10)
+
+    local refreshed = nil
+    data.ensure_conn_names(function(n) refreshed = n end)
+    assert.equals(true, vim.wait(500, function() return refreshed ~= nil end, 5))
+    assert.same({ "first", "second" }, refreshed)
+
+    vim.api.nvim_set_current_dir(orig_cwd)
     conns._test.reset_caches()
     data.clear_conn_names()
     pcall(vim.fn.delete, tmpdir, "rf")
