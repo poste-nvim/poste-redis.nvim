@@ -307,7 +307,11 @@ local function list_connections_sync(search_dir)
       end
       local host = resolved.host
       if not host and url then
-        host = url:match("^rediss?://([^/@]+)@") or url:match("^rediss?://([^:/]+)")
+        -- URL-derived host for display: strip the userinfo FIRST, or the
+        -- capture grabs `user:password` whole (credentials must never land
+        -- in a host field, even one nothing renders today)
+        local no_userinfo = url:gsub("//([^/@]+)@", "//")
+        host = no_userinfo:match("^rediss?://([^:/]+)")
       end
       local db = resolved.db
       if not db and url then db = url:match("/(%d+)$") end

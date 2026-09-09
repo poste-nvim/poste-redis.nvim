@@ -208,6 +208,20 @@ host = "pg-host"
     assert.equals(0, #list)
   end)
 
+  it("URL-derived host never carries userinfo (password stays out of host)", function()
+    write("connections.toml", [[
+[with-auth]
+dialect = "redis"
+url = "redis://alice:s3cret@db.internal:6380/2"
+]])
+    local list = {}
+    connections.list_connections(function(l) list = l end, { search_dir = tmpdir })
+    assert.equals(true, vim.wait(500, function() return #list > 0 end, 5))
+    assert.equals("db.internal", list[1].host)
+    assert.equals("2", list[1].db)
+    assert.is_nil(list[1].host:find("s3cret", 1, true))
+  end)
+
   it("get_connection_config returns env-expanded values", function()
     write("connections.toml", [[
 [srv]
