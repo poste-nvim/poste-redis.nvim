@@ -35,7 +35,7 @@ function M.check()
       handle:close()
       if version ~= "" then ok("poste version: " .. version) end
     end
-    local has_redis_exec = vim.fn.systemlist(binary .. " --help 2>/dev/null") or {}
+    local has_redis_exec = vim.fn.systemlist(vim.fn.shellescape(binary) .. " --help 2>/dev/null") or {}
     local found = false
     for _, line in ipairs(has_redis_exec) do
       if line:match("redis%-exec") then found = true break end
