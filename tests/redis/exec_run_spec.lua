@@ -301,6 +301,52 @@ describe("poste-redis exec_run", function()
     exec_run.cancel()
   end)
 
+  it("run_file_async skips a trailing empty USE group and still fires on_done", function()
+    -- Regression: a `USE name` with no command under it (file end, or only
+    -- comments after) dispatched a zero-command batch. run_async refuses
+    -- those with "Nothing to execute" and never calls on_done, so the
+    -- dispatch chain stranded — the runner's "running" indicators stayed
+    -- forever and no panel rendered.
+    stub_emit({})
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE a", "GET 1", "USE b" })
+    local results, done = {}, {}
+    exec_run.run_file_async(src, {
+      connection = "redis://default:6379/0",
+      resolve_url = function(name) return "redis://" .. name .. ":6379/0", nil end,
+    }, {
+      on_result = function(ev) results[#results + 1] = ev end,
+      on_done = function() done[#done + 1] = true end,
+    })
+    assert.equals(true, wait_for(done))
+    assert.equals(1, #done)
+    -- only the a-group batch ran; the empty b group dispatched nothing
+    assert.is_not_nil(emitted)
+    local payload = vim.json.decode(emitted.stdin)
+    assert.equals("redis://a:6379/0", payload.connection)
+    assert.same({ { "GET", "1" } }, payload.commands)
+    assert.equals(0, #results)
+    vim.api.nvim_buf_delete(src, { force = true })
+    exec_run.cancel()
+  end)
+
+  it("run_file_async completes on a file that is only a USE", function()
+    stub_emit({})
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE a" })
+    local done = {}
+    exec_run.run_file_async(src, {
+      connection = "redis://default:6379/0",
+      resolve_url = function() return "redis://a:6379/0", nil end,
+    }, {
+      on_done = function() done[#done + 1] = true end,
+    })
+    assert.equals(true, wait_for(done))
+    assert.is_nil(emitted)  -- nothing to run anywhere
+    vim.api.nvim_buf_delete(src, { force = true })
+    exec_run.cancel()
+  end)
+
   it("run_file_async stamps each result with its source entry line across USE groups", function()
     -- The binary's `seq` restarts at 1 per batch; a caller mapping seq onto
     -- whole-file lines misplaces every group after the first. dispatch_group

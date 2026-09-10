@@ -331,21 +331,30 @@ end
 local function dispatch_group(groups, index, opts, callbacks, all_results, all_summaries)
   while index <= #groups do
     local g = groups[index]
-    if not g.error then break end
-    local err_ev = {
-      type = "result",
-      status = "error",
-      error = g.error,
-      command = "",
-      start_line = g.start_line,
-    }
-    all_results[#all_results + 1] = err_ev
-    local seq_before = exec_seq
-    guarded(exec_seq, callbacks.on_result, err_ev)()
-    -- the callback may have canceled/superseded the run; only continue the
-    -- synchronous chain while the seq is unchanged
-    if exec_seq ~= seq_before then return end
-    index = index + 1
+    -- An empty batch (e.g. a trailing `USE name` with no command under it)
+    -- must be skipped here, not dispatched: run_async refuses it with
+    -- "Nothing to execute" and returns before ever calling on_done, which
+    -- strands the dispatch chain — the runner's per-line "running" indicators
+    -- never clear and no panel renders.
+    if not g.error and #g.entries > 0 then break end
+    if not g.error then
+      index = index + 1
+    else
+      local err_ev = {
+        type = "result",
+        status = "error",
+        error = g.error,
+        command = "",
+        start_line = g.start_line,
+      }
+      all_results[#all_results + 1] = err_ev
+      local seq_before = exec_seq
+      guarded(exec_seq, callbacks.on_result, err_ev)()
+      -- the callback may have canceled/superseded the run; only continue the
+      -- synchronous chain while the seq is unchanged
+      if exec_seq ~= seq_before then return end
+      index = index + 1
+    end
   end
   if index > #groups then
     guarded(exec_seq, callbacks.on_done, all_results, all_summaries)()
