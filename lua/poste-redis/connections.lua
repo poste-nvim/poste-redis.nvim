@@ -92,11 +92,21 @@ local function parse_dotenv(content, vars)
 end
 
 --- Find and parse `.env` walking up from search_dir (mtime-cached).
+--- A "not found" result is NEVER served stale — mtime has no answer for a
+--- file that did not exist when the cache was written, so a `.env` created
+--- mid-session would stay invisible forever (same rule as
+--- find_connections_toml above, and the sticky not-found cache the mail
+--- round fixed).
 --- @param search_dir string
 --- @return table<string,string>
 local function load_dotenv(search_dir)
   local path = util.find_file_upwards(".env", search_dir)
-  local mtime = path and vim.fn.getftime(path) or nil
+  if not path then
+    _dotenv_cache[search_dir] = nil
+    _dotenv_cache_mtime[search_dir] = nil
+    return {}
+  end
+  local mtime = vim.fn.getftime(path)
   if _dotenv_cache[search_dir] ~= nil and _dotenv_cache_mtime[search_dir] == mtime then
     return _dotenv_cache[search_dir]
   end

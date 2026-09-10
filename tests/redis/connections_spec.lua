@@ -114,6 +114,27 @@ REDIS_PASS=from_env_file
     vim.env.REDIS_PASS = nil
   end)
 
+  it("discovers a .env created after a cached not-found walk", function()
+    -- Regression: load_dotenv cached the negative result (mtime nil matched
+    -- nil), so a .env written mid-session stayed invisible to every
+    -- {{VAR}} expansion until the caches were reset by hand.
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "h"
+password = "{{LATE_VAR}}"
+]])
+    -- first resolve: no .env anywhere → the ref stays literal
+    local url = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.equals("redis://:%7B%7BLATE_VAR%7D%7D@h:6379/0", url)
+    -- now the file appears; the very next resolve must pick it up
+    write(".env", [[
+LATE_VAR=late_secret
+]])
+    url = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.equals("redis://:late_secret@h:6379/0", url)
+  end)
+
   it("percent-encodes an unresolved {{VAR}} ref left literal in the value", function()
     write("connections.toml", [[
 [srv]
