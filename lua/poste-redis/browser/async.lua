@@ -189,8 +189,8 @@ end
 --- Session opts for browser scans: the redis-session process defaults to
 --- --max-items 1000, which would truncate a SCAN COUNT 5000 reply to 1000
 --- keys and silently drop the rest (cursor keeps advancing). Bump it so a
---- full SCAN page is never cut — this is why header discovery had to page at
---- 500. @param db number
+--- full SCAN page is never cut.
+--- @param db number
 --- @return table
 function M.scan_session_opts(db)
   local max_items = math.max(config.config.header_scan_count or 5000, config.config.scan_count or 500) + 1000
