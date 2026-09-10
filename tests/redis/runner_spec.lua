@@ -70,6 +70,29 @@ describe("poste-redis runner indicators", function()
     assert.is_true(has_sign(src, 0, "PosteSpin1"))
   end)
 
+  it("<CR> on a USE line applies that connection instead of erroring", function()
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE srv", "GET k" })
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    connections.resolve_redis_url = function(name)
+      return "redis://" .. name .. ":6379/0", nil
+    end
+    runner.run_selection("cursor")
+    assert.equals("redis://srv:6379/0", redis_state.current_url)
+    assert.equals("srv", redis_state.context.connection)
+    -- no execution was started and no "Nothing to execute" noise appeared
+    assert.is_false(exec_run.is_busy())
+  end)
+
+  it("<CR> on a bare USE opens the connection picker", function()
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE" })
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    local picked = false
+    connections.select_connection = function() picked = true end
+    runner.run_selection("cursor")
+    assert.is_true(picked)
+    assert.is_nil(redis_state.current_url)
+  end)
+
   it("places success on the source buffer, not the result panel", function()
     exec_run.run_selection_async = function(buf, mode, opts, callbacks)
       callbacks.on_start(1, 42)

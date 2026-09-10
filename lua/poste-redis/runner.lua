@@ -108,6 +108,30 @@ function M.run_selection(mode, range)
       vim.log.levels.ERROR, { title = constants.TITLE })
     return
   end
+
+  -- Cursor on a USE directive: <CR> applies it instead of erroring with
+  -- "Nothing to execute" — a bare USE opens the connection picker, mirroring
+  -- how USE behaves as an executable line inside a file run.
+  if mode == "cursor" then
+    local e = parser.cursor_entry(src)
+    if e and e.kind == "use" then
+      local connections = require("poste-redis.connections")
+      if not e.connection then
+        connections.select_connection()
+        return
+      end
+      local ok, err = connections.use_connection(e.connection)
+      if ok then
+        vim.notify("Redis connection: " .. e.connection,
+          vim.log.levels.INFO, { title = constants.TITLE })
+      else
+        vim.notify("USE " .. e.connection .. " failed: " .. tostring(err),
+          vim.log.levels.ERROR, { title = constants.TITLE })
+      end
+      return
+    end
+  end
+
   if exec_run.is_busy() then
     vim.notify("A command is still running — press <Esc> to cancel first",
       vim.log.levels.WARN, { title = constants.TITLE })
