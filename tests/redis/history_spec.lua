@@ -117,6 +117,15 @@ describe("poste-redis history", function()
     assert.equals("14:03:07", lines[1]:sub(spans[1].time[1] + 1))
   end)
 
+  it("build spans the error mark glyph in full (3 bytes for ✗)", function()
+    -- Regression: the error highlight covered 1 byte of the 3-byte ✗, which
+    -- clamps at the char boundary and colors nothing.
+    history.push(entry({ command = "GET k", error = true }))
+    local lines, spans = history._test.build(60)
+    assert.equals("✗", lines[1]:sub(spans[1].mark[1] + 1, spans[1].mark[2]))
+    assert.equals(3, spans[1].mark[2] - spans[1].mark[1])
+  end)
+
   it("long commands truncate and keep the time column aligned", function()
     history.push(entry({
       command = "GET " .. string.rep("k", 120),

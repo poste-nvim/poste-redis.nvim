@@ -178,6 +178,7 @@ local function build(width)
     -- start walks past its bytes; the time is the line's last 8 bytes
     local cmd_s = #mark + 1
     spans[#spans + 1] = {
+      mark = { 0, #mark },
       cmd = { cmd_s, cmd_s + #cmd },
       time = { #line - 8, #line },
     }
@@ -196,8 +197,11 @@ local function refresh()
   vim.api.nvim_buf_clear_namespace(buf, hl_ns, 0, -1)
   for offset, span in ipairs(spans) do
     local e = history[#history - (offset - 1)]
-    if e and e.error then
-      vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisHistoryError", offset - 1, 0, 1)
+    if e and e.error and span.mark then
+      -- the full mark glyph (3 bytes for ✗) — a 1-byte range used to clamp
+      -- at the char boundary and color nothing
+      vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisHistoryError",
+        offset - 1, span.mark[1], span.mark[2])
     end
     if span.cmd then
       vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisHistoryCmd",

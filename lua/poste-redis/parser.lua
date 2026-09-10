@@ -293,9 +293,11 @@ end
 
 --- The key argument of a tokenized command (nil when the command does not
 --- address a key). Shared by gd reveal, the result panel's tab binding and
---- grid editing: USE/SELECT target connections, CONFIG/OBJECT/XINFO/XGROUP
---- address the server or take the key at a later position — revealing or
---- editing their second token would hit a word that is not a key.
+--- grid editing: USE/SELECT target connections; CONFIG/CLIENT/COMMAND/ACL/
+--- SCRIPT/FUNCTION/LATENCY/SLOWLOG/OBJECT/XGROUP/XINFO/MEMORY address the
+--- server (or take the key at a later position — MEMORY USAGE puts it after
+--- the USAGE subcommand), so revealing or editing their second token would
+--- hit a word that is not a key.
 --- @param tokens string[]  command_tokens output (de-quoted, uppercased head)
 --- @return string|nil key
 function M.key_arg(tokens)
@@ -305,7 +307,7 @@ function M.key_arg(tokens)
       or head == "CONFIG" or head == "CLIENT" or head == "COMMAND"
       or head == "ACL" or head == "SCRIPT" or head == "FUNCTION"
       or head == "LATENCY" or head == "SLOWLOG" or head == "OBJECT"
-      or head == "XGROUP" or head == "XINFO" then
+      or head == "XGROUP" or head == "XINFO" or head == "MEMORY" then
     return nil
   end
   return tokens[2]

@@ -182,6 +182,9 @@ describe("poste-redis result buffer", function()
     assert.equals("user:1", parser.key_arg(parser.command_tokens("GET user:1")))
     assert.is_nil(parser.key_arg(parser.command_tokens("CONFIG GET maxmemory")))
     assert.is_nil(parser.key_arg(parser.command_tokens("OBJECT ENCODING user:1")))
+    -- MEMORY USAGE puts the key after the subcommand — the second token is
+    -- never a key (regression: `MEMORY USAGE user:1` revealed "USAGE")
+    assert.is_nil(parser.key_arg(parser.command_tokens("MEMORY USAGE user:1")))
   end)
 
   it("dangerous commands produce a tab and do not crash", function()
