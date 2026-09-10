@@ -173,6 +173,12 @@ function M.run_async(entries, opts, callbacks)
           payload_idx = payload_idx + 1
           local is_injected = opts.db and payload_idx == 1
           ev.db = db  -- the db this command ran on (rebind applies to the NEXT)
+          -- direct single-batch runs (selection/<CR>) stamp their resolved
+          -- connection name the same way dispatch_group stamps per-USE
+          -- groups, so the panel label names the section that actually ran
+          if opts.connection_name and ev.connection_name == nil then
+            ev.connection_name = opts.connection_name
+          end
           if select_targets[payload_idx] and not (ev.status == "error" or ev.error) then
             db = select_targets[payload_idx]
           end
@@ -455,8 +461,18 @@ function M.run_selection_async(buf, mode, opts, callbacks)
     end
   end
   if not opts.connection then
-    -- fall back to the current context / the first USE in the file
-    local url, name = M._connection_for(buf)
+    -- Inherit the file's own section context first: the nearest USE above
+    -- the selection — symmetric with the SELECT inheritance above and with
+    -- what the source winbar displays. The old fallback (state context, then
+    -- the file's LAST USE anywhere) ran a selection cross-connection when
+    -- the cursor sat in an earlier USE section of a multi-USE file.
+    local url, name
+    if entries[1] and entries[1].start_line then
+      url, name = M._use_above(buf, entries[1].start_line)
+    end
+    if not url then
+      url, name = M._connection_for(buf)
+    end
     if url then
       opts = vim.tbl_extend("keep", opts, { connection = url, connection_name = name })
     end
@@ -470,7 +486,7 @@ function M.run_selection_async(buf, mode, opts, callbacks)
 end
 
 --- Best-effort connection lookup: explicit opts > state context > last USE
---- in the file > first redis connection in connections.toml.
+--- in the file.
 --- @param buf number
 --- @return string|nil, string|nil url, connection_name
 function M._connection_for(buf)
@@ -489,6 +505,28 @@ function M._connection_for(buf)
     end
   end
   return nil, nil
+end
+
+--- The connection the file's own USE section establishes above `before_line`:
+--- the nearest USE at or strictly above the line (exclusive), resolved to a
+--- URL. Read-only — unlike _connection_for it never applies state, and it
+--- mirrors what context.entries_context shows in the source winbar, so what
+--- a selection runs against is what the winbar displays.
+--- @param buf number
+--- @param before_line number  1-based line the scan stops at (exclusive)
+--- @return string|nil url, string|nil connection_name
+function M._use_above(buf, before_line)
+  local connections = require("poste-redis.connections")
+  local entries = parser.buffer_entries(buf)
+  local chosen
+  for _, e in ipairs(entries) do
+    if before_line and e.start_line and e.start_line >= before_line then break end
+    if e.kind == "use" and e.connection then chosen = e.connection end
+  end
+  if not chosen then return nil, nil end
+  local url = connections.resolve(chosen)
+  if not url then return nil, nil end
+  return url, chosen
 end
 
 --- The db a statement at `before_line` (1-based) would run on: the nearest

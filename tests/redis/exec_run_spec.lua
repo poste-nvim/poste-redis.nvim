@@ -430,6 +430,42 @@ describe("poste-redis exec_run", function()
     exec_run.cancel()
   end)
 
+  it("run_selection_async inherits the NEAREST USE above, not the file's last", function()
+    -- Regression: the fallback walked the file's LAST USE, so a cursor run
+    -- inside the `USE a` section of `USE a / GET 1 / USE b / GET 2` executed
+    -- against b — cross-connection, silently. It must mirror the winbar's
+    -- section context (and stamp the group name onto the result label).
+    stub_emit({
+      vim.json.encode({ type = "result", seq = 1, command = "GET 1", status = "OK", latency_ms = 1 }),
+      vim.json.encode({ type = "summary", total = 1, failed = 0, elapsed_ms = 1 }),
+    })
+    local connections = require("poste-redis.connections")
+    local orig_resolve = connections.resolve_redis_url
+    connections.resolve_redis_url = function(name)
+      return "redis://" .. name .. ":6379/0", nil
+    end
+    local redis_state = require("poste-redis.state")
+    redis_state.current_url = nil
+
+    local src = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE a", "GET 1", "USE b", "GET 2" })
+    vim.api.nvim_set_current_buf(src)
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })  -- GET 1, inside the a section
+    local results = {}
+    exec_run.run_selection_async(src, "cursor", {}, {
+      on_result = function(ev) results[#results + 1] = ev end,
+    })
+    assert.equals(true, wait_for(results))
+    assert.equals(1, #results)
+    local payload = vim.json.decode(emitted.stdin)
+    assert.equals("redis://a:6379/0", payload.connection)
+    assert.equals("a", results[1].connection_name)
+    connections.resolve_redis_url = orig_resolve
+    redis_state.current_url = nil
+    vim.api.nvim_buf_delete(src, { force = true })
+    exec_run.cancel()
+  end)
+
   it("run_selection_async reports when no connection can be resolved", function()
     stub_emit({})
     local connections = require("poste-redis.connections")
