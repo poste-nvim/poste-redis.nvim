@@ -164,7 +164,16 @@ function M.refresh()
   local dispatched = session_conn.execute(url, tokens, {
     on_response = function(ev)
       local out = format.format_result(ev)
-      out.meta = tab.meta
+      -- Keep the tab's identity stamps (connection/db/key/search state) but
+      -- let the FRESH result own the time-varying fields: a wholesale
+      -- `out.meta = tab.meta` left `K` previewing the pre-refresh value and
+      -- the winbar showing the old latency/status after every `r`.
+      local meta = vim.tbl_extend("force", tab.meta or {}, out.meta)
+      meta.value = ev.value
+      meta.error = ev.error
+      meta.status = ev.status or ""
+      meta.latency_ms = ev.latency_ms
+      out.meta = meta
       if out.kind == "table" then
         out.page = tab.page or 1
         out.page_size = tab.page_size or state.PAGE_SIZE

@@ -134,6 +134,10 @@ describe("poste-redis result grid", function()
       assert.equals("Bob", tab2.grid.rows[1][2])
       assert.equals("31", tab2.grid.rows[1][3])
       assert.equals("HGETALL k", tab2.meta.command)
+      -- the fresh result owns the time-varying meta: identity stamps
+      -- (connection/db) survive, value/status/latency do NOT stay stale
+      assert.equals("stub", tab2.meta.connection)
+      assert.same({ type = "hash", entries = { { "Bob", "31" } }, len = 1 }, tab2.meta.value)
       session_conn.execute = orig_execute
       connections.resolve_redis_url = orig_resolve
     end)
