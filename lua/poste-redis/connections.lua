@@ -111,11 +111,9 @@ local function load_dotenv(search_dir)
     return _dotenv_cache[search_dir]
   end
   local vars = {}
-  if path then
-    local ok, data = pcall(vim.fn.readfile, path)
-    if ok and data then
-      vars = parse_dotenv(table.concat(data, "\n"), vars)
-    end
+  local ok, data = pcall(vim.fn.readfile, path)
+  if ok and data then
+    vars = parse_dotenv(table.concat(data, "\n"), vars)
   end
   _dotenv_cache[search_dir] = vars
   _dotenv_cache_mtime[search_dir] = mtime

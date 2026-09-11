@@ -155,9 +155,12 @@ function M.run_selection(mode, range)
     end
   end
 
-  local indicators = select(2, pcall(require, "poste.indicators"))
+  -- pcall pattern (NOT select(2, pcall(...)): on a missing module select
+  -- hands back the ERROR STRING, which is truthy — indicators.clear_all
+  -- would then index a string and crash the whole selection run)
+  local ok_ind, indicators = pcall(require, "poste.indicators")
 
-  if indicators then indicators.clear_all(src) end
+  if ok_ind then indicators.clear_all(src) end
 
   exec_run.run_selection_async(src, mode, { range = range, entries = entries }, {
     on_start = function(seq, _)

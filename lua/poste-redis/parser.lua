@@ -240,10 +240,9 @@ function M.visual_entries(buf, opts)
   if e_line < s_line then s_line, e_line = e_line, s_line end
   local entries = M.buffer_entries(buf)
   local result = {}
-  local seen = {}
   for i, e in ipairs(entries) do
-    if not (e.end_line < s_line or e.start_line > e_line) and not seen[i] then
-      seen[i] = true
+    -- overlap test: the entry's line range intersects [s_line, e_line]
+    if not (e.end_line < s_line or e.start_line > e_line) then
       result[#result + 1] = e
     end
   end

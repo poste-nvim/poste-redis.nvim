@@ -41,9 +41,21 @@ local DEFAULT_MAX_ITEMS = 100000
 -- }
 local pool = {}
 
+--- Level map: notify needs a vim.log.levels value; an unknown tag falls to
+--- DEBUG (visible in :messages, never a popup). Callers pass "ERROR"/"WARN"/
+--- "DEBUG" — WARN is reserved for one-off lifecycle events (a stalled session
+--- restart); per-line stderr chatter logs at DEBUG so a chatty process cannot
+--- spam notification popups (stderr text still reaches the user through the
+--- on_error paths of every execute()).
+local LOG_LEVELS = {
+  ERROR = vim.log.levels.ERROR,
+  WARN = vim.log.levels.WARN,
+  DEBUG = vim.log.levels.DEBUG,
+}
+
 local function log(level, msg)
   vim.notify("PosteRedis session: " .. msg,
-    level == "ERROR" and vim.log.levels.ERROR or vim.log.levels.DEBUG,
+    LOG_LEVELS[level] or vim.log.levels.DEBUG,
     { title = redis_state.TITLE })
 end
 
@@ -159,7 +171,7 @@ local function start(conn_url, opts)
     on_stderr = function(_, data)
       if data then
         for _, l in ipairs(data) do
-          if l ~= "" then log("WARN", "stderr: " .. l) end
+          if l ~= "" then log("DEBUG", "stderr: " .. l) end
         end
       end
     end,
@@ -392,6 +404,7 @@ M._test = {
   process_event = process_event,
   start = start,
   pool = pool,
+  log_levels = LOG_LEVELS,
 }
 
 return M

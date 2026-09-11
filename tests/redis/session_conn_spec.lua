@@ -322,4 +322,14 @@ describe("poste-redis session_conn", function()
     assert.equals(1, #errors, "on_error must fire when the session is dead")
   end)
 
+  it("log levels map onto vim.log.levels (WARN is not DEBUG)", function()
+    -- Regression: log() collapsed everything but "ERROR" to DEBUG, so the
+    -- watchdog's "session stalled; restarting it" notice never surfaced.
+    local levels = session_conn._test.log_levels
+    assert.equals(vim.log.levels.ERROR, levels.ERROR)
+    assert.equals(vim.log.levels.WARN, levels.WARN)
+    assert.equals(vim.log.levels.DEBUG, levels.DEBUG)
+    assert.is_true(levels.WARN ~= levels.DEBUG)
+  end)
+
 end)
