@@ -251,6 +251,28 @@ describe("poste-redis runner indicators", function()
     assert.is_true(has_sign(src, 1, "PosteIndicatorSuccess"))
     assert.is_false(has_sign(src, 0, "PosteIndicatorSuccess"))
   end)
+
+  it("cancel_current stops a running run and clears its spinners", function()
+    -- <Esc> used to have no binding at all while the busy notification told
+    -- the user to "press <Esc> to cancel first" — exec_run.cancel existed
+    -- (tested) but nothing user-reachable ever called it.
+    local cli = require("poste.cli")
+    local orig_run_async = cli.run_async
+    cli.run_async = function(_cmd, _opts) return 4242 end  -- job "in flight"
+    redis_state.current_url = "redis://stub:6379/0"  -- _connection_for path
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    runner.run_selection("cursor")
+    assert.is_true(exec_run.is_busy(), "run never became busy")
+    assert.is_true(has_sign(src, 0, "PosteSpin1"))
+    cli.run_async = orig_run_async
+
+    assert.is_true(runner.cancel_current(src))
+    assert.is_false(exec_run.is_busy())
+    assert.is_false(has_sign(src, 0, "PosteSpin1"), "spinner survived the cancel")
+
+    -- idle cancel: a no-op, not an error
+    assert.is_false(runner.cancel_current(src))
+  end)
 end)
 
 --- Regression: the visual <CR> keymap used to read the '< '> marks, which

@@ -80,6 +80,9 @@ M.defaults = {
       show_doc = "K",
       -- reveal the key of the command at the cursor in the browser tree
       reveal_key = "gd",
+      -- cancel the in-flight execution (the "still running" busy messages
+      -- send the user here); a no-op when nothing runs
+      cancel = "<Esc>",
     },
     redis_result = {
       close = "q",

@@ -180,6 +180,22 @@ function M.run_selection(mode, range)
   })
 end
 
+--- Cancel the in-flight execution and drop its per-line "running" spinners.
+--- This is the <Esc> path the "still running" notifications promise — the
+--- busy flag is global, so the cancel is too; `buf` scopes the spinner
+--- cleanup to the source buffer the keymap lives on (a canceled run's
+--- on_exit is dropped by the seq guard and can never clear them itself).
+--- @param buf number|nil  buffer whose running indicators to clear
+--- @return boolean canceled  false when nothing was in flight
+function M.cancel_current(buf)
+  if not exec_run.is_busy() then return false end
+  exec_run.cancel()
+  local ok, indicators = pcall(require, "poste.indicators")
+  if ok and buf then indicators.clear_all(buf) end
+  vim.notify("Execution canceled", vim.log.levels.INFO, { title = constants.TITLE })
+  return true
+end
+
 --- Run the whole file, honoring USE, rendering all results.
 function M.run_file()
   local src = vim.api.nvim_get_current_buf()

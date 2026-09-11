@@ -15,6 +15,7 @@ local function show_help(buf)
     "  " .. config.format_keymap("redis_source", "history") .. "   open request history",
     "  " .. config.format_keymap("redis_source", "show_doc") .. "   show command documentation (K again focuses)",
     "  " .. config.format_keymap("redis_source", "trigger_completion") .. "   trigger completion",
+    "  " .. config.format_keymap("redis_source", "cancel") .. "   cancel a running execution",
     "  " .. config.format_keymap("redis_source", "help") .. "   this help",
     "",
     "poste-redis result panel keymaps:",
@@ -101,6 +102,14 @@ function M.setup_buffer_keymaps(buf)
         connection = ctx.connection,
         db = ctx.db or 0,
       })
+    end, km)
+  end
+  -- <Esc>: cancel the in-flight execution (the busy notifications point
+  -- here). Idle presses fall through silently — the key stays plain <Esc>.
+  k = config.get_keymap("redis_source", "cancel", "<Esc>")
+  if k then
+    vim.keymap.set("n", k, function()
+      runner.cancel_current(buf)
     end, km)
   end
 end
