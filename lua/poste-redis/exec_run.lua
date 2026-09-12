@@ -218,9 +218,22 @@ function M.run_async(entries, opts, callbacks)
 
   if job_id == nil or job_id < 0 then
     busy = false
-    exec_seq = exec_seq + 1
+    -- on_error BEFORE invalidating the seq: guarded() drops callbacks from a
+    -- superseded seq, so bumping exec_seq first silenced this notification
+    -- entirely — a failed jobstart reached nobody.
     guarded(run_seq, callbacks.on_error,
       "Failed to start redis-exec — is the poste binary built? Run cargo build --release in poste.nvim", "")()
+    exec_seq = exec_seq + 1  -- this run never started: nothing may resume it
+    -- on_done UNGUARDED + pcall: it only unwinds the caller (present() clears
+    -- the "running" spinners, dispatch chains advance to the next group) and
+    -- must not be dropped by the stale-seq guard, or a failed jobstart would
+    -- strand the chain — red line #4, busy state never sticks. Any run the
+    -- chain starts from here takes its own, newer seq.
+    local ok_cb, cb_err = pcall(callbacks.on_done, results, summary)
+    if not ok_cb then
+      vim.notify("PosteRedis callback error: " .. tostring(cb_err), vim.log.levels.ERROR,
+        { title = redis_state.TITLE })
+    end
     return nil
   end
 

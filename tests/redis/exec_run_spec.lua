@@ -138,6 +138,24 @@ describe("poste-redis exec_run", function()
     exec_run.cancel()
   end)
 
+  it("reports a jobstart failure — on_error fires before the seq is invalidated", function()
+    -- regression: the start-failure branch bumped exec_seq before firing the
+    -- guarded on_error, and the guard then dropped it — a failed jobstart
+    -- never notified anyone and the dispatch chain stranded on its group.
+    cli.run_async = function(_cmd, _opts) return -1 end
+    local errs, done = {}, {}
+    exec_run.run_async({ entry("GET k") },
+      { connection = "redis://h:6379/0" }, {
+        on_error = function(msg, _) errs[#errs + 1] = msg end,
+        on_done = function() done[#done + 1] = true end,
+      })
+    assert.equals(1, #errs)  -- delivered synchronously, not dropped
+    assert.match("Failed to start redis%-exec", errs[1])
+    assert.equals(1, #done)  -- caller unwinds (spinners clear / chain continues)
+    assert.equals(false, exec_run.is_busy())
+    exec_run.cancel()
+  end)
+
   it("rejects a non-redis connection URL", function()
     stub_emit({})
     local errs = {}
