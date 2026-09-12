@@ -24,9 +24,9 @@ local redis_state = require("poste-redis.state")
 --- shows its active tab's context, a .redis file shows its USE/SELECT context
 --- at the cursor, everything else shows the global context. See
 --- `poste-redis.context`.
-local function window_ctx()
+local function window_ctx(win)
   local ok, context = pcall(require, "poste-redis.context")
-  if ok then return context.resolve() end
+  if ok then return context.resolve(win) end
   return { connection = redis_state.context.connection, db = redis_state.context.db }
 end
 
@@ -146,9 +146,28 @@ local function fmt_ctx()
   return M.get_context()
 end
 
---- Wire the context into mini.statusline / lualine when either is present.
---- Opt out with setup({ statusline = false }) from poste-redis setup opts.
-function M.setup()
+--- Context resolution for the shared `poste.statusline` compose layer
+--- (poste.nvim). Redis claims a window when its context resolver names a
+--- connection: the result panel, the browser and .redis source buffers are
+--- window-scoped (they beat any *buffer*-scoped sibling context on the same
+--- window), the global session fallback is global (a poste-db SQL buffer
+--- wins over it).
+--- @param win number
+--- @return table|nil  { text, hl, scope }
+local function provider_resolve(win)
+  local ok, context = pcall(require, "poste-redis.context")
+  if not ok then return nil end
+  local ok_res, ctx = pcall(context.resolve_scoped, win)
+  if not ok_res or not ctx or not ctx.connection then return nil end
+  return {
+    text = context.display(ctx),
+    hl = M.get_ctx_color(ctx.connection),
+    scope = ctx.branch == "global" and "global" or "window",
+  }
+end
+
+--- Legacy inline mini.statusline wiring (pre-shared-layer poste.nvim).
+local function legacy_mini_wiring()
   vim.schedule(function()
     local ok_mini, statusline = pcall(require, "mini.statusline")
     if ok_mini then
@@ -187,7 +206,22 @@ function M.setup()
         })
       end
     end
+  end)
+end
 
+--- Register with the shared `poste.statusline` compose layer (poste.nvim).
+--- Falls back to the inline mini.statusline wiring above when the shared
+--- module is missing (older poste.nvim checkout).
+function M.setup()
+  local ok_shared, shared = pcall(require, "poste.statusline")
+  if ok_shared then
+    shared.register_provider({ name = "poste-redis", resolve = provider_resolve })
+    shared.setup()
+  else
+    legacy_mini_wiring()
+  end
+
+  vim.schedule(function()
     local ok_lualine, lualine = pcall(require, "lualine")
     if ok_lualine then
       local cfg = lualine.get_config()

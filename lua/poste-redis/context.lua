@@ -128,13 +128,18 @@ end
 -- Window resolution
 -----------------------------------------------------------------------
 
---- The window's context. Priority: result panel > browser > .redis file >
---- global context. Never raises on torn-down panel/browser state.
+--- The window's context + which priority branch matched. Priority:
+--- result panel > browser > .redis file > global context. Never raises on
+--- torn-down panel/browser state. `resolve()` slices the branch away so its
+--- shape stays stable for existing callers/specs.
 --- @param win number|nil window handle (default: current)
---- @return { connection = string|nil, db = number|nil }
-function M.resolve(win)
+--- @return { connection = string|nil, db = number|nil,
+---          branch = "panel"|"browser"|"file"|"global" }
+function M.resolve_scoped(win)
   win = win or vim.api.nvim_get_current_win()
-  if not vim.api.nvim_win_is_valid(win) then return { connection = nil, db = nil } end
+  if not vim.api.nvim_win_is_valid(win) then
+    return { connection = nil, db = nil, branch = "global" }
+  end
   local buf = vim.api.nvim_win_get_buf(win)
 
   -- 1. result panel: the active tab carries its own origin context (the
@@ -143,7 +148,7 @@ function M.resolve(win)
   if ok_b and bstate.buf == buf and bstate.tabs and bstate.tabs[bstate.active] then
     local meta = bstate.tabs[bstate.active].meta
     if meta and (meta.connection or meta.db ~= nil) then
-      return { connection = meta.connection, db = meta.db }
+      return { connection = meta.connection, db = meta.db, branch = "panel" }
     end
   end
 
@@ -151,7 +156,8 @@ function M.resolve(win)
   if vim.api.nvim_buf_get_name(buf) == "poste://redis_browser" then
     local ok_i, binit = pcall(require, "poste-redis.browser.init")
     if ok_i and binit.current_scope then
-      return binit.current_scope()
+      local s = binit.current_scope() or {}
+      return { connection = s.connection, db = s.db, branch = "browser" }
     end
   end
 
@@ -162,12 +168,27 @@ function M.resolve(win)
     if not fc.connection then
       fc.connection = redis_state.context.connection
     end
-    if fc.connection then return { connection = fc.connection, db = fc.db } end
-    return { connection = nil, db = nil }
+    if fc.connection then
+      return { connection = fc.connection, db = fc.db, branch = "file" }
+    end
+    return { connection = nil, db = nil, branch = "file" }
   end
 
   -- 4. anywhere else: the global session context
-  return { connection = redis_state.context.connection, db = redis_state.context.db }
+  return {
+    connection = redis_state.context.connection,
+    db = redis_state.context.db,
+    branch = "global",
+  }
+end
+
+--- The window's context. Priority: result panel > browser > .redis file >
+--- global context. Never raises on torn-down panel/browser state.
+--- @param win number|nil window handle (default: current)
+--- @return { connection = string|nil, db = number|nil }
+function M.resolve(win)
+  local r = M.resolve_scoped(win)
+  return { connection = r.connection, db = r.db }
 end
 
 -----------------------------------------------------------------------
@@ -196,6 +217,7 @@ M._test = {
   file_context = M.file_context,
   display = M.display,
   resolve = M.resolve,
+  resolve_scoped = M.resolve_scoped,
 }
 
 return M
