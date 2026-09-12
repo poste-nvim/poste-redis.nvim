@@ -98,13 +98,19 @@ end
 --- @param v table  the view this fetch belongs to
 --- @param ev table result event
 --- @param label string  tab title (page number / type)
-local function add_page(v, ev, label)
+--- @param index_base number|nil  first row's true list position minus 1 —
+---   list pages re-base the grid's index column (1..N per page → global
+---   position), so it doubles as the real LSET/LINDEX index grid_edit uses
+local function add_page(v, ev, label, index_base)
   if view ~= v then return end
   local out = format.format_result(ev)
   out.meta.title = label
   out.meta.key = v.key
   out.meta.connection = v.conn_name
   out.meta.db = v.db
+  if index_base and out.kind == "table" and out.grid then
+    for i, row in ipairs(out.grid.rows) do row[1] = index_base + i end
+  end
   -- the loaded/total footer: carried in meta for BOTH kinds; the text render
   -- appends it at display time, so tab.lines stays the pure value (yank / K
   -- never pick up the "(loaded N / total M …)" chrome)
@@ -136,6 +142,9 @@ function M.next_page()
   local cmd = page_command(v.key, v.type, v.cursor)
   if not cmd then return end
   v.busy = true
+  -- capture BEFORE the fetch: the list cursor becomes the page's index base
+  -- (page 2's rows are true positions base+1.., not a fresh 1..N)
+  local list_base = (v.type == "list") and (tonumber(v.cursor) or 0) or nil
 
   local function on_event(ev)
     v.busy = false
@@ -162,7 +171,7 @@ function M.next_page()
       v.cursor = tostring((tonumber(v.cursor) or 0) + #items)
       v.loaded = v.loaded + #items
       if #items < page_size() then v.done = true end
-      add_page(v, ev, ("%s [list · page %d]"):format(v.key, #v.pages + 1))
+      add_page(v, ev, ("%s [list · page %d]"):format(v.key, #v.pages + 1), list_base)
     elseif v.type == "stream" then
       -- XRANGE pages by exclusive last id (Redis 6.2 `(` prefix); an empty
       -- follow-up page (total was an exact page multiple) ends the view

@@ -69,6 +69,38 @@ describe("poste-redis value viewer", function()
     assert.equals(1, #buffer._tabs())
   end)
 
+  it("list pages continue the key's numbering (grid index = true list position)", function()
+    -- regression: every list page restarted its index column at 1, so
+    -- grid_edit's LSET/LINDEX on page 2 addressed the wrong element — the
+    -- verified-write refused with a bogus "List changed" warning, or (values
+    -- coinciding) corrupted the element it was pointed at.
+    local pages_served = 0
+    local function items(n, start)
+      local out = {}
+      for i = start, start + n - 1 do out[#out + 1] = "item-" .. i end
+      return out
+    end
+    session_conn.execute = function(_url, _cmd, cbs)
+      pages_served = pages_served + 1
+      if pages_served == 1 then
+        cbs.on_response({ value = { type = "list", value = items(500, 1) } })
+      else
+        cbs.on_response({ value = { type = "list", value = items(3, 501) } })
+      end
+      return "dispatched"
+    end
+
+    value.view(make_node("l", "list"), nil, nil)
+    buffer.next_tab()  -- lands on the last page: fetches page 2
+    assert.equals(2, pages_served)
+    assert.equals(2, #buffer._tabs())
+    local page2 = buffer._tabs()[2]
+    assert.equals("table", page2.kind)
+    assert.equals(501, page2.grid.rows[1][1], "page 2 starts at true position 501")
+    assert.equals(503, page2.grid.rows[3][1])
+    assert.equals("item-501", page2.grid.rows[1][2])
+  end)
+
   it("a text page's loaded/total footer stays out of the yanked value", function()
     -- The footer used to be appended straight into tab.lines, so `yank
     -- current` on a string key copied "  (loaded 1 …)" along with the value.
