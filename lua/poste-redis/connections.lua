@@ -363,9 +363,6 @@ function M.apply_connection(name, url)
   redis_state.context.connection = name
   redis_state.context.db = nil
   redis_state.current_url = url
-  -- keep the poste-wide state in sync so the key browser picks the context
-  local ok, poste_state = pcall(require, "poste.state")
-  if ok then poste_state.connection = name end
 end
 
 --- Resolve + apply a connection name as the current context.

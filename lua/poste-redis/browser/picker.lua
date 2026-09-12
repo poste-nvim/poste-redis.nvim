@@ -35,8 +35,7 @@ local function focus_row()
   local win = state.window()
   if not win then return end
   local row = 1
-  local ok, poste_state = pcall(require, "poste.state")
-  local preferred = ok and poste_state.connection
+  local preferred = redis_state.context and redis_state.context.connection
   if preferred then
     for i, n in ipairs(state.conn_picker.nodes) do
       if n.name == preferred then row = i; break end
