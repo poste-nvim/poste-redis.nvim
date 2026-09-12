@@ -2,13 +2,15 @@
 #
 #   cd playground && docker compose up -d
 #
-# On startup the container seeds demo data for every value type (string /
-# list / set / hash / zset / stream), with the collection types sized to
-# trigger the result-panel grid pagination (150 / 120 items → 3 pages at
-# page_size 50). See init/seed.sh for the keys.
+# On startup the container seeds multi-db demo data — 100+ keys in both db0
+# (a multilingual shop) and db1 (service/tenant infra), covering every value
+# type (string / list / set / hash / zset / stream), deep `a:b:c:...`
+# namespaces for the key-browser tree, values in en / 中文 / 日本語 / Latin /
+# русский, and big collections sized to trigger grid pagination (150 / 120
+# items → 3 pages at page_size 50). See init/seed.sh for the keys.
 #
-# Connect from poste-redis with connections.toml `[local]` →
-# redis://127.0.0.1:16479/0 (examples/connections.toml).
+# Connect from poste-redis with connections.toml `[local]` → /0 and
+# `[local-db2]` → /1 (examples/connections.toml).
 services:
   redis:
     image: redis:7-alpine

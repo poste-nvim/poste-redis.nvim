@@ -79,11 +79,13 @@ ZSCORE leaderboard:test:demo "player_b"
 ZINCRBY leaderboard:test:demo 120 "player_c"
 ZREVRANGE leaderboard:test:demo 0 4 WITHSCORES
 
+SELECT 1
+
+KEYS *
+HGETALL svc:search:index:tags:shard:0:stat
+
+USE local-db2
 SELECT 0
-get a:b:c
 
-
-SELECT 3
-get a:b:c
-
-
+KEYS  *
+HGETALL  node:node-02:stats
