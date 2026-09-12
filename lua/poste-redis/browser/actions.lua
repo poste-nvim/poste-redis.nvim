@@ -158,11 +158,15 @@ function M.delete_key(node, ctx)
   }, nil, { db = node.meta and node.meta.db, owner = "browser" })
 end
 
---- Delete all keys under a prefix (a group node) with count estimation and
---- a second confirmation (P1-4: 按前缀删除前显示匹配数量预估并二次确认).
+--- Shared engine for delete_prefix (`D`) and delete_node (`d` on a group):
+--- full SCAN cursor loop collecting the prefix's keys, ONE confirm showing
+--- the real count (a single estimate page undercounted multi-page prefixes
+--- and the delete silently missed the rest), serial DELs, one aggregated
+--- history line with an executable yank pipeline, then the tree detach.
 --- @param node table group node
 --- @param ctx table { db_node, render }
-function M.delete_prefix(node, ctx)
+--- @param opts table { count_per_page = number, question = fun(count, prefix) }
+local function delete_prefix_keys(node, ctx, opts)
   ctx = ctx or {}
   local prefix = node.meta and node.meta.prefix
   local db_node = ctx.db_node or node.parent
@@ -174,12 +178,8 @@ function M.delete_prefix(node, ctx)
   local db = node.meta and node.meta.db
   local key_list = {}
 
-  -- Estimate matching keys with a FULL SCAN cursor loop: a single page
-  -- undercounted prefixes with more than one page of keys, the confirm
-  -- showed the wrong count and the delete silently missed the rest.
   local function confirm_and_delete()
-    local question = ("Delete %d key(s) matching  %s:*  ?"):format(#key_list, prefix)
-    if not confirm(question) then
+    if not confirm(opts.question(#key_list, prefix)) then
       notify("Deletion cancelled")
       return
     end
@@ -209,8 +209,11 @@ function M.delete_prefix(node, ctx)
     del_next(1)
   end
 
-  local function estimate_page(cursor)
-    session_conn.execute(url, { "SCAN", cursor, "COUNT", "1000", "MATCH", util.glob_escape(prefix) .. ":*" }, {
+  local function next_page(cursor)
+    session_conn.execute(url, {
+      "SCAN", cursor, "COUNT", tostring(opts.count_per_page),
+      "MATCH", util.glob_escape(prefix) .. ":*",
+    }, {
       on_response = function(ev)
         -- SCAN reply: {type, value: keys[], cursor} (redis_executor SCAN branch)
         for _, k in ipairs(ev.value and ev.value.value or {}) do
@@ -219,79 +222,6 @@ function M.delete_prefix(node, ctx)
         local cursor2 = (ev.value and ev.value.cursor) or "0"
         if cursor2 == "0" then
           confirm_and_delete()
-        else
-          estimate_page(cursor2)
-        end
-      end,
-      on_error = function(msg)
-        notify("SCAN estimate failed: " .. tostring(msg), vim.log.levels.ERROR)
-      end,
-    }, nil, { db = db, owner = "browser" })
-  end
-
-  estimate_page("0")
-end
-
---- Delete a group/db node and every key under it (full SCAN cursor loop,
---- y/n confirm before the batch). The node is removed from the tree after.
---- @param node table group node (or any node with a meta.prefix)
---- @param ctx table { db_node, render }
-function M.delete_node(node, ctx)
-  ctx = ctx or {}
-  local prefix = node.meta and node.meta.prefix
-  local db_node = ctx.db_node or node.parent
-  local url, err = conn_url_for(node)
-  if not prefix or not url then
-    notify("Cannot resolve prefix/connection: " .. tostring(err), vim.log.levels.ERROR)
-    return
-  end
-  local db = node.meta and node.meta.db
-  local key_list = {}
-
-  local function delete_batch()
-    local question
-    if #key_list == 0 then
-      question = ("Delete node  %s  (no keys under it)?"):format(prefix)
-    else
-      question = ("Delete node  %s  and all %d key(s) under it?"):format(prefix, #key_list)
-    end
-    if not confirm(question) then
-      notify("Deletion cancelled")
-      return
-    end
-    local function del_next(i)
-      if i > #key_list then
-        notify(("Deleted node %s (%d key(s))"):format(prefix, #key_list))
-        record({ "DEL", prefix .. ":*" }, {
-          connection = node.meta and node.meta.connection,
-          db = db,
-          count = #key_list,
-          yank = scan_pipeline(prefix),
-        })
-        -- drop the node from its parent (detach_node prunes emptied groups)
-        refresh_tree(db_node, ctx.render, function() detach_node(node) end)
-        return
-      end
-      session_conn.execute(url, { "DEL", key_list[i] }, {
-        on_response = function() del_next(i + 1) end,
-        on_error = function(msg)
-          notify(("DEL %s failed: %s"):format(key_list[i], tostring(msg)), vim.log.levels.ERROR)
-          del_next(i + 1)
-        end,
-      }, nil, { db = db, owner = "browser" })
-    end
-    del_next(1)
-  end
-
-  local function next_page(cursor)
-    session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", util.glob_escape(prefix) .. ":*" }, {
-      on_response = function(ev)
-        for _, k in ipairs(ev.value and ev.value.value or {}) do
-          if type(k) == "string" then key_list[#key_list + 1] = k end
-        end
-        local cursor2 = (ev.value and ev.value.cursor) or "0"
-        if cursor2 == "0" then
-          delete_batch()
         else
           next_page(cursor2)
         end
@@ -303,6 +233,35 @@ function M.delete_node(node, ctx)
   end
 
   next_page("0")
+end
+
+--- Delete all keys under a prefix (a group node) with count estimation and
+--- a second confirmation (P1-4: 按前缀删除前显示匹配数量预估并二次确认).
+--- @param node table group node
+--- @param ctx table { db_node, render }
+function M.delete_prefix(node, ctx)
+  delete_prefix_keys(node, ctx, {
+    count_per_page = 1000,
+    question = function(count, prefix)
+      return ("Delete %d key(s) matching  %s:*  ?"):format(count, prefix)
+    end,
+  })
+end
+
+--- Delete a group node and every key under it (full SCAN cursor loop, y/n
+--- confirm before the batch). The node is removed from the tree after.
+--- @param node table group node (or any node with a meta.prefix)
+--- @param ctx table { db_node, render }
+function M.delete_node(node, ctx)
+  delete_prefix_keys(node, ctx, {
+    count_per_page = 5000,
+    question = function(count, prefix)
+      if count == 0 then
+        return ("Delete node  %s  (no keys under it)?"):format(prefix)
+      end
+      return ("Delete node  %s  and all %d key(s) under it?"):format(prefix, count)
+    end,
+  })
 end
 
 --- Batch-delete several selected nodes (multi-select) with one confirm.
