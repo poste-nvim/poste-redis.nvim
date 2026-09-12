@@ -228,7 +228,12 @@ function M.run_file()
 
   local all_results = {}
   local last_conn_name = nil  -- last USE group's name (multi-USE files)
-  exec_run.run_file_async(src, {}, {
+  -- Pre-USE commands inherit the selected context (state.current_url): the
+  -- "No connection for line N" error tells users to run :PosteRedisConnection,
+  -- which only fixes the retry if that selection reaches group_by_connection.
+  -- USE groups still win — dispatch_group force-extends each group's own
+  -- connection over this run-level default.
+  exec_run.run_file_async(src, { connection = redis_state.current_url }, {
     on_result = function(ev)
       all_results[#all_results + 1] = ev
     end,

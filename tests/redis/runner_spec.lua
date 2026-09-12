@@ -194,6 +194,21 @@ describe("poste-redis runner indicators", function()
     assert.equals(src, vim.api.nvim_get_current_buf())
   end)
 
+  it("passes the selected context to run_file so pre-USE commands run", function()
+    -- regression: :PosteRedisConnection then re-running a USE-less file still
+    -- errored with "No connection for line 1" — the selection never reached
+    -- group_by_connection as the default URL.
+    redis_state.current_url = "redis://selected:6379/0"
+    redis_state.context.connection = "selected"
+    local captured
+    exec_run.run_file_async = function(buf, opts, callbacks)
+      captured = opts
+      callbacks.on_done({}, {})
+    end
+    runner.run_file()
+    assert.equals("redis://selected:6379/0", captured.connection)
+  end)
+
   it("runs every statement in a visual range, not just the cursor line", function()
     vim.api.nvim_buf_set_lines(src, 0, -1, false, { "GET a", "GET b", "GET c" })
     local captured
