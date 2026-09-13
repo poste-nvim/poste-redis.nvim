@@ -6,6 +6,12 @@
 >
 > 现状：M1 与 M2 均已在本仓库实现并通过测试；本文保留为执行记录和
 > P2 后续 backlog 的来源（见 §10）。
+>
+> **2026-09-13 家族解散**：poste.nvim 的共享 Lua 已 vendor 进本仓库
+> （`lua/poste-redis/`），poste.nvim 现为纯 Rust CLI 仓库。下文所有
+> 「rtp 追加 `../poste.nvim`」「依赖 poste.state」「CI checkout
+> poste.nvim」等表述均为解散前的历史记录；现存的唯一跨仓库契约是
+> poste 二进制的 NDJSON schema（`../poste.nvim/docs/schema.md`）。
 
 ---
 
@@ -15,7 +21,8 @@
 
 1. `requirements.md` — 本插件的目标、范式、优先级
 2. 本文档 — M1 的每一刀切在哪里
-3. `../poste.nvim/AGENTS.md` — 家族共享 infra 的规矩（protocol-agnostic 红线）
+3. `AGENTS.md`（本仓库）— 自包含现状与 protocol-agnostic 红线（原
+   `../poste.nvim/AGENTS.md` 的共享 infra 规矩已随解散作废）
 4. `../poste-db.nvim/AGENTS.md` — 卫星插件惯例（naming 三段式、Lua pitfalls、harness 顺序）
 5. `../poste-ai.nvim/AGENTS.md` — "Neovim Plugin Development Conventions" 一节（API 陷阱清单全部适用）
 

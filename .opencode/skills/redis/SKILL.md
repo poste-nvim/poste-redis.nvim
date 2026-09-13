@@ -28,10 +28,6 @@ SQL/HTTP-specific files unless the task explicitly crosses protocols.
 | `AGENTS.md` | Architecture, conventions, Lua pitfalls |
 | `requirements.md` | Product spec (P0–P3, value shapes, naming) |
 | `EXECUTION-PLAN.md` | M1 work breakdown, decisions D1–D6, acceptance §8 |
-| `lua/poste/state.lua` | `find_poste_binary`, shared config |
-| `lua/poste/cli.lua` | `run` / `run_async` / `run_json` wrappers |
-| `lua/poste/select.lua` | Connection picker |
-| `lua/poste/indicators.lua` | Spinner / ✓ / ✘ indicators |
 
 ### Redis Lua (`lua/poste-redis/`)
 
@@ -47,7 +43,10 @@ SQL/HTTP-specific files unless the task explicitly crosses protocols.
 | `result/header.lua` | Floating fixed header for grid tabs |
 | `history.lua` | In-memory history + float |
 | `toml.lua` | **Vendored** from poste-db — don't edit without syncing source |
-| `config.lua` / `state.lua` / `constants.lua` / `util.lua` | defaults / context / dims & blacklist / helpers |
+| `config.lua` / `state.lua` / `constants.lua` / `util.lua` | defaults / context (+ state-lite merged from poste.nvim@5b3759e: `find_poste_binary`, config singleton, log) / dims & blacklist / helpers |
+| `cli.lua` | **Vendored** from poste.nvim@5b3759e — poste binary wrappers (`run`/`run_json`/`run_async`) |
+| `select.lua` | **Vendored** — connection picker (snacks → float → `vim.ui.select`) |
+| `indicators.lua` | **Vendored** — spinner / ✓ / ✘ sign-column indicators |
 
 ### Rust (in `../poste.nvim`)
 

@@ -31,12 +31,6 @@ jobs:
       - name: Checkout poste-redis.nvim
         uses: actions/checkout@v4
 
-      - name: Checkout poste.nvim (sibling dependency)
-        uses: actions/checkout@v4
-        with:
-          repository: beyondlex/poste.nvim
-          path: poste.nvim
-
       - name: Install Neovim ${{ matrix.nvim_version }}
         uses: rhysd/action-setup-vim@v1
         with:

@@ -22,6 +22,10 @@ poste.nvim（共享 infra + Rust CLI）        poste-ai.nvim（AI 助手，零�
         └────────────────── poste-redis.nvim ─────┘
 ```
 
+> **2026-09-13 更新**：上图是 M1 立项时的基线。家族解散后共享 infra 已
+> vendor 进本仓库，rtp 依赖不复存在；仅剩 `poste` 二进制（NDJSON schema
+> 见 `../poste.nvim/docs/schema.md`）。
+
 - 与 **poste-db.nvim 完全同构**：Lua 卫星（`lua/poste-redis/`）+ poste 二进制扩展。不做独立后端、不自造 RPC 协议
 - **红线**：禁止 `require("poste.http.*")` / `require("poste.db.*")`；AI context 只 `pcall(require, "poste-ai")`
 - **命名**：`poste-redis`（插件/命令 `:PosteRedis*`）/ `poste_redis`（snake_case 标识符、namespace）/
