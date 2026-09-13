@@ -1,7 +1,7 @@
 --- Highlight groups for poste-redis result panel and source buffers.
 --- Links to existing treesitter/builtin groups; runs at setup and on
 --- ColorScheme so user colorschemes don't clobber panel semantics.
-local state = require("poste.state")
+local state = require("poste-redis.state")
 
 local M = {}
 

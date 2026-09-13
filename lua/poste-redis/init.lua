@@ -19,6 +19,15 @@ function M.setup(opts)
   require("poste-redis.autocmds").setup()
   require("poste-redis.commands").setup()
 
+  -- Shared poste binary (vendored installer, family dissolution): make sure
+  -- it is available once per session. vim.g.poste_binary keeps its
+  -- first-class override role (a dev/worktree build never triggers a
+  -- release download).
+  if not vim.g.poste_redis_setup_done then
+    vim.g.poste_redis_setup_done = true
+    require("poste-redis.install_binary").ensure()
+  end
+
   -- context in the statusline (mini.statusline / lualine), colored per
   -- connection via connections.toml `color`; opt out with statusline = false
   if opts.statusline ~= false then

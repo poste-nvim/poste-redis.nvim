@@ -1,15 +1,18 @@
 # poste-redis.nvim
 
-Independent Redis plugin for Poste. Depends on [poste.nvim](https://github.com/beyondlex/poste.nvim)
-for shared infra (`poste.state`, `poste.cli`, `poste.select`, `poste.indicators`) and the
-`poste redis-exec` Rust subcommand (M1 transport).
+Independent Redis plugin for Poste — self-contained since the poste.nvim
+family dissolution: the former shared infra (state-lite, cli, util, select,
+indicators, binary installer) is vendored under `lua/poste-redis/` (vendor
+source poste.nvim@5b3759e). The family's shared `poste` binary — and its
+`poste redis-exec` / `redis-session` subcommands (M1 transport) — is the only
+cross-repo contract (schema: `../poste.nvim/docs/schema.md`).
 
 ## Key Facts
 
-- All Lua lives under `lua/poste-redis/`
-- Requires `poste.nvim` on rtp — `require("poste.state")` must succeed
-- Red line: NO `require("poste-db.*")` / `require("poste-http.*")` — every
-  "reuse" is a copied pattern, vendored, or a shared `poste.*` module
+- All Lua lives under `lua/poste-redis/` — no runtime dependency on
+  poste.nvim or any sibling
+- Red line: NO `require("poste-db.*")` / `require("poste-http.*")` /
+  `require("poste.*")` — every "reuse" is a copied pattern or vendored
 - `poste-redis` / `poste_redis` = the plugin; `poste_redis` = ONLY the filetype
   (mirrors poste-db's naming convention)
 - `plugin/poste-redis.lua` calls `require("poste-redis.init").setup()`
@@ -81,6 +84,7 @@ function A calls B, forward-declare `local B` first (same rule as poste-db).
 
 | Want | Go to |
 |------|-------|
-| Shared infra (state, cli, select, indicators) | `../poste.nvim/lua/poste/` |
+| Vendored shared infra (state, cli, select, indicators, installer) | `lua/poste-redis/` — vendor source poste.nvim@5b3759e `lua/poste/` |
+| Binary NDJSON schema contract | `../poste.nvim/docs/schema.md` |
 | Rust `redis-exec` / `redis_executor` | `../poste.nvim/crates/poste-cli/src/redis_exec.rs`, `crates/poste-exec/src/redis_executor.rs` |
 | Requirements / execution plan | `requirements.md` / `EXECUTION-PLAN.md` |

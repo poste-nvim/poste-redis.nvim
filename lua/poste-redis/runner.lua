@@ -6,7 +6,7 @@ local parser = require("poste-redis.parser")
 local buffer = require("poste-redis.buffer")
 local history = require("poste-redis.history")
 local constants = require("poste-redis.constants")
-local state = require("poste.state")
+local state = require("poste-redis.state")
 local redis_state = require("poste-redis.state")
 
 local M = {}
@@ -71,8 +71,10 @@ local function present(results, summaries, opts)
   -- on the request buffer's sign column (never inside the result panel). Every
   -- executed statement line from THIS run gets its own sign; anything left over
   -- was cleared at dispatch.
-  local ok, indicators = pcall(require, "poste.indicators")
-  if ok and src then
+  -- vendored indicators (family dissolution): the module is bundled, so
+  -- the old pcall guards are gone
+  local indicators = require("poste-redis.indicators")
+  if src then
     for _, ev in ipairs(results or {}) do
       local line_0
       -- src_line (stamped by exec_run per USE group) is the exact executed
@@ -155,12 +157,8 @@ function M.run_selection(mode, range)
     end
   end
 
-  -- pcall pattern (NOT select(2, pcall(...)): on a missing module select
-  -- hands back the ERROR STRING, which is truthy — indicators.clear_all
-  -- would then index a string and crash the whole selection run)
-  local ok_ind, indicators = pcall(require, "poste.indicators")
-
-  if ok_ind then indicators.clear_all(src) end
+  local indicators = require("poste-redis.indicators")
+  indicators.clear_all(src)
 
   exec_run.run_selection_async(src, mode, { range = range, entries = entries }, {
     on_start = function(seq, _)
@@ -190,8 +188,8 @@ end
 function M.cancel_current(buf)
   if not exec_run.is_busy() then return false end
   exec_run.cancel()
-  local ok, indicators = pcall(require, "poste.indicators")
-  if ok and buf then indicators.clear_all(buf) end
+  local indicators = require("poste-redis.indicators")
+  if buf then indicators.clear_all(buf) end
   vim.notify("Execution canceled", vim.log.levels.INFO, { title = constants.TITLE })
   return true
 end
@@ -218,12 +216,10 @@ function M.run_file()
     end
   end
 
-  local ok, indicators = pcall(require, "poste.indicators")
-  if ok then
-    indicators.clear_all(src)
-    for _, line_0 in ipairs(batch_lines) do
-      indicators.set_indicator(src, line_0, "running")
-    end
+  local indicators = require("poste-redis.indicators")
+  indicators.clear_all(src)
+  for _, line_0 in ipairs(batch_lines) do
+    indicators.set_indicator(src, line_0, "running")
   end
 
   local all_results = {}

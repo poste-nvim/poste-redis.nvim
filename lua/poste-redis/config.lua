@@ -175,22 +175,14 @@ local KEY_DISPLAY_NAMES = {
 }
 
 --- Resolve a keymap for (section, action). `false` disables; nil → default.
---- Legacy: falls through to `poste.state.config.keymaps` first so overrides
---- configured via `require("poste").setup({ keymaps = {...} })` still work.
+--- Keymaps are read from THIS plugin's config only — the legacy fall-through
+--- to `poste.state.config.keymaps` (family shared layer) is gone since the
+--- poste.nvim family dissolution.
 --- @param section string
 --- @param action string
 --- @param default string|nil
 --- @return string|nil
 function M.get_keymap(section, action, default)
-  local ok, poste_state = pcall(require, "poste.state")
-  if ok and poste_state.config and poste_state.config.keymaps
-    and poste_state.config.keymaps[section] ~= nil then
-    local key = poste_state.config.keymaps[section][action]
-    if key ~= nil then
-      if key == false then return nil end
-      return key
-    end
-  end
   local sec = M.config.keymaps[section]
   if not sec then return default end
   local key = sec[action]

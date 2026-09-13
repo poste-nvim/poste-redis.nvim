@@ -1,6 +1,7 @@
 globals = {
   "vim",
   "_G",
+  "Snacks",  -- vendored select.lua (poste.nvim family dissolution)
   "describe",
   "it",
   "before_each",

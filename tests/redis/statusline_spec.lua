@@ -116,3 +116,150 @@ describe("poste-redis statusline ctx color", function()
     assert.is_nil(last.opts.bg)
   end)
 end)
+
+---------------------------------------------------------------------------
+-- mini.statusline wiring (poste.nvim family dissolution): scope-guard,
+--- fall-through chain discipline, % escaping, reload idempotency.
+---------------------------------------------------------------------------
+local redis_state = require("poste-redis.state")
+
+--- Fake mini.statusline with just enough surface for the wiring.
+local function fake_mini()
+  local fake = {
+    section_fileinfo = function() return "[orig]" end,
+    config = { content = { active = function() return "[orig-active]" end } },
+    combine_groups = function(groups)
+      local out = {}
+      for _, g in ipairs(groups) do
+        if type(g) == "string" then
+          out[#out + 1] = g
+        elseif g.strings then
+          if g.hl then out[#out + 1] = "%#" .. g.hl .. "#" end
+          for _, s in ipairs(g.strings) do out[#out + 1] = tostring(s) end
+        end
+      end
+      return table.concat(out)
+    end,
+    section_mode = function() return "M", "ModeHl" end,
+    section_git = function() return "G" end,
+    section_diff = function() return "D" end,
+    section_diagnostics = function() return "DG" end,
+    section_lsp = function() return "L" end,
+    section_filename = function() return "F" end,
+    section_location = function() return "LOC" end,
+    section_searchcount = function() return "S" end,
+  }
+  package.loaded["mini.statusline"] = fake
+  return fake
+end
+
+--- Fresh module + fake mini, then run setup() and pump the scheduled wiring.
+local function fresh_setup()
+  local ms = fake_mini()
+  package.loaded["poste-redis.statusline"] = nil
+  local sl = require("poste-redis.statusline")
+  sl.setup()
+  vim.wait(100, function() return vim.g.poste_redis_statusline_wired end)
+  return sl, ms
+end
+
+--- A .redis source buffer current in the window: its file branch resolves
+--- through the global-context fallback (context.lua's USE-less path).
+local function current_redis_buf()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].filetype = "poste_redis"
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "GET k" })
+  vim.api.nvim_set_current_buf(buf)
+  return buf
+end
+
+local function current_plain_buf()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_current_buf(buf)
+  return buf
+end
+
+describe("poste-redis statusline wiring", function()
+  before_each(function()
+    vim.g.poste_redis_statusline_wired = nil
+  end)
+
+  after_each(function()
+    package.loaded["mini.statusline"] = nil
+    vim.g.poste_redis_statusline_wired = nil
+    redis_state.context.connection = nil
+    redis_state.context.db = nil
+    vim.cmd("enew")
+  end)
+
+  it("renders the context on a .redis source buffer", function()
+    redis_state.context.connection = "local"
+    local _, ms = fresh_setup()
+    current_redis_buf()
+
+    local fileinfo = ms.section_fileinfo({})
+    assert.match("local", fileinfo)
+
+    local active = ms.config.content.active()
+    assert.match("local", active)
+    assert.match("MiniStatuslineDevinfo", active)  -- layout intact
+  end)
+
+  it("falls through on plain buffers even with a global context set", function()
+    -- the global session fallback must NOT claim arbitrary buffers
+    redis_state.context.connection = "globalconn"
+    local _, ms = fresh_setup()
+    current_plain_buf()
+
+    assert.equals("[orig]", ms.section_fileinfo({}))
+    assert.equals("[orig-active]", ms.config.content.active())
+  end)
+
+  it("escapes % in the context text (statusline E539)", function()
+    redis_state.context.connection = "100%"
+    local _, ms = fresh_setup()
+    current_redis_buf()
+
+    local out = ms.section_fileinfo({})
+    assert.match("100%%", out, 1, true)
+    assert.has_no.errors(function()
+      vim.api.nvim_eval_statusline(out, {})
+    end)
+  end)
+
+  it("does not re-capture the hooks when setup runs twice", function()
+    local sl, ms = fresh_setup()
+    local active1 = ms.config.content.active
+
+    sl.setup()  -- same module instance
+    assert.equals(active1, ms.config.content.active, "hooks must not be re-wrapped")
+
+    -- a module reload must also be a no-op: the vim.g guard owns the
+    -- idempotency across reloads
+    package.loaded["poste-redis.statusline"] = nil
+    require("poste-redis.statusline").setup()
+    vim.wait(50)
+    assert.equals(active1, ms.config.content.active,
+      "a reload must not stack a second wrapper")
+  end)
+
+  it("chains: a sibling wrapper installed earlier still renders", function()
+    local ms = fake_mini()
+    ms.section_fileinfo = function() return "%#PosteDbSqlCtxprod# prod/blog " end
+    ms.config.content.active = function() return "sibling-active" end
+
+    package.loaded["poste-redis.statusline"] = nil
+    local sl = require("poste-redis.statusline")
+    sl.setup()
+    vim.wait(100, function() return vim.g.poste_redis_statusline_wired end)
+
+    current_plain_buf()
+    assert.match("PosteDbSqlCtxprod", ms.section_fileinfo({}))
+    assert.equals("sibling-active", ms.config.content.active())
+
+    redis_state.context.connection = "local"
+    current_redis_buf()
+    assert.match("local", ms.config.content.active(),
+      "redis still renders its own context on redis windows")
+  end)
+end)

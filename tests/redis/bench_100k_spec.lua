@@ -22,7 +22,7 @@ describe("poste-redis M2 exit — 100k-key browser acceptance", function()
 
   local function live_available()
     if not url or url == "" then return false end
-    local binary = require("poste.state").find_poste_binary()
+    local binary = require("poste-redis.state").find_poste_binary()
     if not binary or vim.fn.filereadable(binary) ~= 1 then return false end
     local probe = io.popen('echo \'{"connection":"' .. url .. '","commands":[["PING"]]}\' | "' .. binary .. '" redis-exec 2>/dev/null')
     if not probe then return false end

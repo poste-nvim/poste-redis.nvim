@@ -4,6 +4,13 @@ local M = {}
 M.PLUGIN_TITLE = "PosteRedis"
 M.TITLE = M.PLUGIN_TITLE
 
+-- vendored from poste.nvim@5b3759e lua/poste/constants.lua — the entries
+-- consumed by this plugin's vendored indicators.lua (family dissolution)
+M.SPINNER_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+M.SPINNER_INTERVAL_MS = 100
+M.INDICATOR_NS_NAME = "poste_indicator"
+M.SIGN_GROUP_NAME = "poste_sg_4a7f"
+
 --- Result panel split: share of the editor height at creation/on resize.
 M.RESULT_HEIGHT_RATIO = 0.4
 M.RESULT_MIN_HEIGHT = 4

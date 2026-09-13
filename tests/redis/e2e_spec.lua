@@ -4,7 +4,7 @@
 local exec_run = require("poste-redis.exec_run")
 local buffer = require("poste-redis.buffer")
 local history = require("poste-redis.history")
-local state = require("poste.state")
+local state = require("poste-redis.state")
 
 describe("poste-redis e2e (live redis)", function()
   local url = vim.env.REDIS_TEST_URL

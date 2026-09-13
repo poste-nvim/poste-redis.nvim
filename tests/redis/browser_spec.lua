@@ -1109,7 +1109,7 @@ describe("poste-redis browser e2e (live redis)", function()
 
   local function live_available()
     if not url or url == "" then return false end
-    local binary = require("poste.state").find_poste_binary()
+    local binary = require("poste-redis.state").find_poste_binary()
     if not binary or vim.fn.filereadable(binary) ~= 1 then return false end
     local probe = io.popen('echo \'{"connection":"' .. url .. '","commands":[["PING"]]}\' | "' .. binary .. '" redis-exec 2>/dev/null')
     if not probe then return false end
@@ -1342,7 +1342,7 @@ describe("poste-redis browser actions e2e (live redis)", function()
 
   local function live_available()
     if not url or url == "" then return false end
-    local binary = require("poste.state").find_poste_binary()
+    local binary = require("poste-redis.state").find_poste_binary()
     if not binary or vim.fn.filereadable(binary) ~= 1 then return false end
     local probe = io.popen('echo \'{"connection":"' .. url .. '","commands":[["PING"]]}\' | "' .. binary .. '" redis-exec 2>/dev/null')
     if not probe then return false end
@@ -2152,7 +2152,6 @@ describe("poste-redis browser connections picker (first open)", function()
     session_conn.execute = orig_execute
     redis_state.context.connection = nil
     redis_state.current_url = nil
-    require("poste.state").connection = nil
     browser.close()
   end)
 
@@ -2328,8 +2327,10 @@ describe("poste-redis browser connections picker (first open)", function()
   end)
 
   it("parks the cursor on the current context's connection row", function()
-    local poste_state = require("poste.state")
-    poste_state.connection = "beta"  -- set by USE / :PosteRedisConnection
+    -- set by USE / :PosteRedisConnection (since f7ce663 this is the slot
+    -- the picker's focus_row reads; the old poste_state.connection write
+    -- was a dead slot the f7ce663 cleanup missed in specs)
+    redis_state.context.connection = "beta"
     stub_connections({
       tree.make_connection_node({ name = "beta", url = "redis://b:6380/0", dialect = "redis" }),
       tree.make_connection_node({ name = "alpha", url = "redis://a:6379/0", dialect = "redis" }),

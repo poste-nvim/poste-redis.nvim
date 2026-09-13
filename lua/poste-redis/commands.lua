@@ -72,7 +72,7 @@ function M.setup()
   end, { nargs = "?", desc = "Reveal a key in the browser tree (default: the active result tab's key)" })
 
   vim.api.nvim_create_user_command("PosteRedisInfo", function()
-    local state = require("poste.state")
+    local state = require("poste-redis.state")
     local redis_state = require("poste-redis.state")
     local connections = require("poste-redis.connections")
     local util = require("poste-redis.util")

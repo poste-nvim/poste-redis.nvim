@@ -17,15 +17,9 @@ function M.check()
     error("Neovim >= 0.10.0 required (uses vim.system, vim.treesitter.language)")
   end
 
-  -- Shared infra (poste.nvim)
-  local state_ok, state = pcall(require, "poste.state")
-  if not state_ok then
-    error("poste.nvim not found on runtimepath — install beyondlex/poste.nvim")
-    return
-  end
-  ok("poste.nvim shared infra loaded")
-
-  -- Poste binary + redis-exec subcommand
+  -- Poste binary + redis-exec subcommand (vendored state, family
+  -- dissolution: the binary is REQUIRED here — redis-exec is the transport)
+  local state = require("poste-redis.state")
   local binary = state.find_poste_binary()
   if binary then
     ok("poste binary: " .. binary)

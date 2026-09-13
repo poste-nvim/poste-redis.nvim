@@ -3,10 +3,10 @@
 --- up the current buffer after the panel took focus).
 local runner = require("poste-redis.runner")
 local exec_run = require("poste-redis.exec_run")
-local state = require("poste.state")
+local state = require("poste-redis.state")
 local buffer = require("poste-redis.buffer")
 local history = require("poste-redis.history")
-local indicators = require("poste.indicators")
+local indicators = require("poste-redis.indicators")
 local connections = require("poste-redis.connections")
 local redis_state = require("poste-redis.state")
 local orig_resolve = connections.resolve_redis_url
@@ -133,7 +133,7 @@ describe("poste-redis runner indicators", function()
     -- regression: the runner once injected into ITS entry list while
     -- exec_run re-derived entries from the buffer — the SELECT never ran
     -- (db stayed 0) and its phantom result/indicator cluttered the run
-    local cli = require("poste.cli")
+    local cli = require("poste-redis.cli")
     local session_conn = require("poste-redis.session_conn")
     local orig_run_async = cli.run_async
     local orig_execute = session_conn.execute
@@ -271,7 +271,7 @@ describe("poste-redis runner indicators", function()
     -- <Esc> used to have no binding at all while the busy notification told
     -- the user to "press <Esc> to cancel first" — exec_run.cancel existed
     -- (tested) but nothing user-reachable ever called it.
-    local cli = require("poste.cli")
+    local cli = require("poste-redis.cli")
     local orig_run_async = cli.run_async
     cli.run_async = function(_cmd, _opts) return 4242 end  -- job "in flight"
     redis_state.current_url = "redis://stub:6379/0"  -- _connection_for path

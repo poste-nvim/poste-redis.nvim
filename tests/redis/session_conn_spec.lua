@@ -2,7 +2,7 @@
 --- The `poste redis-session` process is stubbed: vim.fn.jobstart is replaced
 --- with an in-memory fake job so specs never touch a real redis (Lua-side
 --- stub development per EXECUTION-PLAN §10 / requirements §10 risk table).
-local cli = require("poste.cli")
+local cli = require("poste-redis.cli")
 local session_conn = require("poste-redis.session_conn")
 
 local URL = "redis://127.0.0.1:16379/0"

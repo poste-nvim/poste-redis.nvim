@@ -7,7 +7,7 @@
 ---   - `result.status` is redis-cli style status text; a failed command sets
 ---     status="error" + `error` and the batch continues (greedy)
 --- Note: the subcommand has no `--json` flag — its output is always NDJSON.
-local cli = require("poste.cli")
+local cli = require("poste-redis.cli")
 local parser = require("poste-redis.parser")
 local util = require("poste-redis.util")
 local redis_state = require("poste-redis.state")

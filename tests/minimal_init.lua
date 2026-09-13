@@ -1,10 +1,12 @@
 -- Minimal Neovim configuration for running poste-redis tests.
 -- Used as -u script (actual vimrc replacement).
--- Sibling deps on rtp: poste.nvim (required). The poste binary itself is NOT
--- needed by unit tests — transport-facing specs stub it.
+-- Self-contained since the poste.nvim family dissolution (no poste.nvim on
+-- rtp). The poste BINARY is still the family one built in ../poste.nvim —
+-- transport-facing specs stub it, so unit tests never execute it; a locally
+-- built binary is preferred when present, else a dummy keeps the vendored
+-- installer's ensure() hermetic (no download attempt in headless runs).
 
 vim.opt.runtimepath:append(".")
-vim.opt.runtimepath:append("../poste.nvim")
 
 -- Unit specs never need swap files; a crashed headless run used to leave
 -- E300 "swap file already exists" residue that broke the next run.
@@ -17,18 +19,19 @@ if vim.g.poste_binary == nil then
   local chosen = (vim.fn.filereadable(release) == 1) and release or debug
   if vim.fn.filereadable(chosen) == 1 then
     vim.g.poste_binary = vim.fn.fnamemodify(chosen, ":p")
+  else
+    local dummy = vim.fn.tempname()
+    vim.fn.writefile({ "# dummy poste binary for tests" }, dummy)
+    vim.g.poste_binary = dummy
   end
 end
 
 -- rtp alone is not enough for require(): Neovim only extends package.path
 -- for absolute rtp entries, so mirror the lua/ dirs here explicitly.
 local repo = vim.fn.fnamemodify(".", ":p")
-local poste = vim.fn.fnamemodify("../poste.nvim", ":p")
 package.path = package.path
   .. ";" .. repo .. "lua/?.lua"
   .. ";" .. repo .. "lua/?/init.lua"
-  .. ";" .. poste .. "lua/?.lua"
-  .. ";" .. poste .. "lua/?/init.lua"
   .. ";./tests/?.lua"
   .. ";./tests/?/init.lua"
 

@@ -2,15 +2,8 @@
 local config = require("poste-redis.config")
 
 describe("poste-redis config", function()
-  local state_config_backup
-
-  before_each(function()
-    state_config_backup = vim.deepcopy(require("poste.state").config)
-  end)
-
   after_each(function()
     config.config = vim.deepcopy(config.defaults)
-    require("poste.state").config = state_config_backup
   end)
 
   it("exposes the M1 defaults", function()
@@ -69,19 +62,6 @@ describe("poste-redis config", function()
 
   it("get_keymap falls back to the default for an unknown section", function()
     assert.equals("Y", config.get_keymap("redis_unknown_section", "run", "Y"))
-  end)
-
-  it("legacy keymaps from poste.state.config win", function()
-    local state = require("poste.state")
-    state.config.keymaps = { redis_source = { run = "<leader>legacy" } }
-    config.merge({ keymaps = { redis_source = { run = "<leader>new" } } })
-    assert.equals("<leader>legacy", config.get_keymap("redis_source", "run"))
-  end)
-
-  it("legacy keymaps respect false (disabled)", function()
-    local state = require("poste.state")
-    state.config.keymaps = { redis_result = { close = false } }
-    assert.is_nil(config.get_keymap("redis_result", "close"))
   end)
 
   it("format_key_string maps named keys to readable labels", function()

@@ -2,7 +2,7 @@
 --- The poste binary is stubbed: poste.cli.run_async is replaced with an
 --- in-process emitter so specs never touch a real redis (red line: Lua-side
 --- stub development per EXECUTION-PLAN §10).
-local cli = require("poste.cli")
+local cli = require("poste-redis.cli")
 local exec_run = require("poste-redis.exec_run")
 local parser = require("poste-redis.parser")
 local util = require("poste-redis.util")

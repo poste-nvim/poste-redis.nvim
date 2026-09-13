@@ -1,9 +1,9 @@
 --- Redis connection management: parse `connections.toml` (redis 段), resolve
 --- to a redis:// URL. The binary never reads config files — Lua resolves and
 --- passes the URL (poste-redis EXECUTION-PLAN §5).
-local state = require("poste.state")
+local state = require("poste-redis.state")
 local redis_state = require("poste-redis.state")
-local util = require("poste.util")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -390,11 +390,9 @@ function M.select_connection()
     for _, c in ipairs(list) do
       items[#items + 1] = string.format("%s  %s", c.name, redis_util.redact_url(c.url or ""))
     end
-    local ok, select_mod = pcall(require, "poste.select")
-    if not ok then
-      vim.notify("poste.select unavailable", vim.log.levels.ERROR, { title = redis_state.TITLE })
-      return
-    end
+    -- vendored picker (family dissolution): the module is bundled, so the
+    -- old "poste.select unavailable" pcall guard is gone
+    local select_mod = require("poste-redis.select")
     select_mod.select(items, "Select Redis Connection", function(selected)
       if not selected then return end
       for _, c in ipairs(list) do
@@ -431,11 +429,9 @@ function M.select_context()
     for _, c in ipairs(list) do
       items[#items + 1] = string.format("%s  %s", c.name, redis_util.redact_url(c.url or ""))
     end
-    local ok, select_mod = pcall(require, "poste.select")
-    if not ok then
-      vim.notify("poste.select unavailable", vim.log.levels.ERROR, { title = redis_state.TITLE })
-      return
-    end
+    -- vendored picker (family dissolution): the module is bundled, so the
+    -- old "poste.select unavailable" pcall guard is gone
+    local select_mod = require("poste-redis.select")
     select_mod.select(items, "Select Redis Context", function(selected)
       if not selected then return end
       for _, c in ipairs(list) do

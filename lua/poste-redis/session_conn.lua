@@ -133,7 +133,7 @@ end
 --- Start a redis-session process. Returns the session or nil.
 local function start(conn_url, opts)
   opts = opts or {}
-  local binary = require("poste.cli").binary()
+  local binary = require("poste-redis.cli").binary()
   if not binary then return nil end
 
   local now = os.time()

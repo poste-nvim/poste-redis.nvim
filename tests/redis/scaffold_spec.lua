@@ -3,7 +3,7 @@
 
 describe("poste-redis scaffold", function()
   it("loads modules from the repo on rtp", function()
-    assert.is_truthy(package.loaded["poste.state"] or pcall(require, "poste.state"))
+    assert.is_truthy(package.loaded["poste-redis.state"] or pcall(require, "poste-redis.state"))
   end)
 
   it("registers the poste_redis filetype detection script", function()

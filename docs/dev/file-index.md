@@ -60,12 +60,16 @@ fallback — see `requirements.md`.
 | File | Role |
 |------|------|
 | `config.lua` | `M.defaults` (preview_max_bytes, scan_count, keymaps sections), `merge`, `get_keymap`, `format_key_string` |
-| `state.lua` | `M.context = { connection, db }`, `M.last_response`, `M.TITLE` |
-| `constants.lua` | URL prefix detection, panel/float dims, `MAX_PREVIEW_BYTES`, dangerous-command blacklist |
+| `state.lua` | `M.context = { connection, db }`, `M.last_response`, `M.TITLE`; + state-lite merged from poste.nvim@5b3759e (`config` singleton, `find_poste_binary`, `apply_highlight_overrides`, `log`) |
+| `constants.lua` | URL prefix detection, panel/float dims, `MAX_PREVIEW_BYTES`, dangerous-command blacklist; spinner/indicator constants merged from poste.nvim@5b3759e |
+| `cli.lua` | VENDORED from poste.nvim@5b3759e `lua/poste/cli.lua` — poste binary wrapper (`run`/`run_json`/`run_async`) |
+| `select.lua` | VENDORED from poste.nvim@5b3759e `lua/poste/select.lua` — snacks → float → `vim.ui.select` picker |
+| `indicators.lua` | VENDORED from poste.nvim@5b3759e `lua/poste/indicators.lua` — sign-column spinner / ✓ / ✘ + eol latency virt-text |
+| `install_binary.lua` | VENDORED from poste.nvim@5b3759e `lua/poste/install.lua`, trimmed (no git-tag version sync) — ensures the family poste binary (named `install_binary` because `install.lua` is the parser compiler) |
 | `connections.lua` | `find_connections_toml` (walk-up + mtime cache), `resolve_redis_url` (url form / field form / `{{var}}`), `use_connection`, `select_connection` |
 | `toml.lua` | **Vendored** from poste-db (`lua/poste-db/toml.lua`) — see file header for sync instructions |
 | `context.lua` | **Window-scoped context resolution** — what connection+db a window is about: result panel (active tab's stamped meta) > browser (current scope) > `.redis` file (effective USE/SELECT at the cursor, mirrors what `<CR>` resolves) > global context. `entries_context` pure per-file walk, `display` ("local db3" / credential-free host) |
-| `statusline.lua` | Statusline context segment — window-scoped via `context.resolve()`, colored by connections.toml `color`/`link`/`bg` (`get_ctx_color`), auto-wired into mini.statusline / lualine (`setup({ statusline = false })` opts out) |
+| `statusline.lua` | Statusline context segment — colored by connections.toml `color`/`link`/`bg` (`get_ctx_color`), auto-wired into mini.statusline / lualine (`setup({ statusline = false })` opts out). Since the family dissolution the mini wiring is scope-guarded: renders only on windows redis owns (panel/browser/.redis file), falls through to the captured original elsewhere — the global session fallback is no longer rendered |
 | `winbar.lua` | **Source-buffer context winbar** — `.redis` buffer top bar showing the cursor's effective context, repainted on CursorMoved/WinEnter; gated behind `config.source_winbar` |
 
 ### UI wiring
@@ -81,7 +85,7 @@ fallback — see `requirements.md`.
 | `highlights.lua` | `PosteRedis*` groups (source + result panel + history) |
 | `treesitter.lua` | parser availability probe, enable tree-sitter highlighting, keep regex fallback |
 | `install.lua` | compile tree-sitter-poste-redis/src/parser.c into `stdpath("data")/site/parser` (needs cc; silent no-op otherwise) |
-| `util.lua` | `redact_url`, `glob_escape`, `render_command`, `display_width`, `truncate_display`, `pad_*`, `escape_for_line`, `format_latency` |
+| `util.lua` | `redact_url`, `glob_escape`, `render_command`, `display_width`, `truncate_display`, `pad_*`, `escape_for_line`, `format_latency`; + `clean_nil`/`find_file_upwards`/`ensure_job_data` merged from poste.nvim@5b3759e |
 
 ### Completion (`completion/`, P2-4)
 
@@ -103,7 +107,7 @@ fallback — see `requirements.md`.
 | `redis/toml_spec.lua` | vendored parser (sections, escapes, errors) |
 | `redis/format_spec.lua` | value rendering incl. binary / truncated / CJK / grid model for list/set/hash/zset |
 | `redis/result_grid_spec.lua` | grid: layout widths, render_page + pagination, panel cell navigation, page flip, search, yank cell/column, preview, header slicing |
-| `redis/exec_run_spec.lua` | transport contract (stubbed `poste.cli`), stale-guard, USE grouping |
+| `redis/exec_run_spec.lua` | transport contract (stubbed `poste-redis.cli`), stale-guard, USE grouping |
 | `redis/session_conn_spec.lua` | M2 session pool (stubbed jobstart): start args, reuse, seq pairing, error routing, exit drops session, cleanup_buf, db auto-SELECT, chunk-split stdout |
 | `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/flatten/nested view modes, value page commands + live-redis e2e (SCAN groups, string/hash value render, TTL/DEL/RENAME) |
 | `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |

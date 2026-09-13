@@ -14,7 +14,6 @@ With lazy.nvim:
 ```lua
 {
   "beyondlex/poste-redis.nvim",
-  dependencies = { "beyondlex/poste.nvim" },
   opts = {},
 }
 ```
