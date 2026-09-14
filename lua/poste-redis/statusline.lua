@@ -176,11 +176,17 @@ local function owns_window()
   return ctx.branch ~= "global"
 end
 
---- mini.statusline wiring. Scope-guarded (see owns_window); both wrappers
---- fall through to the captured original on windows redis does not own, so
---- plugins that wrap the same hooks stay chained. The
+--- mini.statusline wiring (the only path since the poste.nvim family
+--- dissolution). The context is rendered by wrapping `section_fileinfo`
+--- only: redis claims a window it owns (result panel, key browser,
+--- .redis source buffer with a resolvable connection — see
+--- `owns_window`) and otherwise falls through to the captured original,
+--- so sibling plugins wrapping the same hook chain instead of fighting
+--- over a global slot. `section_fileinfo` is a safe anchor —
+--- mini.statusline's own default `content.active` renders through it, so
+--- the context survives whoever owns the layout. The
 --- `vim.g.poste_redis_statusline_wired` flag keeps a module reload from
---- re-capturing the already-wrapped hooks (wrapper stacking).
+--- re-capturing the already-wrapped hook (wrapper stacking).
 local function wire_mini_statusline()
   vim.schedule(function()
     local ok_mini, statusline = pcall(require, "mini.statusline")
@@ -199,37 +205,16 @@ local function wire_mini_statusline()
       return orig_fileinfo(...)
     end
 
-    local orig_active = statusline.config.content.active
-    statusline.config.content.active = function()
-      if not owns_window() then
-        -- Not a redis window: fall through so an earlier sibling wrapper
-        -- still renders its context (chain discipline).
-        if orig_active then return orig_active() end
-        return ""
-      end
-      local ctx_hl = M.get_context_hl()
-
-      local mode, mode_hl = statusline.section_mode({ trunc_width = 120 })
-      local git = statusline.section_git({ trunc_width = 40 })
-      local diff = statusline.section_diff({ trunc_width = 75 })
-      local diagnostics = statusline.section_diagnostics({ trunc_width = 75 })
-      local lsp = statusline.section_lsp({ trunc_width = 75 })
-      local filename = statusline.section_filename({ trunc_width = 140 })
-      local fileinfo = statusline.section_fileinfo({ trunc_width = 120 })
-      local location = statusline.section_location({ trunc_width = 75 })
-      local search = statusline.section_searchcount({ trunc_width = 75 })
-
-      return statusline.combine_groups({
-        { hl = mode_hl,                 strings = { mode } },
-        { hl = "MiniStatuslineDevinfo", strings = { git, diff, diagnostics, lsp } },
-        "%<",
-        { hl = "MiniStatuslineFilename", strings = { filename } },
-        "%=",
-        { hl = ctx_hl or "MiniStatuslineFileinfo", strings = { fileinfo } },
-        { hl = mode_hl,                 strings = { location } },
-        { hl = "MiniStatuslineFileinfo", strings = { search } },
-      })
-    end
+    -- NOTE: we deliberately do NOT override `config.content.active`.
+    -- The context is rendered through the `section_fileinfo` wrapper
+    -- above, which survives any layout: mini.statusline's default
+    -- `content.active` calls `section_fileinfo`, and every sibling
+    -- postgres-family layout does too. Owning `content.active` here
+    -- duplicated mini's default layout and, when the user did not
+    -- configure their own `content.active` (the default case), the
+    -- non-redis fall-through returned "" and blanked the statusline on
+    -- every non-redis buffer. See the `section_fileinfo` wrapper for
+    -- the per-connection highlight.
   end)
 end
 
