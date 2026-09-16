@@ -32,6 +32,29 @@ describe("poste-redis value viewer", function()
     assert.same({ "GET", "str" }, value._test.page_command("str", "string", nil))
   end)
 
+  it("a key deleted between scan and view warns instead of rendering a (nil) tab", function()
+    -- no known type: the TYPE probe runs; "none" means the key is gone
+    local node = make_node("gone", nil)
+    local ran = nil
+    session_conn.execute = function(_url, cmd, cbs)
+      ran = cmd[1]
+      cbs.on_response({ value = { type = "string", value = "none" } })
+      return "dispatched"
+    end
+    local notified = nil
+    local orig_notify = vim.notify
+    vim.notify = function(msg, level, _opts)
+      notified = { msg = msg, level = level }
+      return nil
+    end
+    value.view(node, nil, nil)
+    vim.notify = orig_notify
+    assert.equals("TYPE", ran)
+    assert.truthy(notified, "a warn notification must fire")
+    assert.truthy(notified.msg:find("does not exist", 1, true))
+    assert.equals(0, buffer.tab_count(), "no result tab may open")
+  end)
+
   it("a multi-page hash advances past page 1 (done from the UPDATED cursor)", function()
     -- Regression: done was judged from the pre-update cursor, which is "0"
     -- on the very first call, so page 2 could never be fetched even though

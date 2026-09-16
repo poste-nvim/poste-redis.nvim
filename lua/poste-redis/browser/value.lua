@@ -291,7 +291,15 @@ function M.view(node, root_nodes, render_hook)
   -- TYPE first, then fetch by type
   session_conn.execute(url, { "TYPE", key }, {
     on_response = function(ev)
-      start(ev.value and ev.value.value)
+      local t = ev.value and ev.value.value
+      if t == "none" then
+        -- the key vanished between the SCAN and the view (deleted/expired):
+        -- a GET tab would just render "(nil)" with no explanation
+        vim.notify(("Key '%s' does not exist"):format(key),
+          vim.log.levels.WARN, { title = redis_state.TITLE })
+        return
+      end
+      start(t)
     end,
     on_error = function(msg)
       vim.notify("TYPE failed: " .. tostring(msg), vim.log.levels.ERROR,
