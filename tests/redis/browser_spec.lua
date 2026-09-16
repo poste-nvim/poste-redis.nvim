@@ -2042,6 +2042,20 @@ describe("poste-redis browser lazy spine pre-fold (nested view)", function()
     assert.equals(2, n)  -- leaf a:b: + leaf a:b:c
   end)
 
+  it("spine_fold reads browser_split_nest at CALL time, not module load", function()
+    async.set_view_mode("nested")
+    local config_mod = require("poste-redis.config")
+    local default = config_mod.config.browser_split_nest
+    config_mod.config.browser_split_nest = 3
+    local folded, n = scan._test.spine_fold("s1", {
+      "s1:s2:s3:s4:s5:s6:t1", "s1:s2:s3:s4:s5:s6:t2",
+    })
+    config_mod.config.browser_split_nest = default
+    -- cap 3: the chain folds to s1:s2:s3 and the two deeper keys stay flat
+    assert.equals("s1:s2:s3", folded)
+    assert.equals(2, n)
+  end)
+
   it("spine_fold caps the chain at browser_split_nest segments", function()
     async.set_view_mode("nested")
     -- six segments is the split cap: deeper keys live flat inside the folder,

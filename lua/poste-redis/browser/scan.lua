@@ -31,7 +31,13 @@ local M = {}
 --- stay flat inside the deepest folder (prevents pathological trees from
 --- `a:b:c:d:...` keys). Configurable via `browser_split_nest`. Single-spine
 --- chains fold at render time (tree.lua), so a deeper cap costs no indentation.
-local SPLIT_NEST = config.config.browser_split_nest or 6
+--- Read at CALL time: a module-load capture ignored a value set by a later
+--- setup() (scan.lua is required lazily by the browser, potentially before
+--- the user's opts merge).
+--- @return number
+local function split_nest()
+  return config.config.browser_split_nest or 6
+end
 
 --- Number of `:`-separated segments in a folder prefix ("" → 0, "a" → 1,
 --- "a:b" → 2). Drives the nested-view nest cap.
@@ -57,7 +63,7 @@ end
 --- @return string folded_prefix, number direct_children
 local function spine_fold(pfx, keys)
   local depth = seg_count(pfx)
-  while depth < SPLIT_NEST do
+  while depth < split_nest() do
     local kids, order = {}, {}
     for i = 1, #keys do
       local rest = keys[i]:sub(#pfx + 2)
@@ -261,7 +267,7 @@ end
 local function build_nested_children(node, keys, conn_name, db, depth)
   node.children = {}
   local prefix = node.meta.prefix or ""
-  if depth >= SPLIT_NEST then
+  if depth >= split_nest() then
     for _, k in ipairs(keys) do
       table.insert(node.children, tree.make_key_node(
         key_entry_name(k), conn_name, db, key_entry_meta(k)))
@@ -518,7 +524,7 @@ local function build_group_nested(node, keys, conn_name, db, from, full)
     if prefix ~= "" then rest = k:sub(#prefix + 2) end
     local seg = rest:match("^([^:]+)")
     local has_more = seg and rest:sub(#seg + 1) ~= ""
-    if seg and has_more and depth < SPLIT_NEST then
+    if seg and has_more and depth < split_nest() then
       local sub_prefix = (prefix == "" and seg) or (prefix .. ":" .. seg)
       local g = node._nsegs[seg]
       if not g then
@@ -648,7 +654,7 @@ M._test = {
   build_group_headers = build_group_headers,
   build_group_nested = build_group_nested,
   spine_fold = spine_fold,
-  SPLIT_NEST = SPLIT_NEST,
+  SPLIT_NEST = split_nest,
 }
 
 return M

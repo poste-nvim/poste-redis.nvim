@@ -23,7 +23,17 @@ function M.centered_float(lines, opts)
 
   local b = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = b })
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
+  -- one buffer line per item: nvim_buf_set_lines rejects an item containing
+  -- a newline (E5108 "replacement string item contains newlines"), so a
+  -- caller embedding "\n" in a help line would take the whole float down —
+  -- split instead, the rendering intent is identical.
+  local flat = {}
+  for _, line in ipairs(lines or {}) do
+    for _, part in ipairs(vim.split(tostring(line), "\n", { plain = true })) do
+      flat[#flat + 1] = part
+    end
+  end
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, flat)
   vim.api.nvim_set_option_value("modifiable", false, { buf = b })
   if opts.filetype then
     vim.api.nvim_set_option_value("filetype", opts.filetype, { buf = b })
