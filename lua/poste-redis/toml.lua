@@ -1,8 +1,9 @@
 -- VENDORED from poste-db.nvim lua/poste-db/toml.lua
--- Source commit: b7aefc6 ("fix(toml): single-pass basic-string unescape")
--- Syncing: poste-redis must not require("poste-db.*") (family red line). This
--- pure-function TOML parser is copied here verbatim; when poste-db updates it,
--- re-copy the file and bump the commit above. Keep it dependency-free.
+-- Source commit: 94fccf2 ("fix(toml): literal-string backslash + UTF-8 BOM
+-- handling"). Syncing: poste-redis must not require("poste-db.*") (family red
+-- line). This pure-function TOML parser is copied here verbatim; when
+-- poste-db updates it, re-copy the file and bump the commit above. Keep it
+-- dependency-free.
 
 --- Minimal pure-Lua TOML parser.
 --- Supports: [section] headers, key = "string", key = 'string', key = 123,
@@ -19,11 +20,20 @@ local function strip_inline_comment(s)
   local i = 1
   local in_string = false
   local string_char = nil
+  -- TOML basic strings ("…") process backslash escapes; literal strings
+  -- ('…') process NONE — skipping 2 chars after a `\` in a literal string
+  -- ate the closing quote of values like 'a\' and turned a trailing
+  -- comment into a spurious "Unclosed single-quoted string" error.
+  local escaped = false
   while i <= #s do
     local ch = s:sub(i, i)
     if in_string then
-      if ch == "\\" then
-        i = i + 2
+      if escaped then
+        escaped = false
+        i = i + 1
+      elseif string_char == '"' and ch == "\\" then
+        escaped = true
+        i = i + 1
       elseif ch == string_char then
         in_string = false
         i = i + 1
@@ -62,12 +72,14 @@ local function parse_value(v)
   if v == "false" then return false end
   local n = tonumber(v)
   if n then return n end
+  -- NB: the error must not quote the value — connections.toml values are
+  -- frequently secrets, and the message goes to the log file.
   if v:sub(1, 1) == '"' then
-    if v:sub(-1, -1) ~= '"' then return nil, "Unclosed string: " .. v end
+    if v:sub(-1, -1) ~= '"' then return nil, "Unclosed double-quoted string" end
     return unescape_basic(v:sub(2, -2))
   end
   if v:sub(1, 1) == "'" then
-    if v:sub(-1, -1) ~= "'" then return nil, "Unclosed string: " .. v end
+    if v:sub(-1, -1) ~= "'" then return nil, "Unclosed single-quoted string" end
     return v:sub(2, -2)
   end
   return v
@@ -77,6 +89,9 @@ end
 --- @param content string Raw TOML text
 --- @return table|nil, string|nil parsed table, error_message
 function M.parse(content)
+  -- editors and Windows tools routinely save with a UTF-8 BOM; without
+  -- stripping it the first line fails as "Invalid key=value line"
+  content = content:gsub("^\xEF\xBB\xBF", "")
   local result = {}
   local section = result
 

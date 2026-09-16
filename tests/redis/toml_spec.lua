@@ -60,6 +60,32 @@ password = "a\"b\\c"
     assert.equals("a\\b", out.path)
   end)
 
+  it("literal strings: a trailing backslash does not eat the closing quote", function()
+    -- '…' is literal: the \ is data, so stripping 2 chars after it swallowed
+    -- the closing quote and misread the rest of the line as string content
+    local out = toml.parse("path = 'a\\' # trailing comment\n")
+    assert.equals("a\\", out.path)
+  end)
+
+  it("double-quoted strings: an escaped quote before # still ends the string", function()
+    local out = toml.parse('pw = "a\\"b" # trailing\n')
+    assert.equals('a"b', out.pw)
+  end)
+
+  it("strips a UTF-8 BOM before parsing", function()
+    -- editors/Windows tools save with a BOM; unparsed the first key=value
+    -- line fails as invalid
+    local out = toml.parse("﻿[srv]\ndialect = \"redis\"\n")
+    assert.equals("redis", out.srv.dialect)
+  end)
+
+  it("unclosed-string errors never echo the value (may be a secret)", function()
+    local out, err = toml.parse("password = \"s3cret-value\n")
+    assert.is_nil(out)
+    assert.truthy(err)
+    assert.falsy(err:find("s3cret%-value", 1, false))
+  end)
+
   it("supports true/false and top-level keys", function()
     local out = toml.parse("tls = true\nhost = \"h\"\n")
     assert.equals(true, out.tls)
