@@ -119,8 +119,7 @@ M.defaults = {
       add_row = "o",
       delete_row = "dd",
     },
-    -- Key browser (M2). Defaults land with that milestone; placeholders keep
-    -- the section discoverable in :help and config docs.
+    -- Key browser (M2, shipped).
     redis_browser = {
       toggle_node = "<CR>",
       move_left = "h",
