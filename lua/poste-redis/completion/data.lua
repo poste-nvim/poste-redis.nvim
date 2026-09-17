@@ -12,6 +12,7 @@
 local connections = require("poste-redis.connections")
 local session_conn = require("poste-redis.session_conn")
 local config = require("poste-redis.config")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -171,7 +172,12 @@ function M.ensure_key_candidates(conn_url, prefix, db, callback)
   key_fetch_gen[fkey] = my_gen
 
   local scan_count = config.config.scan_count or 500
-  local cmd = { "SCAN", "0", "MATCH", prefix .. "*", "COUNT", tostring(scan_count) }
+  -- the prefix is a literal key prefix: glob metacharacters inside it must
+  -- not widen the MATCH — an unescaped `a*b` prefix matched glob-wise and
+  -- the literal filter below then dropped the extras, so keys with `*?[]\`
+  -- in their names completed incompletely (same discipline as the browser
+  -- scans, util.glob_escape)
+  local cmd = { "SCAN", "0", "MATCH", util.glob_escape(prefix) .. "*", "COUNT", tostring(scan_count) }
   session_conn.execute(conn_url, cmd, {
     on_response = function(ev)
       if key_fetch_gen[fkey] ~= my_gen then return end

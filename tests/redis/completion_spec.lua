@@ -220,6 +220,25 @@ describe("poste-redis completion data", function()
     session_conn.execute = orig_execute
   end)
 
+  it("escapes glob metacharacters in the completion prefix", function()
+    -- the MATCH pattern must treat the typed prefix literally: an unescaped
+    -- `a*b` matched glob-wise and the literal filter then dropped the extras,
+    -- so keys with `*?[]\` in their names completed incompletely
+    local orig_execute = session_conn.execute
+    local calls = {}
+    data.clear_key_cache()
+    session_conn.execute = function(_url, cmd, callbacks)
+      table.insert(calls, cmd)
+      vim.schedule(function() callbacks.on_response({ value = { value = {} } }) end)
+    end
+    local got = nil
+    data.ensure_key_candidates("redis://h:6379/0", "a*b[1]?", 0, function(r) got = r end)
+    assert.equals(true, vim.wait(500, function() return got ~= nil end, 5))
+    assert.equals("a\\*b\\[1\\]\\?*", calls[1][4])
+    data.clear_key_cache()
+    session_conn.execute = orig_execute
+  end)
+
   it("a stale in-flight SCAN cannot answer a post-clear fetch", function()
     -- clear_key_cache drops an in-flight fetch's callbacks; a NEWER fetch
     -- for the same prefix may start right after, and the stale response
