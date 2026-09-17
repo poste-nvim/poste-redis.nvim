@@ -76,7 +76,7 @@ describe("poste-redis examples", function()
 
   it("connections.toml example exposes redis connections synchronously", function()
     local connections = require("poste-redis.connections")
-    local list = connections._test.list_connections_sync("examples")
+    local list = connections.list_connections_sync("examples")
     assert.equals(2, #list)
   end)
 end)

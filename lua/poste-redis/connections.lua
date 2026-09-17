@@ -294,10 +294,12 @@ function M.resolve(name_or_url)
   return M.resolve_redis_url(name_or_url)
 end
 
---- List redis connections: { { name, url, host, port, db }, ... } (async cb).
---- @param callback function(list: table[])
---- @param opts? table { search_dir = string|nil }
-local function list_connections_sync(search_dir)
+--- Sync list of redis connections: { { name, url, host, port, db }, ... }.
+--- Public so health.lua and completion don't reach through `_test`.
+--- @param search_dir string|nil
+--- @return table[]
+function M.list_connections_sync(search_dir)
+  search_dir = search_dir or get_search_dir()
   local parsed, _ = read_config(search_dir)
   local list = {}
   if parsed then
@@ -337,9 +339,10 @@ local function list_connections_sync(search_dir)
   return list
 end
 
+--- Async list (callback variant of list_connections_sync).
 function M.list_connections(callback, opts)
   local search_dir = (opts and opts.search_dir) or get_search_dir()
-  local list = list_connections_sync(search_dir)
+  local list = M.list_connections_sync(search_dir)
   vim.schedule(function() callback(list) end)
 end
 
@@ -347,7 +350,7 @@ end
 --- @param search_dir string|nil
 --- @return string[]
 function M.redis_connection_names(search_dir)
-  local list = list_connections_sync(search_dir or get_search_dir())
+  local list = M.list_connections_sync(search_dir)
   local names = {}
   for _, c in ipairs(list) do
     names[#names + 1] = c.name
@@ -465,7 +468,6 @@ M._test = {
   parse_dotenv = parse_dotenv,
   apply_env = apply_env,
   percent_encode = percent_encode,
-  list_connections_sync = list_connections_sync,
   --- Drop every file/mtimes cache (specs use temp dirs).
   reset_caches = function()
     _config_search_cache = {}

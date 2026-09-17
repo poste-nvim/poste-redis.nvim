@@ -50,7 +50,7 @@ function M.check()
   local config_path = connections.find_connections_toml(search_dir)
   if config_path then
     ok("connections.toml: " .. config_path)
-    local redis_count = #connections._test.list_connections_sync(search_dir)
+    local redis_count = #connections.list_connections_sync(search_dir)
     if redis_count > 0 then
       ok(string.format("%d redis connection(s) found", redis_count))
     else
