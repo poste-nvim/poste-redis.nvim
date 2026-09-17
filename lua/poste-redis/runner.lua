@@ -62,6 +62,10 @@ local function present(results, summaries, opts)
     status = any_failed and "error" or (first and first.status or ""),
     latency_ms = total_latency,
     error = any_failed,
+    -- the first result's db: a replayed entry renders as a real tab bound to
+    -- meta.db — without it, grid edits / refresh / TTL probes run unsteered
+    -- on the shared session's CURRENT db (a silent wrong-db write)
+    db = first and first.db or nil,
     lines = buffer_lines(),
     -- raw (transport-truncated) value of the first result — the panel's
     -- default active tab — so `K` previews the entry's detail on replay

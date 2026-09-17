@@ -112,6 +112,23 @@ describe("poste-redis runner indicators", function()
     assert.equals(src, vim.api.nvim_get_current_buf())
   end)
 
+  it("the history entry carries the result's db (replay edits stay on it)", function()
+    -- regression: present() dropped the db when pushing history, so a
+    -- replayed tab rendered with meta.db = nil and grid edits / refresh /
+    -- TTL probes ran unsteered on the shared session's CURRENT db — a
+    -- silent wrong-db write.
+    exec_run.run_selection_async = function(buf, mode, opts, callbacks)
+      callbacks.on_done({
+        {
+          seq = 1, command = "GET k", status = "OK", latency_ms = 1, db = 3,
+          value = { type = "string", value = "v" },
+        },
+      }, {})
+    end
+    runner.run_selection("cursor")
+    assert.equals(3, history.list()[1].db)
+  end)
+
   it("line runs show no indicator on the inherited SELECT line", function()
     vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE local", "SELECT 3", "GET session:abc" })
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
