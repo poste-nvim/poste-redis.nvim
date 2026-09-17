@@ -269,7 +269,21 @@ function M.execute(conn_url, command, callbacks, bufnr, opts)
       at = os.time(),
     }
     local sel_payload = vim.json.encode({ seq = sel_seq, command = { "SELECT", tostring(db) } }) .. "\n"
-    pcall(vim.fn.chansend, session.job_id, sel_payload)
+    local ok_send, sent_sel = pcall(vim.fn.chansend, session.job_id, sel_payload)
+    if not ok_send or type(sent_sel) ~= "number" or sent_sel <= 0 then
+      -- The SELECT never reached the process. Fail the whole request now:
+      -- sending the command anyway would run it on the session's current db
+      -- while the UI claims opts.db, and a lingering sel_seq pending entry
+      -- (never answered) would trip the stall watchdog into restarting a
+      -- session that may be perfectly healthy. Undo our db write so the
+      -- next execute re-issues the SELECT.
+      session.pending[sel_seq] = nil
+      if session.db == db then session.db = prev_db end
+      if callbacks.on_error then
+        pcall(callbacks.on_error, "redis session chansend failed (SELECT)", nil)
+      end
+      return "not_running"
+    end
   end
 
   session.seq = session.seq + 1

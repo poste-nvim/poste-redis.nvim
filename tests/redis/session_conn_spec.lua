@@ -188,8 +188,32 @@ describe("poste-redis session_conn", function()
     assert.equals(0, #responses)
   end)
 
-  it("a failed SELECT errors the pipelined command and reverts the session db", function()
-    -- Regression: the SELECT was fire-and-forget (seq 0, no pending entry)
+  it("a chansend-failed SELECT fails the request without sending the command", function()
+    -- The SELECT send used to be unchecked (pcall, result ignored): a dead
+    -- channel left its pending entry unanswered, which the stall watchdog later "recovered" by restarting a possibly healthy
+    -- session, and the command behind it ran unsteered on the current db.
+    local session = session_conn.get(URL)
+    local errs = {}
+    vim.fn.chansend = function(id, payload)
+      if payload and payload:find('"SELECT"') then return 0 end  -- dead channel
+      fake_job.chansend[#fake_job.chansend + 1] = payload
+      return #payload
+    end
+    local ret = session_conn.execute(URL, { "GET", "k" }, {
+      on_response = function() assert.fail("command must not run") end,
+      on_error = function(msg) errs[#errs + 1] = msg end,
+    }, nil, { db = 3 })
+    assert.equals("not_running", ret)
+    assert.equals(1, #errs)
+    assert.match("chansend failed", errs[1])
+    -- the command was never sent, the SELECT pending entry is gone and the
+    -- db bookkeeping reverted (the next execute re-issues the SELECT)
+    assert.equals(0, #fake_job.chansend)
+    assert.is_nil(session.pending[1])
+    assert.is_nil(session.db)
+  end)
+
+  it("a failed SELECT errors the pipelined command and reverts the session db", function()    -- Regression: the SELECT was fire-and-forget (seq 0, no pending entry)
     -- while session.db was already updated — a failed SELECT (db out of
     -- range) left every later request silently running on the OLD db while
     -- the UI claimed the requested one.
