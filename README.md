@@ -58,7 +58,8 @@ GET session:abc
   `:PosteRedisBrowserView`.
 - `<leader>/` filters keys by substring; `<Space>` switches db; `o` switches
   connection; `d`/`D` delete keys/prefixes (multi-select with `<Tab>`),
-  `t` TTL, `R` rename, `i` info, `y` yank.
+  `t` TTL (on a selection: one prompt for every selected key), `R` rename,
+  `i` info, `y` yank.
 - `<CR>` on a key opens a paginated value viewer (HSCAN/SSCAN/ZSCAN/LRANGE
   pages); truncated strings load fully with `F`.
 
