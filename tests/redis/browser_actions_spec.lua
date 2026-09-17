@@ -314,4 +314,58 @@ describe("poste-redis browser actions", function()
       end
     end
   end)
+
+  it("set_ttl_nodes EXPIREs every selected key after ONE prompt", function()
+    local history = require("poste-redis.history")
+    history.clear()
+    local k1 = key_node("user:1", "stubconn", 0)
+    local k2 = key_node("user:2", "stubconn", 0)
+    k1.meta.url = "redis://h:6379/0"
+    k2.meta.url = "redis://h:6379/0"
+    local group = tree.make_group_node("user", "stubconn", 0)  -- skipped: not a key
+    group.meta.url = "redis://h:6379/0"
+    local done = false
+    actions.set_ttl_nodes({ k1, group, k2 }, { on_done = function() done = true end })
+    assert.is_true(wait_for(function() return done end))
+    local expires = {}
+    for _, c in ipairs(calls) do
+      if c.cmd and c.cmd[1] == "EXPIRE" then expires[#expires + 1] = c.cmd end
+    end
+    assert.equals(2, #expires, "group nodes are skipped, keys get EXPIRE")
+    assert.same({ "EXPIRE", "user:1", "60" }, expires[1])
+    assert.same({ "EXPIRE", "user:2", "60" }, expires[2])
+    -- one aggregated history line with both keys and an executable yank form
+    assert.equals(1, history.count())
+    assert.equals("EXPIRE user:1 user:2", history.list()[1].command)
+    assert.equals(2, history.list()[1].count)
+    assert.match("redis%-cli EXPIRE 'user:1' 60", history.list()[1].yank)
+    assert.match("redis%-cli EXPIRE 'user:2' 60", history.list()[1].yank)
+  end)
+
+  it("set_ttl_nodes with a negative prompt PERSISTs every selected key", function()
+    -- the input stub answers "60" to TTL prompts; override to -1 for this case
+    vim.ui.input = function(opts, cb)
+      calls[#calls + 1] = { input_opts = opts }
+      if cb then cb("-1") end
+    end
+    local k1 = key_node("user:1", "stubconn", 0)
+    k1.meta.url = "redis://h:6379/0"
+    actions.set_ttl_nodes({ k1 }, {})
+    assert.is_true(wait_for(function()
+      for _, c in ipairs(calls) do
+        if c.cmd and c.cmd[1] == "PERSIST" then return true end
+      end
+      return false
+    end))
+  end)
+
+  it("set_ttl_nodes warns when nothing selectable is in the selection", function()
+    local group = tree.make_group_node("user", "stubconn", 0)
+    group.meta.url = "redis://h:6379/0"
+    actions.set_ttl_nodes({ group }, {})
+    vim.wait(100, function() return false end, 5)
+    for _, c in ipairs(calls) do
+      assert.not_equals("EXPIRE", c.cmd and c.cmd[1], "no keys selected → no server call")
+    end
+  end)
 end)

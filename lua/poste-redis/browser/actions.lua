@@ -447,6 +447,81 @@ function M.set_ttl(node, _ctx)
   }, nil, { db = db, owner = "browser" })
 end
 
+--- Batch TTL over a multi-select (`t` with an active selection): ONE seconds
+--- prompt, then EXPIRE (or PERSIST for negatives) on every selected key node.
+--- Group nodes in the selection are skipped — a folder has no single TTL.
+--- @param nodes table[] selected nodes
+--- @param ctx table { db_node, render, on_done }
+function M.set_ttl_nodes(nodes, ctx)
+  ctx = ctx or {}
+  local keys = {}
+  for _, node in ipairs(nodes or {}) do
+    if node.node_type == "key" and node.meta and node.meta.key then
+      keys[#keys + 1] = node
+    end
+  end
+  if #keys == 0 then
+    notify("No key nodes selected", vim.log.levels.WARN)
+    return
+  end
+  local url, err = conn_url_for(keys[1])
+  if not url then
+    notify("Cannot resolve connection: " .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+
+  vim.ui.input({
+    prompt = ("TTL for %d key(s) (seconds, -1 = PERSIST): "):format(#keys),
+  }, function(input)
+    if not input or input == "" then return end
+    local secs = tonumber(input)
+    if secs == nil then
+      notify("Invalid TTL: " .. input, vim.log.levels.ERROR)
+      return
+    end
+    local failed = 0
+    local function apply(i)
+      if i > #keys then
+        if failed == 0 then
+          notify(("TTL set on %d key(s) (%s)"):format(#keys, input))
+        else
+          notify(("TTL set on %d/%d key(s); %d failed"):format(#keys - failed, #keys, failed),
+            vim.log.levels.WARN)
+        end
+        -- one aggregated history line (a bare multi-key EXPIRE is not a real
+        -- command — the yank form carries one redis-cli line per key)
+        local toks, yank_lines = { "EXPIRE" }, {}
+        for _, node in ipairs(keys) do
+          toks[#toks + 1] = node.meta.key
+          yank_lines[#yank_lines + 1] = ("redis-cli EXPIRE '%s' %s"):format(node.meta.key, tostring(secs))
+        end
+        record(toks, {
+          connection = keys[1].meta and keys[1].meta.connection,
+          db = keys[1].meta and keys[1].meta.db,
+          count = #keys,
+          yank = table.concat(yank_lines, "\n"),
+        })
+        if ctx.on_done then ctx.on_done() end
+        return
+      end
+      local node = keys[i]
+      local node_url = conn_url_for(node) or url
+      local node_db = node.meta and node.meta.db
+      local cmd = secs < 0 and { "PERSIST", node.meta.key }
+        or { "EXPIRE", node.meta.key, tostring(secs) }
+      session_conn.execute(node_url, cmd, {
+        on_response = function() apply(i + 1) end,
+        on_error = function(msg)
+          failed = failed + 1
+          notify(("TTL %s failed: %s"):format(node.meta.key, tostring(msg)), vim.log.levels.ERROR)
+          apply(i + 1)
+        end,
+      }, nil, { db = node_db, owner = "browser" })
+    end
+    apply(1)
+  end)
+end
+
 ----------------------------------------------------------------------
 -- Rename
 ----------------------------------------------------------------------

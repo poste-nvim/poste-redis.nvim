@@ -497,6 +497,18 @@ local function setup_browser_buffer()
   k = config.get_keymap("redis_browser", "ttl", "t")
   if k then
     vim.keymap.set("n", k, function()
+      -- t with an active selection: ONE seconds prompt for every selected
+      -- key (group nodes are skipped) — the TTL counterpart of D-on-selection
+      if state.multi_select.active and next(state.multi_select.selected) then
+        local nodes = {}
+        for node in pairs(state.multi_select.selected) do nodes[#nodes + 1] = node end
+        require("poste-redis.browser.actions").set_ttl_nodes(nodes, {
+          db_node = state.current_db_node,
+          render = render_tree,
+          on_done = exit_multi_select,
+        })
+        return
+      end
       local node = current_node()
       if not node or node.node_type ~= "key" then return end
       actions.set_ttl(node, action_ctx())
@@ -547,7 +559,7 @@ local function setup_browser_buffer()
         "  o     switch connection (back to the connections list)",
         "  d     delete key (confirm)",
         "  D     delete all keys under prefix (count + confirm)",
-        "  <Tab> multi-select nodes (same db); D deletes all selected",
+        "  <Tab> multi-select nodes (same db); D deletes, t sets TTL on all selected",
         "  i     node info (count / memory / ttl)",
         "  t     show/edit TTL (secs, -1 = PERSIST)",
         "  R     rename key (conflict-checked)",
