@@ -33,6 +33,7 @@ fallback — see `requirements.md`.
 | `buffer/pager.lua` | Grid page flipping (wrapping) for table tabs |
 | `buffer/preview.lua` | `K` float preview: raw JSON (text tabs) / current cell (table tabs) |
 | `buffer/yank.lua` | Yank whole tab / current cell / current column |
+| `buffer/export.lua` | Grid export on `E`: RFC 4180 CSV / TSV / one-object-per-line JSON, whole grid (all pages), index column never exported, truncation surfaced in the notify |
 | `buffer/sort.lua` | Column sort on `s` (none → desc → asc → none): numeric-aware stable re-order of grid rows, cursor follows the focused record, sort icon byte-range in the rendered header (link @number) |
 | `result/grid.lua` | **Pure table-grid renderer**: `build_layout` (display widths + right-align), `render_page` (borderless `│` rows + col byte maps + pagination), `compute_matches` / `cell_match_range` (search). No vim ops — reusable in poste.nvim later |
 | `result/header.lua` | Floating fixed header for grid tabs (1-line float over the panel following horizontal scroll, per-char viewport slicing) |
@@ -112,6 +113,8 @@ fallback — see `requirements.md`.
 | `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/flatten/nested view modes, value page commands + live-redis e2e (SCAN groups, string/hash value render, TTL/DEL/RENAME) |
 | `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close, grid tab render |
+| `redis/yank_spec.lua` | register targets (" and +), page arithmetic, text-tab fallback |
+| `redis/export_spec.lua` | csv quoting, tsv cleaning, json shape, export() guards |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/completion_spec.lua` | P2-4: ctx detection, command table, conn names, SCAN key-prefix fetch+cache (stubbed session), orchestrator dispatch |
 | `redis/value_spec.lua` | value viewer: per-type page commands, progressive pagination (done from the updated cursor, `<Tab>` fetches the next page, exhausted cursor stops) |
@@ -135,4 +138,5 @@ fallback — see `requirements.md`.
 |------|--------|
 | M2 exit: 100k-key acceptance script (P1-1 first-screen < 300ms) | done |
 | completion (P2-4): command table + USE connection names + key-prefix SCAN hints | done |
-| write ops / command palette / export (P2) | not started |
+| write ops / command palette (P2) | not started |
+| result-grid export (P2): `E` writes the active grid to csv/tsv/json | done |

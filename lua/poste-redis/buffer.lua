@@ -283,6 +283,11 @@ function M.yank_column()
   yank.column(state.tabs[state.active])
 end
 
+--- `E` on a grid tab: export the whole grid (all pages) to csv/tsv/json.
+function M.export_grid()
+  require("poste-redis.buffer.export").export(state.tabs[state.active])
+end
+
 --- `s` on a content column: cycle none → desc → asc → none and pin the sort
 --- icon next to the column name in the header.
 function M.sort_column()
@@ -557,6 +562,8 @@ function setup_keymaps()
   if k then vim.keymap.set("n", k, function() M.yank_cell() end, km) end
   k = config.get_keymap("redis_result", "yank_column", "yc")
   if k then vim.keymap.set("n", k, function() M.yank_column() end, km) end
+  k = config.get_keymap("redis_result", "export_grid", "E")
+  if k then vim.keymap.set("n", k, function() M.export_grid() end, km) end
   k = config.get_keymap("redis_result", "show_search", "<leader>/")
   if k then vim.keymap.set("n", k, function() M.show_search() end, km) end
   k = config.get_keymap("redis_result", "next_search", "n")

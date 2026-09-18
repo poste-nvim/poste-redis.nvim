@@ -45,7 +45,8 @@ GET session:abc
   (list/set/hash/zset) as a sortable grid with a frozen header, cell
   navigation, search, paging and yank. `i`/`o`/`dd` edit cells/rows back to
   Redis (with stale-cell guards); `r` re-runs the tab's command; `gd` jumps
-  to the tab's key in the browser.
+  to the tab's key in the browser; `E` exports the whole grid to a file
+  (CSV / TSV / JSON).
 - `<Esc>` cancels an in-flight execution; dangerous commands (`FLUSHALL`,
   `CONFIG`, …) are flagged in the panel.
 

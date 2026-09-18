@@ -102,6 +102,8 @@ M.defaults = {
       preview_cell = "K",
       yank_cell = "yy",
       yank_column = "yc",
+      -- export the active grid to a file (csv/tsv/json, all pages)
+      export_grid = "E",
       show_search = "<leader>/",
       next_search = "n",
       prev_search = "N",
