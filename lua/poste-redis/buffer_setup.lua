@@ -23,6 +23,7 @@ local function show_help(buf)
     "  " .. config.format_keymap("redis_result", "next_tab") .. " / " .. config.format_keymap("redis_result", "prev_tab") .. "   switch result tabs",
     "  " .. config.format_keymap("redis_result", "preview_cell") .. "   preview cell / raw value",
     "  " .. config.format_keymap("redis_result", "yank_cell") .. " / " .. config.format_keymap("redis_result", "yank_column") .. "   yank cell / column",
+    "  " .. config.format_keymap("redis_result", "export_grid") .. "   export the grid to a file (csv/tsv/json)",
     "  " .. config.format_keymap("redis_result", "prev_page") .. " / " .. config.format_keymap("redis_result", "next_page") .. "   previous / next page",
     "  " .. config.format_keymap("redis_result", "sort_column") .. "   sort by the cursor column (none → desc → asc → none)",
     "  " .. config.format_keymap("redis_result", "show_search") .. "   search in results",
