@@ -133,7 +133,9 @@ function M.edit_cell(tab)
   vim.ui.input({ prompt = ("Edit %s [%s]: "):format(key, type_name), default = current }, function(input)
     if input == nil or input == current then return end
     if type_name == "string" then
-      exec(tab, url, { "SET", key, input }, db, function() refresh(tab) end)
+      -- KEEPTTL: a bare SET would silently clear the key's expiry — editing a
+      -- value must not reset it (ignored on keys without a TTL, redis >= 6)
+      exec(tab, url, { "SET", key, input, "KEEPTTL" }, db, function() refresh(tab) end)
     elseif type_name == "hash" then
       -- col 2 = field (editable → HSET new field, DEL old), col 3 = value
       if col == 2 and input ~= row_data[2] then
@@ -261,11 +263,14 @@ function M.add_row(tab)
       end)
     end)
   else
-    -- string (overwrite) / list (RPUSH) / set (SADD)
+    -- string (overwrite, KEEPTTL — same no-TTL-reset rule as edit_cell) /
+    -- list (RPUSH) / set (SADD)
     local verb = type_name == "list" and "RPUSH" or type_name == "set" and "SADD" or "SET"
     vim.ui.input({ prompt = ("Value to %s on %s: "):format(verb, key) }, function(value)
       if value == nil or value == "" then return end
-      exec(tab, url, { verb, key, value }, db, function() refresh(tab) end)
+      local cmd = { verb, key, value }
+      if verb == "SET" then cmd[#cmd + 1] = "KEEPTTL" end
+      exec(tab, url, cmd, db, function() refresh(tab) end)
     end)
   end
 end

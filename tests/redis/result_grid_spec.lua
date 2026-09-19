@@ -520,13 +520,20 @@ describe("poste-redis grid editing", function()
     connections.resolve_redis_url = nil
   end)
 
-  it("string edit issues SET", function()
+  it("string edit issues SET with KEEPTTL (a bare SET clears the TTL)", function()
     open_key_tab_conn({ type = "string", value = "hello" })
     buffer.active_tab().cursor = { row = 1, col = 2 }
     vim.ui.input = function(opts, cb) cb("world") end
     grid_edit.edit_cell(buffer.active_tab())
-    assert.equals("SET user:1 world", sent_cmds[1])
+    assert.equals("SET user:1 world KEEPTTL", sent_cmds[1])
     assert.equals(1, refreshes)
+  end)
+
+  it("string add_row issues SET with KEEPTTL too", function()
+    open_key_tab_conn({ type = "string", value = "hello" })
+    vim.ui.input = function(opts, cb) cb("next") end
+    grid_edit.add_row(buffer.active_tab())
+    assert.equals("SET user:1 next KEEPTTL", sent_cmds[1])
   end)
 
   it("writes land in the command history", function()
@@ -538,7 +545,7 @@ describe("poste-redis grid editing", function()
     grid_edit.edit_cell(buffer.active_tab())
     local items = history.list()
     assert.equals(1, #items, "exactly one entry per write (TTL probes excluded)")
-    assert.equals("SET user:1 world", items[1].command)
+    assert.equals("SET user:1 world KEEPTTL", items[1].command)
     assert.equals("write", items[1].kind)
     assert.equals("stubconn", items[1].connection)
     history.clear()
