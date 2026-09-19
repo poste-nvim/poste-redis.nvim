@@ -7,7 +7,6 @@ local buffer = require("poste-redis.buffer")
 local history = require("poste-redis.history")
 local constants = require("poste-redis.constants")
 local state = require("poste-redis.state")
-local redis_state = require("poste-redis.state")
 
 local M = {}
 
@@ -58,7 +57,7 @@ local function present(results, summaries, opts)
   end
   history.push({
     command = first and first.command or "",
-    connection = opts.connection or redis_state.context.connection,
+    connection = opts.connection or state.context.connection,
     status = any_failed and "error" or (first and first.status or ""),
     latency_ms = total_latency,
     error = any_failed,
@@ -233,7 +232,7 @@ function M.run_file()
   -- which only fixes the retry if that selection reaches group_by_connection.
   -- USE groups still win — dispatch_group force-extends each group's own
   -- connection over this run-level default.
-  exec_run.run_file_async(src, { connection = redis_state.current_url }, {
+  exec_run.run_file_async(src, { connection = state.current_url }, {
     on_result = function(ev)
       all_results[#all_results + 1] = ev
     end,

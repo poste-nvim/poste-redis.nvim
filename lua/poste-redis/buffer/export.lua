@@ -111,6 +111,9 @@ function M.export(tab)
     vim.ui.input({ prompt = "Export to: ", default = default_path,
       completion = "file" }, function(path)
       if not path or path == "" then return end
+      -- writefile does not expand `~` — a typed `~/exports/x.csv` failed with
+      -- "no such directory" while completion suggested it as a valid target
+      path = vim.fn.expand(path)
       local lines = M[fmt == "csv" and "to_csv" or fmt == "tsv" and "to_tsv" or "to_json"](tab.grid)
       local ok, err = pcall(vim.fn.writefile, lines, path)
       if not ok then

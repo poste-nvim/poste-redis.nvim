@@ -91,4 +91,44 @@ describe("poste-redis buffer export", function()
       assert.is_false(exp.export(nil))
     end)
   end)
+
+  describe("export write path", function()
+    it("expands `~` in the picked path before writefile", function()
+      -- writefile does not expand `~`; completion suggests it as a target,
+      -- so a typed ~/x.csv used to fail with a no-such-directory error
+      local tab = {
+        kind = "table",
+        grid = grid(),
+      }
+      local orig_select, orig_input, orig_writefile = vim.ui.select, vim.ui.input, vim.fn.writefile
+      local written_path
+      vim.ui.select = function(_, _, cb) cb("csv") end
+      vim.ui.input = function(_, cb) cb("~/exports/keys.csv") end
+      vim.fn.writefile = function(lines, path)
+        written_path = path
+        return 0
+      end
+      local ok = exp.export(tab)
+      vim.ui.select, vim.ui.input, vim.fn.writefile = orig_select, orig_input, orig_writefile
+      assert.is_true(ok)
+      assert.equals(vim.env.HOME .. "/exports/keys.csv", written_path)
+    end)
+
+    it("notices a truncated grid as a partial export", function()
+      local tab = {
+        kind = "table",
+        grid = grid({ total = 500 }),
+      }
+      local orig_select, orig_input, orig_writefile, orig_notify = vim.ui.select, vim.ui.input, vim.fn.writefile, vim.notify
+      local note
+      vim.ui.select = function(_, _, cb) cb("json") end
+      vim.ui.input = function(_, cb) cb("/tmp/poste-redis-test-export.json") end
+      vim.fn.writefile = function() return 0 end
+      vim.notify = function(msg) note = msg end
+      local ok = exp.export(tab)
+      vim.ui.select, vim.ui.input, vim.fn.writefile, vim.notify = orig_select, orig_input, orig_writefile, orig_notify
+      assert.is_true(ok)
+      assert.truthy(note:find("500", 1, true), "partial export must say the total")
+    end)
+  end)
 end)
