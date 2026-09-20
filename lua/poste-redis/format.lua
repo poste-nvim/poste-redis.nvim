@@ -171,10 +171,11 @@ local function render_unknown(v)
   return { cell(v.value) }
 end
 
+--- Text renderers, consulted only for types with no GRID_BUILDERS entry —
+--- which is why "string" is absent here: it renders as a one-row grid.
 local RENDERERS = {
   ["nil"] = render_nil,
   integer = render_integer,
-  string = render_string,
   binary = render_binary,
   stream = render_stream,
   unknown = render_unknown,
