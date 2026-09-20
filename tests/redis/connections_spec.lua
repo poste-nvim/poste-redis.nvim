@@ -6,6 +6,7 @@ local redis_state = require("poste-redis.state")
 
 describe("poste-redis connections", function()
   local tmpdir
+  local repo_cwd = vim.fn.getcwd()
 
   before_each(function()
     tmpdir = vim.fn.tempname()
@@ -16,6 +17,10 @@ describe("poste-redis connections", function()
   end)
 
   after_each(function()
+    -- two cases below cd into tmpdir to exercise discovery-from-cwd; leaving
+    -- the process there makes every later require() in the file resolve
+    -- against a directory that is about to be deleted
+    vim.api.nvim_set_current_dir(repo_cwd)
     connections._test.reset_caches()
     pcall(vim.fn.delete, tmpdir, "rf")
   end)
