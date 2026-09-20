@@ -26,6 +26,25 @@ describe("poste-redis format", function()
     assert.equals("42", out.lines[1])
   end)
 
+  it("renders a large integer reply with all its digits", function()
+    -- tostring() (the old path) uses %.14g: an INCR'd microsecond counter
+    -- showed as "1.75e+15" even though the double holds it exactly
+    local out = lines_for({ type = "integer", value = 1750000000000000 })
+    assert.equals("1750000000000000", out.lines[1])
+  end)
+
+  it("renders zset scores through the same number rule", function()
+    local out = lines_for({
+      type = "zset",
+      len = 1,
+      value = { { member = "m", score = 1750000000000000 } },
+    })
+    assert.equals("table", out.kind)
+    assert.same({ 1, "m", 1750000000000000 }, out.grid.rows[1])
+    -- the raw cell is kept; only the display transform widens it to digits
+    assert.equals("1750000000000000", out.grid.to_display(out.grid.rows[1][3]))
+  end)
+
   it("renders a string reply through the type-labeled grid", function()
     local out = lines_for({ type = "string", value = "hello world" })
     assert.equals("table", out.kind)

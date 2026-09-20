@@ -79,6 +79,20 @@ describe("poste-redis util", function()
     it("encodes tables as compact JSON", function()
       assert.equals('{"a":1}', util.to_clipboard({ a = 1 }))
     end)
+
+    it("keeps every digit of an exact large integer", function()
+      -- 1e15 used to be the bound, so a microsecond timestamp — an exact
+      -- double, and one of the commonest integers in redis — was yanked as
+      -- "1.75e+15" instead of the 16 digits it actually holds
+      assert.equals("1750000000000000", util.to_clipboard(1750000000000000))
+      assert.equals("9007199254740991", util.to_clipboard(2^53 - 1))
+    end)
+
+    it("falls back to scientific form past the exact-integer range", function()
+      -- beyond 2^53 the decode already rounded the value; printing full
+      -- digits would advertise precision the number does not have
+      assert.equals("1e+16", util.to_clipboard(1e16))
+    end)
   end)
 
   describe("format_latency", function()

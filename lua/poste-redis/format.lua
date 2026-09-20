@@ -1,8 +1,9 @@
 --- Result formatter: turns one `result` event into display lines or a grid.
---- Scalars (string / integer / nil / binary / stream / unknown / error) stay
---- a compact text block (kind "text"). Set / List / Hash / Zset become a
---- table grid (kind "table") rendered by poste-redis.result.grid — head
---- fixed, body scrollable, page navigation (poste-db dataset style).
+--- Table-shaped values (Set / List / Hash / Zset, and a plain string so every
+--- type edits the same way) become a table grid (kind "table") rendered by
+--- poste-redis.result.grid — head fixed, body scrollable, page navigation
+--- (poste-db dataset style). The rest (integer / nil / binary / stream /
+--- unknown / error) stay a compact text block (kind "text").
 local util = require("poste-redis.util")
 local constants = require("poste-redis.constants")
 local icons = require("poste-redis.icons")
@@ -24,7 +25,7 @@ local function cell(v)
   if v == vim.NIL then return "(nil)" end
   if type(v) == "boolean" then return v and "true" or "false" end
   if type(v) == "number" then
-    if v == math.floor(v) and math.abs(v) < 1e15 then
+    if v == math.floor(v) and math.abs(v) < util.INT_EXACT then
       return string.format("%.0f", v)
     end
     return string.format("%g", v)
@@ -45,19 +46,9 @@ local function render_nil(_)
 end
 
 local function render_integer(v)
-  return { tostring(v.value) }
-end
-
-local function render_string(v)
-  local s = v.value
-  if type(s) ~= "string" then s = cell(s) end
-  local lines = { '"' .. s .. '"' }
-  if v.truncated then
-    lines[#lines + 1] = string.format("… %d bytes total, %d shown", v.len or 0, #s)
-  elseif v.len then
-    lines[#lines + 1] = string.format("(%d bytes)", v.len)
-  end
-  return lines
+  -- cell(), not tostring(): LuaJIT renders a large double with %.14g, so an
+  -- INCR'd microsecond counter displayed as "1.75e+15"
+  return { cell(v.value) }
 end
 
 local function render_binary(v)

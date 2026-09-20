@@ -3,6 +3,14 @@
 --- poste.nvim@5b3759e lua/poste/util.lua (family dissolution).
 local M = {}
 
+--- Largest magnitude a double represents every integer below exactly
+--- (2^53 = 9007199254740992). Integral values under it print all their
+--- digits; above it the decode already rounded them, so scientific form is
+--- the honest display. The bound used to be 1e15, which threw away digits
+--- that were there: a microsecond timestamp (1.7e15) came back as "1.7e+15"
+--- both on screen and in a yanked cell.
+M.INT_EXACT = 2^53
+
 --- Strip credentials from a redis URL for logs: redis://user:pass@host →
 --- redis://***@host. The password never lands in any log or message. The
 --- pattern must only eat the userinfo — a greedy `.*` here used to swallow
@@ -149,7 +157,7 @@ function M.to_clipboard(v)
   if v == nil or v == vim.NIL then return "" end
   if type(v) == "boolean" then return v and "true" or "false" end
   if type(v) == "number" then
-    if v == math.floor(v) and math.abs(v) < 1e15 then
+    if v == math.floor(v) and math.abs(v) < M.INT_EXACT then
       return string.format("%.0f", v)
     end
     return tostring(v)
