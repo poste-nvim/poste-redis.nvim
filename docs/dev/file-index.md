@@ -103,7 +103,7 @@ fallback — see `requirements.md`.
 | File | Covers |
 |------|--------|
 | `redis/parser_spec.lua` | §4.2 matrix: continuations, quote-aware `#`, USE, CRLF, unquote, dangerous (incl. a quoted command head) |
-| `redis/connections_spec.lua` | §5: url/field forms, `{{var}}` + `.env`/OS, errors, list, use_connection |
+| `redis/connections_spec.lua` | §5: url/field forms, `{{var}}` + `.env`/OS, errors (port/db validation incl. the 16-bit port bound, cached parse failure), list, use_connection |
 | `redis/config_spec.lua` | defaults, merge, keymap resolution |
 | `redis/toml_spec.lua` | vendored parser (sections, escapes, errors) |
 | `redis/format_spec.lua` | value rendering incl. binary / truncated / CJK / grid model for list/set/hash/zset |
@@ -124,6 +124,9 @@ fallback — see `requirements.md`.
 | `redis/docs_spec.lua` | docs data parity with COMMANDS + entry shape, `build_lines` markdown, `resolve_command`, float track_key re-focus, show_doc keymap |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |
 | `scaffold_spec.lua` | harness smoke |
+
+`tests/run.sh` runs the directory; `tests/run_one.sh tests/redis/x_spec.lua`
+runs one file through the same scaffold.
 
 ## Rust (lives in `../poste.nvim`)
 

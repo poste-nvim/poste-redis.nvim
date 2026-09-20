@@ -75,6 +75,10 @@ be fixed in only one place:
 - `tests/run.sh` must be green and `luacheck lua tests` must not gain new
   warnings before every commit. Refactors keep the public API and spec
   assertions untouched; API changes update specs in the same commit.
+  While iterating, `tests/run_one.sh tests/redis/<spec>.lua` runs a single
+  file through the same scaffold (seconds, not the suite's minutes) — but a
+  file run this way shares one nvim process, so it also exposes specs that
+  leak state (cwd, `package.loaded`) into the ones after them.
 - Expose internals for tests via the `M._test` table (see `parser`, `format`,
   `scan`, `value`, …) rather than skipping the test or widening the public API.
 - Every new branch gets an assertion, not just the happy path: error paths,
