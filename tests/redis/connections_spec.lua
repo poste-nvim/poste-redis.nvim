@@ -216,26 +216,42 @@ host = "h"
     toml.parse_file = orig
   end)
 
-  it("rejects a port beyond 65535 but not an out-of-range db", function()
-    -- the transport is 16-bit, so a huge port is a typo; ` databases` is a
-    -- server setting, so SELECT is the right place for a bad db to surface
+  it("bounds port to 1..65535 but leaves db unbounded above", function()
+    -- the transport is 16-bit, so a huge port is a typo; port 0 is not a
+    -- socket port either (the same 1..65535 rule both SQL mirrors apply),
+    -- while db 0 is the default database and ` databases` is a server
+    -- setting, so SELECT is the right place for a bad db to surface
     write("connections.toml", [[
 [bad]
 dialect = "redis"
 host = "h"
 port = 70000
+[zero]
+dialect = "redis"
+host = "h"
+port = 0
 [ok]
 dialect = "redis"
 host = "h"
 port = 6379
 db = 999999
+[first_db]
+dialect = "redis"
+host = "h"
+db = 0
 ]])
     local url, err = connections.resolve_redis_url("bad", { search_dir = tmpdir })
     assert.is_nil(url)
     assert.match("65535", err)
+    url, err = connections.resolve_redis_url("zero", { search_dir = tmpdir })
+    assert.is_nil(url, "port 0 is not a socket port")
+    assert.match("from 1 to 65535", err)
     url, err = connections.resolve_redis_url("ok", { search_dir = tmpdir })
     assert.is_nil(err)
     assert.equals("redis://h:6379/999999", url)
+    url, err = connections.resolve_redis_url("first_db", { search_dir = tmpdir })
+    assert.is_nil(err)
+    assert.equals("redis://h:6379/0", url, "db 0 stays valid")
   end)
 
   it("accepts a numeric string port from the env", function()

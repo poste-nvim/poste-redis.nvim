@@ -248,20 +248,22 @@ local function build_url_from_fields(conn, name)
   -- The bad value itself is NOT echoed: `port = "{{REDIS_PASS}}"` (a typo in
   -- the var name) would otherwise print a secret that resolved.
   local at = name and (" (connection '%s')"):format(name) or ""
-  local function field(label, value, default, max)
+  local function field(label, value, default, min, max)
     if value == nil or value == "" then return default, nil end
     local n = tonumber(value)
-    if not n or n % 1 ~= 0 or n < 0 or (max and n > max) then
-      return nil, ("Invalid %s for redis connection%s: expected a non-negative integer%s"):format(
-        label, at, max and (" up to " .. max) or "")
+    if not n or n % 1 ~= 0 or n < min or (max and n > max) then
+      return nil, ("Invalid %s for redis connection%s: expected an integer %s"):format(
+        label, at, max and ("from " .. min .. " to " .. max) or ("of " .. min .. " or more"))
     end
     return n, nil
   end
-  -- `port` is bounded by the 16-bit transport; `db` is not (maxmemory-database
-  -- is a server setting, and `SELECT` is where an out-of-range index surfaces).
-  local port, port_err = field("port", conn.port, 6379, 65535)
+  -- `port` is bounded by the 16-bit transport and 0 is not a socket port —
+  -- the same 1..65535 rule both SQL mirrors apply to their `port` field.
+  -- `db` has no upper bound (maxmemory-databases is a server setting, and
+  -- `SELECT` is where an out-of-range index surfaces) but 0 is a real index.
+  local port, port_err = field("port", conn.port, 6379, 1, 65535)
   if port_err then return nil, port_err end
-  local db, db_err = field("db", conn.db, 0)
+  local db, db_err = field("db", conn.db, 0, 0)
   if db_err then return nil, db_err end
   local auth = ""
   if conn.username and conn.password then
