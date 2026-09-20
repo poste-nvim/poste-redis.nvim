@@ -307,6 +307,110 @@ describe("poste-redis runner indicators", function()
   end)
 end)
 
+--- Destructive-command gate (the only consumer of confirm_commands).
+--- Before this the blacklist was display-only: <CR> on FLUSHALL ran it against
+--- the server with one keystroke, exactly what the panel's yellow warning
+--- claims to protect against.
+describe("poste-redis runner destructive gate", function()
+  local config = require("poste-redis.config")
+  local src
+  local orig_run_selection = exec_run.run_selection_async
+  local orig_run_file = exec_run.run_file_async
+  local orig_find_binary = state.find_poste_binary
+  local orig_confirm_flag = config.config.confirm_commands
+
+  --- Replace the dialog for one test; nil restores vim.fn.confirm.
+  local function answer(fn) runner._test.set_confirm(fn) end
+
+  before_each(function()
+    src = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "FLUSHALL" })
+    vim.api.nvim_set_current_buf(src)
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    state.find_poste_binary = function() return "/tmp/poste-redis-fake-binary" end
+    config.config.confirm_commands = true
+    buffer.close()
+    history.clear()
+  end)
+
+  after_each(function()
+    answer(nil)
+    indicators.clear_all(src)
+    buffer.close()
+    exec_run.cancel()
+    exec_run.run_selection_async = orig_run_selection
+    exec_run.run_file_async = orig_run_file
+    state.find_poste_binary = orig_find_binary
+    config.config.confirm_commands = orig_confirm_flag
+    pcall(vim.api.nvim_buf_delete, src, { force = true })
+  end)
+
+  it("asks, and a No never starts a job", function()
+    local started, question = 0, nil
+    exec_run.run_selection_async = function() started = started + 1 end
+    answer(function(q) question = q; return 2 end)
+    runner.run_selection("cursor")
+    assert.equals(0, started, "cancelled run dispatched a job")
+    assert.truthy(question:find("FLUSHALL"))
+    -- cancelling must not leave a spinner behind or burn the previous indicators
+    assert.is_false(has_sign(src, 0, "PosteSpin1"))
+    assert.is_false(exec_run.is_busy())
+  end)
+
+  it("a Yes runs the command, and only one question per batch", function()
+    local asked, started = 0, 0
+    answer(function() asked = asked + 1; return 1 end)
+    exec_run.run_selection_async = function(_b, _m, _o, callbacks)
+      started = started + 1
+      callbacks.on_done({}, {})
+    end
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "FLUSHALL", "CONFIG SET save ''", "FLUSHALL" })
+    runner.run_selection("visual", { start_line = 1, end_line = 3 })
+    assert.equals(1, asked, "the whole batch must be confirmed once")
+    assert.equals(1, started)
+  end)
+
+  it("catches a destructive command written with a quoted name", function()
+    -- the gate reads entry.command, which is decoded from the token
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { '"flushall"' })
+    local asked, started = 0, 0
+    answer(function() asked = asked + 1; return 2 end)
+    exec_run.run_selection_async = function() started = started + 1 end
+    runner.run_selection("cursor")
+    assert.equals(1, asked)
+    assert.equals(0, started)
+  end)
+
+  it("leaves ordinary commands alone", function()
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "SET k v", "GET k" })
+    answer(function() error("confirm fired for a harmless batch"); return 1 end)
+    local started = 0
+    exec_run.run_selection_async = function() started = started + 1 end
+    runner.run_selection("visual", { start_line = 1, end_line = 2 })
+    assert.equals(1, started)
+  end)
+
+  it("confirm_commands = false disables the dialog", function()
+    config.config.confirm_commands = false
+    answer(function() error("confirm fired while disabled"); return 1 end)
+    local started = 0
+    exec_run.run_selection_async = function() started = started + 1 end
+    runner.run_selection("cursor")
+    assert.equals(1, started)
+  end)
+
+  it("covers the run-file path too", function()
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE srv", "FLUSHDB" })
+    local asked, started = 0, 0
+    answer(function() asked = asked + 1; return 2 end)
+    exec_run.run_file_async = function() started = started + 1; return nil end
+    runner.run_file()
+    assert.equals(1, asked)
+    assert.equals(0, started)
+    assert.is_false(has_sign(src, 1, "PosteSpin1"))
+  end)
+end)
+
 --- Regression: the visual <CR> keymap used to read the '< '> marks, which
 --- are only written AFTER visual mode ends — a fresh buffer's first selection
 --- read 0/0 ("No command at cursor") and any later run executed the PREVIOUS

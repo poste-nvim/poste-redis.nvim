@@ -6,9 +6,16 @@ local parser = require("poste-redis.parser")
 local buffer = require("poste-redis.buffer")
 local history = require("poste-redis.history")
 local constants = require("poste-redis.constants")
+local config = require("poste-redis.config")
 local state = require("poste-redis.state")
 
 local M = {}
+
+--- Swappable in tests via `_test.set_confirm` (same shape as browser/actions).
+local confirm_default = function(question, buttons, default)
+  return vim.fn.confirm(question, buttons, default, "Warning")
+end
+local confirm_impl = confirm_default
 
 --- Collect the panel's current rendered lines for the history snapshot.
 --- The grid's header lives in a floating window — in-buffer line 1 is a
@@ -101,6 +108,33 @@ local function present(results, summaries, opts)
   end
 end
 
+--- Destructive-command gate: a batch containing a blacklisted command needs an
+--- explicit yes before any job starts. It lives here rather than inside
+--- exec_run because these two entry points are where one stray keystroke
+--- reaches the server — the browser's own refreshes call exec_run directly, and
+--- the AI path asks its own question in ai/actions.lua.
+--- @param entries table[] parser entries of the batch about to run
+--- @return boolean ok_to_run
+local function confirm_dangerous(entries)
+  if config.config.confirm_commands == false then return true end
+  local names, seen = {}, {}
+  for _, e in ipairs(entries or {}) do
+    if e.kind == "command" and parser.is_dangerous(e) and not seen[e.command] then
+      seen[e.command] = true
+      names[#names + 1] = e.command
+    end
+  end
+  if #names == 0 then return true end
+  local shown = table.concat(names, ", ")
+  local choice = confirm_impl(
+    ("This run contains destructive command(s): %s\nRun them?"):format(shown),
+    "&Yes, execute\n&No, cancel", 2)
+  if choice == 1 then return true end
+  vim.notify("Cancelled — not executed: " .. shown,
+    vim.log.levels.WARN, { title = constants.TITLE })
+  return false
+end
+
 --- Run the entry under the cursor, or the visual selection.
 --- @param mode "cursor"|"visual"
 --- @param range table|nil  { start_line, end_line } captured from the visual
@@ -160,6 +194,8 @@ function M.run_selection(mode, range)
     end
   end
 
+  if not confirm_dangerous(entries) then return end
+
   local indicators = require("poste-redis.indicators")
   indicators.clear_all(src)
 
@@ -213,11 +249,14 @@ function M.run_file()
   end
 
   local batch_lines = {}
-  for _, e in ipairs(parser.buffer_entries(src)) do
+  local entries = parser.buffer_entries(src)
+  for _, e in ipairs(entries) do
     if e.kind == "command" and e.start_line then
       batch_lines[#batch_lines + 1] = e.start_line - 1
     end
   end
+
+  if not confirm_dangerous(entries) then return end
 
   local indicators = require("poste-redis.indicators")
   indicators.clear_all(src)
@@ -265,5 +304,10 @@ function M.run_info(entry, opts)
   local out = require("poste-redis.format").format_result(ev)
   vim.notify(table.concat(out.lines, "\n"), vim.log.levels.INFO, { title = constants.TITLE })
 end
+
+M._test = {
+  --- Replace the confirm dialog for a test; nil restores vim.fn.confirm.
+  set_confirm = function(fn) confirm_impl = fn or confirm_default end,
+}
 
 return M

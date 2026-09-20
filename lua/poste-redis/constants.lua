@@ -54,8 +54,9 @@ end
 --- configured with more dbs simply is not listed beyond this.
 M.REDIS_DB_COUNT = 16
 
---- Dangerous commands (P2 blacklist). M1: parser flags these so the result
---- panel shows a yellow warning; full interception lands in M3.
+--- Dangerous commands (P2 blacklist). Two consumers: the result panel's yellow
+--- warning (format.lua) and the run-time confirm gate (runner.lua, gated by
+--- `config.confirm_commands`).
 M.DANGEROUS_COMMANDS = {
   FLUSHALL = true,
   FLUSHDB = true,

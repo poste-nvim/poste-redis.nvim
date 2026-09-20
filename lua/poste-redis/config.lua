@@ -65,9 +65,10 @@ M.defaults = {
   -- same info rides the statusline via poste-redis.statusline; this is the
   -- always-on chrome at the top of the edit window. False disables.
   source_winbar = true,
-  -- Execute confirm heuristic: write commands always require a confirm
-  -- dialog before hitting the server (P2-1). Reserved for M3; constants are
-  -- defined in constants.lua.
+  -- Execute confirm gate: a run that contains a blacklisted command
+  -- (constants.DANGEROUS_COMMANDS — FLUSHALL/FLUSHDB/SHUTDOWN/CONFIG) asks for
+  -- an explicit yes before any job starts. Applies to the <CR> / run-file
+  -- paths in runner.lua; false disables the prompt.
   confirm_commands = true,
   -- Debug commands (:PosteRedisDiag, ...). Off by default.
   debug = false,

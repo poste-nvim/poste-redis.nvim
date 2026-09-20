@@ -21,10 +21,10 @@ fallback — see `requirements.md`.
 
 | File | Role |
 |------|------|
-| `parser.lua` | **The only parser (D1)**: `extract_entries` (continuations joined, quote-aware comments, `USE`), `cursor_entry`, `visual_entries`, `file_entries`, `entry_args` `buffer_entries` takes { max_line } for bounded hot-path parses |
+| `parser.lua` | **The only parser (D1)**: `extract_entries` (continuations joined, quote-aware comments, `USE`), `cursor_entry`, `visual_entries`, `file_entries`, `entry_args` `buffer_entries` takes { max_line } for bounded hot-path parses. The command head is decoded (quotes stripped, uppercased) for `entry.command`/`entry_args`/`key_arg`, so `"FLUSHALL"` cannot slip past the blacklist; `raw` keeps the line as written |
 | `exec_run.lua` | `run_async` (stdin JSON → `poste redis-exec` → NDJSON events), `run_file_async` (USE grouping, sequential batches, SELECT-aware db stamped as `ev.db`), `run_sync`, `run_selection_async`, stale-guard + busy bookkeeping |
 | `session_conn.lua` | **M2**: persistent session pool (`poste redis-session`) — `get`/`execute`/`stop`/`stop_all`/`cleanup_buf`/`release`/`list`; `opts.owner` tags a logical owner, `release(owner)` stops solely-held sessions; requests `{seq, command}`, responses are redis-exec-style result events; SELECT state survives across requests; `opts.db` auto-SELECTs on db change |
-| `runner.lua` | `<CR>` / `:PosteRedisRunFile` entry: connects exec_run → buffer → history, spinner indicators, silently preselects the file's declared db for line/selection runs (SELECT result swallowed) |
+| `runner.lua` | `<CR>` / `:PosteRedisRunFile` entry: connects exec_run → buffer → history, spinner indicators, silently preselects the file's declared db for line/selection runs (SELECT result swallowed), and gates a batch that contains a blacklisted command behind one confirm (`confirm_commands`) |
 | `format.lua` | `format_result` → `{kind}` — "text" for nil/int/string/binary/stream/unknown/error; "table" grid for list/set/hash/zset (`columns` + raw `rows`, `to_display`/`to_copy`); `format_error`, `preview_json`, `status_summary` |
 | `buffer.lua` | Result panel facade: `poste://redis_result`, per-command tabs, `<Tab>`/`<S-Tab>`, panel keymaps, `r` refresh, TTL probe + countdown. Stamps each tab's origin context (connection / db / key) so grid editing writes where the command ran. Delegates to `buffer/*` |
 | `buffer/state.lua` | Shared mutable panel state (buf/win/tabs/active/last_value, PAGE_SIZE) — depended on by all `buffer/*` modules, no cycles |
@@ -102,13 +102,14 @@ fallback — see `requirements.md`.
 
 | File | Covers |
 |------|--------|
-| `redis/parser_spec.lua` | §4.2 matrix: continuations, quote-aware `#`, USE, CRLF, unquote, dangerous |
+| `redis/parser_spec.lua` | §4.2 matrix: continuations, quote-aware `#`, USE, CRLF, unquote, dangerous (incl. a quoted command head) |
 | `redis/connections_spec.lua` | §5: url/field forms, `{{var}}` + `.env`/OS, errors, list, use_connection |
 | `redis/config_spec.lua` | defaults, merge, keymap resolution |
 | `redis/toml_spec.lua` | vendored parser (sections, escapes, errors) |
 | `redis/format_spec.lua` | value rendering incl. binary / truncated / CJK / grid model for list/set/hash/zset |
 | `redis/result_grid_spec.lua` | grid: layout widths, render_page + pagination, panel cell navigation, page flip, search, yank cell/column, preview, header slicing |
 | `redis/exec_run_spec.lua` | transport contract (stubbed `poste-redis.cli`), stale-guard, USE grouping |
+| `redis/runner_spec.lua` | `<CR>`/run-file orchestration: per-line indicators on the source buffer, USE/`<CR>` picker, visual range capture, `cancel_current`, and the destructive-command confirm gate (ask / yes / no / quoted name / `confirm_commands = false`) |
 | `redis/session_conn_spec.lua` | M2 session pool (stubbed jobstart): start args, reuse, seq pairing, error routing, exit drops session, cleanup_buf, db auto-SELECT, chunk-split stdout |
 | `redis/browser_spec.lua` | browser: tree flatten/markers, `:`-grouping, flat/flatten/nested view modes, value page commands + live-redis e2e (SCAN groups, string/hash value render, TTL/DEL/RENAME) |
 | `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |
