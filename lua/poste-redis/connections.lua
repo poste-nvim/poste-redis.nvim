@@ -242,15 +242,18 @@ local function build_url_from_fields(conn, name)
   -- The bad value itself is NOT echoed: `port = "{{REDIS_PASS}}"` (a typo in
   -- the var name) would otherwise print a secret that resolved.
   local at = name and (" (connection '%s')"):format(name) or ""
-  local function field(label, value, default)
+  local function field(label, value, default, max)
     if value == nil or value == "" then return default, nil end
     local n = tonumber(value)
-    if not n or n % 1 ~= 0 or n < 0 then
-      return nil, ("Invalid %s for redis connection%s: expected a non-negative integer"):format(label, at)
+    if not n or n % 1 ~= 0 or n < 0 or (max and n > max) then
+      return nil, ("Invalid %s for redis connection%s: expected a non-negative integer%s"):format(
+        label, at, max and (" up to " .. max) or "")
     end
     return n, nil
   end
-  local port, port_err = field("port", conn.port, 6379)
+  -- `port` is bounded by the 16-bit transport; `db` is not (maxmemory-database
+  -- is a server setting, and `SELECT` is where an out-of-range index surfaces).
+  local port, port_err = field("port", conn.port, 6379, 65535)
   if port_err then return nil, port_err end
   local db, db_err = field("db", conn.db, 0)
   if db_err then return nil, db_err end

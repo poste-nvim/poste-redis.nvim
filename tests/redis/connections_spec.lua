@@ -188,6 +188,28 @@ port = "{{REDISn_PORT}}"
     assert.falsy(err:find("REDISn_PORT", 1, false))
   end)
 
+  it("rejects a port beyond 65535 but not an out-of-range db", function()
+    -- the transport is 16-bit, so a huge port is a typo; ` databases` is a
+    -- server setting, so SELECT is the right place for a bad db to surface
+    write("connections.toml", [[
+[bad]
+dialect = "redis"
+host = "h"
+port = 70000
+[ok]
+dialect = "redis"
+host = "h"
+port = 6379
+db = 999999
+]])
+    local url, err = connections.resolve_redis_url("bad", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.match("65535", err)
+    url, err = connections.resolve_redis_url("ok", { search_dir = tmpdir })
+    assert.is_nil(err)
+    assert.equals("redis://h:6379/999999", url)
+  end)
+
   it("accepts a numeric string port from the env", function()
     write("connections.toml", [[
 [srv]
