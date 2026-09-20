@@ -117,6 +117,17 @@ describe("poste-redis history", function()
     assert.equals("14:03:07", lines[1]:sub(spans[1].time[1] + 1))
   end)
 
+  it("build marks an entry with no reported status blank, not ✓", function()
+    -- `e.status and "✓" or " "` could never reach the blank arm: push keeps
+    -- status a string, and "" is truthy in Lua
+    history.push(entry({ command = "GET k", status = "" }))
+    local lines = history._test.build(60)
+    assert.equals(" ", lines[1]:sub(1, 1))
+    history.push(entry({ command = "SET k v", status = "OK" }))
+    local with_status = history._test.build(60)
+    assert.equals("✓", with_status[1]:sub(1, #"✓"), "newest entry renders first")
+  end)
+
   it("build spans the error mark glyph in full (3 bytes for ✗)", function()
     -- Regression: the error highlight covered 1 byte of the 3-byte ✗, which
     -- clamps at the char boundary and colors nothing.

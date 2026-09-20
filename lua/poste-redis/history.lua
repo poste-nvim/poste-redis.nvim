@@ -167,7 +167,13 @@ local function build(width)
   local items = M.list()
   local lines, spans = {}, {}
   for i, e in ipairs(items) do
-    local mark = e.error and "✗" or (e.kind == "write" and "+" or (e.status and "✓" or " "))
+    -- `status` is normalized to "" by push, and "" is truthy in Lua, so the
+    -- blank arm needs the explicit comparison: an entry that never reported a
+    -- status must not read as a success
+    local status = e.status or ""
+    local mark = e.error and "✗"
+      or (e.kind == "write" and "+")
+      or (status ~= "" and "✓" or " ")
     local time = os.date("%H:%M:%S", e.ts or os.time())
     local cmd_max = width - 12  -- mark+space (2) + gap (1) + time (8) + margin (1)
     local cmd = util.truncate_display(e.command or "", cmd_max)
