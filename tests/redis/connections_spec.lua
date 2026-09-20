@@ -359,11 +359,31 @@ port = 6379
     vim.fn.mkdir(search_dir, "p")
     connections._test.reset_caches()
     assert.is_nil(connections.find_connections_toml(search_dir))
-    assert.is_nil(connections.find_connections_toml(search_dir))  -- cached miss
+    assert.is_nil(connections.find_connections_toml(search_dir)) -- misses never cache
     write("connections.toml", "[srv]\ndialect = \"redis\"\nurl = \"redis://h:6379/0\"\n")
     assert.truthy(connections.find_connections_toml(search_dir))
     local url = connections.resolve_redis_url("srv", { search_dir = search_dir })
     assert.equals("redis://h:6379/0", url)
+  end)
+
+  it("serves a found file from the cache instead of re-walking", function()
+    -- completion calls this on every request; without the fast path the
+    -- "cached" answer still cost a filereadable() per ancestor directory
+    write("connections.toml", "[srv]\ndialect = \"redis\"\nurl = \"redis://h:6379/0\"\n")
+    connections._test.reset_caches()
+    local util = require("poste-redis.util")
+    local real_walk = util.find_file_upwards
+    local walks = 0
+    util.find_file_upwards = function(...)
+      walks = walks + 1
+      return real_walk(...)
+    end
+    local first = connections.find_connections_toml(tmpdir)
+    local second = connections.find_connections_toml(tmpdir)
+    util.find_file_upwards = real_walk
+    assert.truthy(first)
+    assert.equals(first, second)
+    assert.equals(1, walks, "the second lookup must hit the path+mtime cache")
   end)
 end)
 

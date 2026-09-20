@@ -15,28 +15,29 @@ local _config_search_cache = {}
 local _config_search_cache_mtime = {}
 
 --- Walk up from `search_dir` to find connections.toml. The found path is
---- mtime-cached; a "not found" result is NEVER served stale — every call
+--- mtime-cached so a completion request costs one stat() instead of a
+--- directory walk; a "not found" result is NEVER served stale — every miss
 --- re-walks, so a file created mid-session is discovered by every caller
 --- (resolve, listing, completion, browser), not only the picker paths that
 --- also call invalidate(). mtime invalidation alone can't do this: it has no
 --- answer for a file that did not exist when the cache was written (same
---- rule as poste-es connections.lua).
+--- rule as poste-es connections.lua, and poste-db connections.lua).
 --- @param search_dir string|nil
 --- @return string|nil
 function M.find_connections_toml(search_dir)
   search_dir = search_dir or vim.fn.getcwd()
+  local cached = _config_search_cache[search_dir]
+  if cached ~= nil and _config_search_cache_mtime[search_dir] == vim.fn.getftime(cached) then
+    return cached
+  end
   local result = util.find_file_upwards("connections.toml", search_dir)
   if not result then
     _config_search_cache[search_dir] = nil
     _config_search_cache_mtime[search_dir] = nil
     return nil
   end
-  local mtime = vim.fn.getftime(result)
-  if _config_search_cache[search_dir] == result and _config_search_cache_mtime[search_dir] == mtime then
-    return result
-  end
   _config_search_cache[search_dir] = result
-  _config_search_cache_mtime[search_dir] = mtime
+  _config_search_cache_mtime[search_dir] = vim.fn.getftime(result)
   return result
 end
 
