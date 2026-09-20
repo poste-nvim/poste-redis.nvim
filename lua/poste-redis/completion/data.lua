@@ -184,9 +184,12 @@ function M.ensure_key_candidates(conn_url, prefix, db, callback)
       -- SCAN reply: {type, value: keys[], cursor} (redis_executor SCAN branch)
       local v = ev.value
       local keys = (v and v.value) or {}
-      local candidates = {}
+      local candidates, seen = {}, {}
       for _, k in ipairs(keys) do
-        if type(k) == "string" and k:sub(1, #prefix) == prefix then
+        -- `seen`: one page of SCAN may repeat a key, and a duplicate would
+        -- take a second slot of the completion_max_keys cap
+        if type(k) == "string" and not seen[k] and k:sub(1, #prefix) == prefix then
+          seen[k] = true
           candidates[#candidates + 1] = k
         end
       end

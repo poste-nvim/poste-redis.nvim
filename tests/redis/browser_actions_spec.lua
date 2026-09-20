@@ -117,6 +117,44 @@ describe("poste-redis browser actions", function()
     assert.equals(2, dels)
   end)
 
+  it("delete_prefix counts a key SCAN returns twice only once", function()
+    -- SCAN is at-least-once: a rehash mid-walk can hand out the same key on a
+    -- later page. It must not inflate the confirm estimate or DEL twice.
+    local scan_pages = 0
+    session_conn.execute = function(conn_url, cmd, cbs, bufnr, opts)
+      calls[#calls + 1] = { cmd = cmd, opts = opts }
+      local name = (cmd[1] or ""):upper()
+      vim.schedule(function()
+        if name == "SCAN" then
+          scan_pages = scan_pages + 1
+          if scan_pages == 1 then
+            cbs.on_response({ value = { value = { "user:1", "user:2" }, cursor = "5" } })
+          else
+            cbs.on_response({ value = { value = { "user:1" }, cursor = "0" } })
+          end
+        elseif name == "DEL" then
+          cbs.on_response({ value = { value = 1 } })
+        else
+          cbs.on_response({ value = { value = "OK" } })
+        end
+      end)
+      return "dispatched"
+    end
+    local question
+    vim.fn.confirm = function(q) question = q; return 1 end
+    local group = tree.make_group_node("user", "stubconn", 0)
+    group.meta.url = "redis://h:6379/0"
+    actions.delete_prefix(group, {})
+    assert.is_true(wait_for(function()
+      return (question or ""):find("2") ~= nil
+    end))
+    local del_keys = {}
+    for _, c in ipairs(calls) do
+      if c.cmd[1] == "DEL" then del_keys[#del_keys + 1] = c.cmd[2] end
+    end
+    assert.same({ "user:1", "user:2" }, del_keys)
+  end)
+
   it("delete_prefix loops SCAN pages before confirming (multi-page prefix)", function()
     -- a single estimate page undercounted prefixes with >1 page of keys and
     -- the delete silently missed the rest

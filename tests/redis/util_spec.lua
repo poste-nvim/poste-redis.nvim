@@ -134,4 +134,21 @@ describe("poste-redis util", function()
       assert.equals('HSET k f ""', util.render_command({ "HSET", "k", "f", "" }))
     end)
   end)
+
+  describe("append_new", function()
+    it("keeps the first occurrence and marks it seen", function()
+      local dst, seen = {}, {}
+      util.append_new(dst, seen, { "a:b", "a:c" })
+      util.append_new(dst, seen, { "a:b", "a:d" })  -- a:b repeated on page 2
+      assert.same({ "a:b", "a:c", "a:d" }, dst)
+      assert.is_true(seen["a:b"])
+    end)
+
+    it("drops non-string entries and tolerates a missing page", function()
+      local dst, seen = {}, {}
+      util.append_new(dst, seen, { "ok", { "nested" }, 7, vim.NIL })
+      util.append_new(dst, seen, nil)
+      assert.same({ "ok" }, dst)
+    end)
+  end)
 end)

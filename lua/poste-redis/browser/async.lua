@@ -352,7 +352,7 @@ function M.search(db_node, conn_url, conn_name, subpath)
   M.render_now()
 
   local scan_count = config.config.scan_count or 500
-  local all_keys = {}
+  local all_keys, seen = {}, {}
   local RENDER_EVERY_PAGES = 8
   local page = 0
   local match = fuzzy_match_pattern(subpath)
@@ -367,9 +367,7 @@ function M.search(db_node, conn_url, conn_name, subpath)
         local keys = v and v.value or {}
         local new_cursor = (v and v.cursor) or "0"
         page = page + 1
-        for _, k in ipairs(keys) do
-          if type(k) == "string" then all_keys[#all_keys + 1] = k end
-        end
+        util.append_new(all_keys, seen, keys)
         local final_page = new_cursor == "0"
         if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
           -- rebuild the whole bucketed subtree from every match so far (the

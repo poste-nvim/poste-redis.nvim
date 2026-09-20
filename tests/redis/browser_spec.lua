@@ -418,6 +418,60 @@ describe("poste-redis browser async grouping", function()
     session_conn.execute = orig_execute
   end)
 
+  --- SCAN's cursor is a bucket index, so a rehash mid-walk can hand the same
+  --- key out on two pages (the contract is at-least-once). One row per key.
+  it("scan_group renders a key that SCAN returns twice only once", function()
+    async.set_view_mode("flatten")
+    local session_conn = require("poste-redis.session_conn")
+    local orig_execute = session_conn.execute
+    local page = 0
+    session_conn.execute = function(_conn_url, cmd, cbs)
+      if cmd[1] == "SCAN" then
+        page = page + 1
+        if page == 1 then
+          cbs.on_response({ value = { value = { "a:b", "a:c" }, cursor = "17" } })
+        else
+          cbs.on_response({ value = { value = { "a:b", "a:d" }, cursor = "0" } })
+        end
+      else
+        cbs.on_response({ value = { value = "string" } })  -- TYPE fetch
+      end
+      return "dispatched"
+    end
+    local group = tree.make_group_node("a", "c", 0)
+    scan.scan_group(group, "redis://h", "c")
+    local names = {}
+    for _, ch in ipairs(group.children) do names[#names + 1] = ch.name end
+    assert.same({ "a:b", "a:c", "a:d" }, names)
+    session_conn.execute = orig_execute
+  end)
+
+  it("scan_keys counts a group's keys once per distinct key", function()
+    async.set_view_mode("flatten")
+    local session_conn = require("poste-redis.session_conn")
+    local orig_execute = session_conn.execute
+    local page = 0
+    session_conn.execute = function(_conn_url, _cmd, cbs)
+      page = page + 1
+      if page == 1 then
+        cbs.on_response({ value = { value = { "u:1", "u:2", "k" }, cursor = "9" } })
+      else
+        -- u:1 again (rehash) plus a new key; k is a bare leaf on the db node
+        cbs.on_response({ value = { value = { "u:1", "u:3" }, cursor = "0" } })
+      end
+      return "dispatched"
+    end
+    local db = tree.make_db_node({ db = 0 }, "c")
+    scan.scan_keys(db, "redis://h", "c")
+    assert.equals(3, db._segs.u._child_count, "duplicate keys must not inflate the group")
+    local leaves = {}
+    for _, ch in ipairs(db.children) do
+      if ch.node_type == "key" then leaves[#leaves + 1] = ch.name end
+    end
+    assert.same({ "k" }, leaves)
+    session_conn.execute = orig_execute
+  end)
+
   it("view_mode default follows config.browser_view_mode", function()
     local config = require("poste-redis.config")
     assert.equals("flatten", config.defaults.browser_view_mode)

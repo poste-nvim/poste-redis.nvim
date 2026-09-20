@@ -242,4 +242,22 @@ function M.ensure_job_data(data)
   return data
 end
 
+--- Append the strings of `src` that `seen` has not recorded yet, marking them.
+--- SCAN's iteration contract is at-least-once: the same key can be returned on
+--- two pages of one walk (the cursor is a bucket index, and a rehash mid-scan
+--- revisits buckets), so every browser accumulator dedups through here —
+--- otherwise one key renders as two rows and a group's child count is too high.
+--- Non-string entries (a nested reply from a weird server) are skipped.
+--- @param dst string[]   accumulator (mutated)
+--- @param seen table<string, true>  keys already collected (mutated)
+--- @param src table[]    one SCAN page's key list
+function M.append_new(dst, seen, src)
+  for _, v in ipairs(src or {}) do
+    if type(v) == "string" and not seen[v] then
+      seen[v] = true
+      dst[#dst + 1] = v
+    end
+  end
+end
+
 return M

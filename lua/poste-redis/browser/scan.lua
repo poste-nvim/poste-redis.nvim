@@ -418,7 +418,7 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
   async.render_now()
 
   local scan_count = config.config.header_scan_count or 5000
-  local all_keys = {}
+  local all_keys, seen = {}, {}
   local built = 0  -- keys already materialized into nodes
   local page = 0
 
@@ -439,9 +439,7 @@ function M.scan_keys(node, conn_url, conn_name, pattern)
         local keys = v and v.value or {}
         local new_cursor = (v and v.cursor) or "0"
         page = page + 1
-        for _, k in ipairs(keys) do
-          if type(k) == "string" then all_keys[#all_keys + 1] = k end
-        end
+        util.append_new(all_keys, seen, keys)
         local final_page = new_cursor == "0"
         -- Every page may surface new prefixes: append them immediately.
         local new_nodes = build_group_headers(node, all_keys, conn_name, db, built + 1, final_page)
@@ -570,7 +568,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
   async.render_now()
 
   local scan_count = config.config.scan_count or 500
-  local all_keys = {}
+  local all_keys, seen = {}, {}
   local built = 0
   local RENDER_EVERY_PAGES = 8
   local page = 0
@@ -596,9 +594,7 @@ function M.scan_group(node, conn_url, conn_name, subpattern)
         local keys = v and v.value or {}
         local new_cursor = (v and v.cursor) or "0"
         page = page + 1
-        for _, k in ipairs(keys) do
-          if type(k) == "string" then all_keys[#all_keys + 1] = k end
-        end
+        util.append_new(all_keys, seen, keys)
         local final_page = new_cursor == "0"
         if page == 1 or page % RENDER_EVERY_PAGES == 0 or final_page then
           local new_nodes = {}

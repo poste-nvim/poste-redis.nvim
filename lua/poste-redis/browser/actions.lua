@@ -176,7 +176,9 @@ local function delete_prefix_keys(node, ctx, opts)
     return
   end
   local db = node.meta and node.meta.db
-  local key_list = {}
+  -- SCAN pages may repeat a key (at-least-once) and this list is both the
+  -- confirm count and the DEL batch, so it goes through the dedup collector
+  local key_list, seen = {}, {}
 
   local function confirm_and_delete()
     if not confirm(opts.question(#key_list, prefix)) then
@@ -216,9 +218,7 @@ local function delete_prefix_keys(node, ctx, opts)
     }, {
       on_response = function(ev)
         -- SCAN reply: {type, value: keys[], cursor} (redis_executor SCAN branch)
-        for _, k in ipairs(ev.value and ev.value.value or {}) do
-          if type(k) == "string" then key_list[#key_list + 1] = k end
-        end
+        util.append_new(key_list, seen, ev.value and ev.value.value or {})
         local cursor2 = (ev.value and ev.value.cursor) or "0"
         if cursor2 == "0" then
           confirm_and_delete()
@@ -359,12 +359,11 @@ function M.delete_nodes(nodes, ctx)
       pending_scans = pending_scans + 1
       local match = util.glob_escape(job.node.meta.prefix or "") .. ":*"
       local db = job.node.meta and job.node.meta.db
+      local seen = {}  -- one dedup set per job: its own key list
       local function scan_next(cursor)
         session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", match }, {
           on_response = function(ev)
-            for _, k in ipairs(ev.value and ev.value.value or {}) do
-              if type(k) == "string" then job.keys[#job.keys + 1] = k end
-            end
+            util.append_new(job.keys, seen, ev.value and ev.value.value or {})
             local cursor2 = (ev.value and ev.value.cursor) or "0"
             if cursor2 == "0" then
               pending_scans = pending_scans - 1

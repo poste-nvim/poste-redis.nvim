@@ -93,6 +93,7 @@ local function group_info(node, url, cb)
   -- glob-escape: the prefix is a literal key name, not a pattern
   local match = util.glob_escape(prefix) .. ":*"
   local count = 0
+  local seen = {}  -- SCAN is at-least-once; a repeat would count and sample twice
   local memory = 0
   local sampled = 0
   local pending_samples = 0
@@ -136,8 +137,10 @@ local function group_info(node, url, cb)
     session_conn.execute(url, { "SCAN", cursor, "COUNT", "5000", "MATCH", match }, {
       on_response = function(ev)
         local keys = ev.value and ev.value.value or {}
-        count = count + #keys
-        for _, k in ipairs(keys) do sample(k) end
+        local fresh = {}
+        util.append_new(fresh, seen, keys)
+        count = count + #fresh
+        for _, k in ipairs(fresh) do sample(k) end
         local cursor2 = (ev.value and ev.value.cursor) or "0"
         if cursor2 == "0" or count >= 1000000 then
           scan_done = true
