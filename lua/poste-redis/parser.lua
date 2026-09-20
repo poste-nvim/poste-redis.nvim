@@ -87,24 +87,39 @@ local function unquote(tok)
   return tok
 end
 
+--- The decoded command head: quotes stripped, uppercased. Tokens keep the
+--- quotes as written (for `raw` / the panel title), so everything that DECIDES
+--- something from the name has to decode it first — above all the danger
+--- blacklist, which `"FLUSHALL"` would otherwise slip past with the quotes
+--- still attached, and the server would reject that name anyway.
+--- @param tok string|nil
+--- @return string
+local function head_of(tok)
+  return unquote(tok or ""):upper()
+end
+
 --- Build a command entry.
+--- @param tokens string[]  quoted as written; only `command` is decoded
+--- @return table entry
 local function command_entry(tokens, start_line, end_line)
   return {
     kind = "command",
     tokens = tokens,
-    command = (tokens[1] or ""):upper(),
+    command = head_of(tokens[1]),
     start_line = start_line,
     end_line = end_line,
     raw = table.concat(tokens, " "),
   }
 end
 
---- Build a USE entry.
+--- Build a USE entry. The connection name is decoded like the command head:
+--- `USE "local"` is the same section as `USE local`, and a name kept verbatim
+--- would fail `connections.resolve` with the quotes still attached.
 local function use_entry(tokens, start_line, end_line)
   return {
     kind = "use",
     tokens = tokens,
-    connection = tokens[2],
+    connection = tokens[2] and unquote(tokens[2]) or nil,
     start_line = start_line,
     end_line = end_line,
     raw = table.concat(tokens, " "),
@@ -138,7 +153,7 @@ function M.extract_entries(content)
       return
     end
     local first = logical[1]
-    local is_use = type(first) == "string" and first:upper() == "USE"
+    local is_use = type(first) == "string" and head_of(first) == "USE"
     local entry = is_use and use_entry(logical, logical_start, logical_end)
       or command_entry(logical, logical_start, logical_end)
     entries[#entries + 1] = entry
@@ -271,7 +286,7 @@ function M.entry_args(entry)
   local out = {}
   for i, t in ipairs(entry.tokens or {}) do
     if i == 1 then
-      out[1] = t:upper()
+      out[1] = head_of(t)
     else
       out[i] = unquote(t)
     end
@@ -280,9 +295,10 @@ function M.entry_args(entry)
 end
 
 --- True when the entry is a dangerous command (FLUSHALL/FLUSHDB/SHUTDOWN/
---- CONFIG ...). M1: parser flags these; panel shows a yellow warning (red line
---- #5). Full interception lands in M3 (P2-2). Delegates to constants so the
---- blacklist has a single source of truth.
+--- CONFIG ...). Drives the result panel's yellow warning and the runner's
+--- confirm gate. Delegates to constants so the blacklist has a single
+--- source of truth. `entry.command` is decoded, so quoting the head does not
+--- slip past it.
 --- @param entry table
 --- @return boolean
 function M.is_dangerous(entry)
@@ -322,7 +338,7 @@ function M.command_tokens(line)
   local tokens = {}
   for i, t in ipairs(tokenize_line(line)) do
     if i == 1 then
-      tokens[1] = t:upper()
+      tokens[1] = head_of(t)
     else
       tokens[i] = unquote(t)
     end

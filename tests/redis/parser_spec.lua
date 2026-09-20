@@ -152,6 +152,27 @@ describe("poste-redis parser", function()
     assert.is_false(parser.is_dangerous(parser.extract_entries("USE my-redis\n")[1]))
   end)
 
+  it("decodes a quoted command head everywhere the name is interpreted", function()
+    -- the blacklist must not be escapable by typing the name in quotes, and the
+    -- server is sent the bare name anyway (`"FLUSHALL"` is not a command to it)
+    local quoted = parser.extract_entries('"FLUSHALL"\n')[1]
+    assert.equals("FLUSHALL", quoted.command)
+    assert.is_true(parser.is_dangerous(quoted))
+    assert.same({ "FLUSHALL" }, parser.entry_args(quoted))
+    assert.equals("SET", parser.extract_entries("'set' k v\n")[1].command)
+    -- `raw` keeps the text as written, so the panel title is not rewritten
+    assert.equals('"FLUSHALL"', quoted.raw)
+  end)
+
+  it("decodes a quoted USE so the connection name resolves", function()
+    local e = parser.extract_entries('USE "local"\n')[1]
+    assert.equals("use", e.kind)
+    assert.equals("local", e.connection)
+    -- quoting the verb is equally a USE directive
+    assert.equals("use", parser.extract_entries('"use" local\n')[1].kind)
+    assert.same({ "SET", "k", "v" }, parser.command_tokens('"SET" "k" "v"'))
+  end)
+
   it("continuation stops at blank lines", function()
     local entries = parser.extract_entries("SET k v \\\n\nGET a\n")
     assert.equals(2, #entries)
