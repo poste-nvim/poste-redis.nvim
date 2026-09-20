@@ -9,6 +9,10 @@
 ---   - table:  key (for submission), name (display), description (secondary)
 local M = {}
 
+-- nvim_buf_set_extmark rejects the `-1` that add/clear_namespace accept, so the
+-- description highlight needs a real namespace of its own.
+local ns = vim.api.nvim_create_namespace("poste-redis-select")
+
 local function normalize_items(items)
   local result = {}
   for i, v in ipairs(items) do
@@ -142,7 +146,7 @@ local function pick_float(items, prompt, on_select)
         local line = lines[idx + 1] or ""
         local desc_start = line:find("  " .. item.description, 1, true)
         if desc_start then
-          vim.api.nvim_buf_set_extmark(list_buf, -1, idx, desc_start - 1, {
+          vim.api.nvim_buf_set_extmark(list_buf, ns, idx, desc_start - 1, {
             end_row = idx,
             end_col = desc_start - 1 + #item.description,
             hl_group = "Comment",
