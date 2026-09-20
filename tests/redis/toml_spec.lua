@@ -124,4 +124,49 @@ password = "a\"b\\c"
     assert.is_nil(out)
     assert.truthy(err)
   end)
+
+  -- The shapes poste-db added after 94fccf2. A project keeps ONE
+  -- connections.toml for the whole plugin family, so a redis-only install
+  -- still has to read a file whose postgres sections use inline tables.
+  it("parses an inline table into a real table", function()
+    local out = toml.parse('[pg]\ndialect = "postgres"\ntunnel = { to = "jump@bastion", port = 2222 }')
+    assert.is_table(out.pg.tunnel)
+    assert.equals("jump@bastion", out.pg.tunnel.to)
+    assert.equals(2222, out.pg.tunnel.port)
+  end)
+
+  it("parses inline arrays and keeps commas inside strings", function()
+    local out = toml.parse('[pg]\nlist = ["a,b", "c"]\nempty = []')
+    assert.same({ "a,b", "c" }, out.pg.list)
+    assert.same({}, out.pg.empty)
+  end)
+
+  it("reports an unclosed inline container instead of stringifying it", function()
+    local parsed, err = toml.parse('tunnel = { to = "x"')
+    assert.is_nil(parsed)
+    assert.equals("Unclosed inline table", err)
+  end)
+
+  it("rejects [[array-of-tables]] instead of making a \"[name\" section", function()
+    local out, err = toml.parse('[[srv]]\ndialect = "redis"')
+    assert.is_nil(out)
+    assert.equals("Array-of-tables headers ([[name]]) are not supported", err)
+  end)
+
+  it("rejects dotted keys but keeps dotted section names", function()
+    -- the header IS the connection name, so `my-app.prod` must stay legal
+    local out, err = toml.parse('[my-app.prod]\ndialect = "redis"')
+    assert.is_nil(err)
+    assert.equals("redis", out["my-app.prod"].dialect)
+
+    local bad, bad_err = toml.parse('[srv]\ntunnel.to = "h"')
+    assert.is_nil(bad)
+    assert.truthy(bad_err:find("Dotted keys", 1, true))
+  end)
+
+  it("never echoes a malformed line's value (may be a secret)", function()
+    local out, err = toml.parse('password "s3cret-value"')
+    assert.is_nil(out)
+    assert.falsy(err:find("s3cret%-value", 1, false))
+  end)
 end)

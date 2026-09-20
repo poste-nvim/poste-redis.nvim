@@ -1,14 +1,21 @@
 -- VENDORED from poste-db.nvim lua/poste-db/toml.lua
--- Source commit: 94fccf2 ("fix(toml): literal-string backslash + UTF-8 BOM
--- handling"). Syncing: poste-redis must not require("poste-db.*") (family red
--- line). This pure-function TOML parser is copied here verbatim; when
--- poste-db updates it, re-copy the file and bump the commit above. Keep it
--- dependency-free.
+-- Source commit: 89f0468 ("fix(toml): error on shapes that silently
+-- misparse"). The copy here had been pinned to 94fccf2 and so was missing the
+-- inline table/array parsing poste-db added in cc6652e.
+-- Syncing: poste-redis must not require("poste-db.*") (family red line), so
+-- this pure-function parser is copied verbatim — including doc comments and
+-- poste-db-only examples in them. When poste-db updates the file, re-copy it
+-- whole and bump the commit above. Keep it dependency-free.
 
 --- Minimal pure-Lua TOML parser.
---- Supports: [section] headers, key = "string", key = 'string', key = 123,
---- key = true/false, # comments, inline comments (outside strings),
+--- Supports: [section] headers, key = "string" / 'string' / 123 / true|false,
+--- inline arrays `[…]` and inline tables `{…}` (the shapes connections.toml
+--- uses for `tunnel = { … }`), # comments, inline comments (outside strings),
 --- basic escape sequences.
+--- Deliberately unsupported: [[array-of-tables]], dotted keys and multi-line
+--- values — the first two error out rather than producing a bogus key, the
+--- last is rare in a config file. Unquoted values (dates, bare words) come
+--- back as strings.
 --- Returns { [section] = { key = value, ... }, ... }
 local M = {}
 
@@ -65,7 +72,88 @@ local function unescape_basic(s)
   end))
 end
 
-local function parse_value(v)
+local parse_value  -- forward: inline containers recurse into it
+
+--- Split a value body on a top-level delimiter, keeping quoted strings and
+--- nested `[...]`/`{...}` intact (so `["a,b", "c"]` splits into two items).
+local function split_top(s, sep)
+  local parts, buf = {}, {}
+  local depth, i, quote = 0, 1, nil
+  while i <= #s do
+    local ch = s:sub(i, i)
+    if quote then
+      table.insert(buf, ch)
+      if ch == "\\" and quote == '"' then
+        table.insert(buf, s:sub(i + 1, i + 1))
+        i = i + 2
+      elseif ch == quote then
+        quote = nil
+        i = i + 1
+      else
+        i = i + 1
+      end
+    elseif ch == '"' or ch == "'" then
+      quote = ch
+      table.insert(buf, ch)
+      i = i + 1
+    elseif ch == "{" or ch == "[" then
+      depth = depth + 1
+      table.insert(buf, ch)
+      i = i + 1
+    elseif ch == "}" or ch == "]" then
+      depth = depth - 1
+      table.insert(buf, ch)
+      i = i + 1
+    elseif ch == sep and depth == 0 then
+      table.insert(parts, table.concat(buf))
+      buf = {}
+      i = i + 1
+    else
+      table.insert(buf, ch)
+      i = i + 1
+    end
+  end
+  table.insert(parts, table.concat(buf))
+  return parts
+end
+
+--- Inline array (`[1, 2]`) / inline table (`{ to = "h", port = 2222 }`).
+--- Without these, `tunnel = { … }` — a shape tunnel.normalize_cfg documents —
+--- came back as the raw string and every tunneled connection failed to match.
+local function parse_container(v)
+  local is_array = v:sub(1, 1) == "["
+  local closer = is_array and "]" or "}"
+  if v:sub(-1, -1) ~= closer then
+    return nil, is_array and "Unclosed inline array" or "Unclosed inline table"
+  end
+  local body = v:sub(2, -2)
+  if is_array then
+    local out = {}
+    if trim(body) == "" then return out end
+    for _, part in ipairs(split_top(body, ",")) do
+      local item, err = parse_value(part)
+      if err then return nil, err end
+      if item ~= nil then table.insert(out, item) end
+    end
+    return out
+  end
+  local out = {}
+  if trim(body) == "" then return out end
+  for _, part in ipairs(split_top(body, ",")) do
+    local pair = trim(part)
+    if pair ~= "" then
+      local eq = pair:find("=", 1, true)
+      if not eq then return nil, "Invalid inline table entry" end
+      local key = parse_value(pair:sub(1, eq - 1))
+      local val, err = parse_value(pair:sub(eq + 1))
+      if err then return nil, err end
+      out[tostring(key)] = val
+    end
+  end
+  return out
+end
+
+parse_value = function(v)
   v = trim(strip_inline_comment(v))
   if v == "" then return nil end
   if v == "true" then return true end
@@ -81,6 +169,9 @@ local function parse_value(v)
   if v:sub(1, 1) == "'" then
     if v:sub(-1, -1) ~= "'" then return nil, "Unclosed single-quoted string" end
     return v:sub(2, -2)
+  end
+  if v:sub(1, 1) == "[" or v:sub(1, 1) == "{" then
+    return parse_container(v)
   end
   return v
 end
@@ -99,6 +190,13 @@ function M.parse(content)
     local trimmed = trim(line)
     if trimmed == "" or trimmed:sub(1, 1) == "#" then -- luacheck: ignore 542
     elseif trimmed:sub(1, 1) == "[" then
+      -- [[array-of-tables]] would otherwise parse into a section literally
+      -- named "[name", so the connection silently vanishes from the list.
+      -- A dotted [a.b] header stays a flat section called "a.b" on purpose:
+      -- the header IS the connection name, so `my-app.prod` is legal.
+      if trimmed:sub(1, 2) == "[[" then
+        return nil, "Array-of-tables headers ([[name]]) are not supported"
+      end
       local close = trimmed:find("]", 2)
       if not close then
         return nil, "Invalid table header: " .. line
@@ -114,13 +212,18 @@ function M.parse(content)
     else
       local eq = trimmed:find("=", 1, true)
       if not eq then
-        return nil, "Invalid key=value line: " .. line
+        -- the raw line can be a mistyped `password "x"`, so it is not echoed
+        return nil, "Invalid key=value line (expected `key = value`)"
       end
       local key = trim(trimmed:sub(1, eq - 1))
       local val, err = parse_value(trimmed:sub(eq + 1))
       if err then return nil, err end
       if key == "" then
-        return nil, "Empty key in line: " .. line
+        return nil, "Empty key in line"
+      end
+      -- never echo the line here: values can be passwords
+      if key:find(".", 1, true) then
+        return nil, "Dotted keys (a.b = …) are not supported: " .. key
       end
       section[key] = val
     end
