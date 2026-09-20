@@ -193,6 +193,29 @@ port = "{{REDISn_PORT}}"
     assert.falsy(err:find("REDISn_PORT", 1, false))
   end)
 
+  it("caches a parse failure until the file changes", function()
+    -- the statusline and completion read the config on every redraw and
+    -- keystroke; a broken file must not be re-read and re-parsed each time
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "h"
+]])
+    vim.api.nvim_set_current_dir(tmpdir)
+    local toml = require("poste-redis.toml")
+    local orig, calls = toml.parse_file, 0
+    toml.parse_file = function()
+      calls = calls + 1
+      return nil, "parse error"
+    end
+    local cfg, err = connections.get_connection_config("srv")
+    assert.is_nil(cfg)
+    assert.equals("parse error", err)
+    assert.is_nil(connections.get_connection_config("srv"))
+    assert.equals(1, calls, "the second read must come from the failure cache")
+    toml.parse_file = orig
+  end)
+
   it("rejects a port beyond 65535 but not an out-of-range db", function()
     -- the transport is 16-bit, so a huge port is a typo; ` databases` is a
     -- server setting, so SELECT is the right place for a bad db to surface

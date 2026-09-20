@@ -198,6 +198,7 @@ end
 local _config_cache = nil
 local _config_cache_path = nil
 local _config_cache_mtime = nil
+local _config_cache_err = nil
 
 --- Read + cache the connections.toml table (mtime invalidated).
 --- @return table|nil, string|nil parsed, error
@@ -208,11 +209,16 @@ local function read_config(search_dir)
   if _config_cache_path ~= config_path or _config_cache_mtime ~= mtime then
     local toml = require("poste-redis.toml")
     local parsed, err = toml.parse_file(config_path)
-    if not parsed then return nil, err end
+    -- The failure is cached under the same mtime key as the success: the
+    -- statusline and completion read config on every redraw/keystroke, and a
+    -- broken file would otherwise be re-read and re-parsed each time until it
+    -- is fixed.
     _config_cache = parsed
+    _config_cache_err = parsed and nil or err
     _config_cache_path = config_path
     _config_cache_mtime = mtime
   end
+  if not _config_cache then return nil, _config_cache_err end
   return _config_cache, nil
 end
 
@@ -494,6 +500,7 @@ M._test = {
     _config_cache = nil
     _config_cache_path = nil
     _config_cache_mtime = nil
+    _config_cache_err = nil
     _dotenv_cache = {}
     _dotenv_cache_mtime = {}
   end,
