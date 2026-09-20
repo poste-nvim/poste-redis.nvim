@@ -158,6 +158,62 @@ port = 6379
     assert.match("host", err)
   end)
 
+  it("reports a non-numeric port instead of raising from string.format", function()
+    -- port/db reach "%d"; a typo (or a {{VAR}} that never resolved) used to
+    -- escape as a raw "bad argument #5 to '?'" traceback out of resolve()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "h"
+port = "63x9"
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.match("port", err)
+    assert.match("srv", err, nil, true)
+  end)
+
+  it("reports a typo'd {{VAR}} in port as a config error, not a crash", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "h"
+port = "{{REDISn_PORT}}"
+]])
+    local ok, url, err = pcall(connections.resolve_redis_url, "srv", { search_dir = tmpdir })
+    assert.is_true(ok)
+    assert.is_nil(url)
+    assert.match("port", err)
+    -- the unresolved literal is deliberately not echoed (it may name a secret)
+    assert.falsy(err:find("REDISn_PORT", 1, false))
+  end)
+
+  it("accepts a numeric string port from the env", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "h"
+port = "{{ENV_PORT}}"
+db = "{{ENV_DB}}"
+]])
+    write(".env", "ENV_PORT=6380\nENV_DB=3\n")
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(err)
+    assert.equals("redis://h:6380/3", url)
+  end)
+
+  it("rejects a fractional or negative db", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "h"
+db = 1.5
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.match("db", err)
+  end)
+
   it("rejects a non-redis dialect", function()
     write("connections.toml", [[
 [pg]

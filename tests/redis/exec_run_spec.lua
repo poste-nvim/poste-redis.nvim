@@ -502,6 +502,10 @@ describe("poste-redis exec_run", function()
     })
     assert.equals(1, #errs)
     assert.match("No connection", errs[1])
+    -- the resolve error must ride along: "Invalid port for redis connection
+    -- 'srv'" reads as a fixable config bug, while "no connection resolved"
+    -- sends the user off to add a USE line that is already there
+    assert.match("boom", errs[1])
     connections.resolve_redis_url = orig_resolve
     redis_state.current_url = nil
     vim.api.nvim_buf_delete(src, { force = true })

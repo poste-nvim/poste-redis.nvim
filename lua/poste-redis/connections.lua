@@ -229,15 +229,30 @@ end
 --- Build a redis:// URL from individual fields (url absent).
 --- Returns nil, err when the connection isn't a redis one or is malformed.
 --- @param conn table env-resolved connection config
+--- @param name? string connection name, for the error text
 --- @return string|nil, string|nil
-local function build_url_from_fields(conn)
+local function build_url_from_fields(conn, name)
   local scheme = conn.tls and "rediss" or "redis"
   local host = conn.host
   if not host or host == "" then
     return nil, "Missing host for redis connection"
   end
-  local port = conn.port or 6379
-  local db = conn.db or 0
+  -- Which connection, so a shared file with ten of them stays diagnosable.
+  -- The bad value itself is NOT echoed: `port = "{{REDIS_PASS}}"` (a typo in
+  -- the var name) would otherwise print a secret that resolved.
+  local at = name and (" (connection '%s')"):format(name) or ""
+  local function field(label, value, default)
+    if value == nil or value == "" then return default, nil end
+    local n = tonumber(value)
+    if not n or n % 1 ~= 0 or n < 0 then
+      return nil, ("Invalid %s for redis connection%s: expected a non-negative integer"):format(label, at)
+    end
+    return n, nil
+  end
+  local port, port_err = field("port", conn.port, 6379)
+  if port_err then return nil, port_err end
+  local db, db_err = field("db", conn.db, 0)
+  if db_err then return nil, db_err end
   local auth = ""
   if conn.username and conn.password then
     auth = percent_encode(conn.username) .. ":" .. percent_encode(conn.password) .. "@"
@@ -274,7 +289,7 @@ function M.resolve_redis_url(name, opts)
     end
     return conn.url, nil
   end
-  return build_url_from_fields(conn)
+  return build_url_from_fields(conn, name)
 end
 
 --- Resolve a connection REFERENCE that may be a connections.toml name or an
@@ -313,7 +328,7 @@ function M.list_connections_sync(search_dir)
           url = resolved.url
         end
       else
-        url = build_url_from_fields(resolved)
+        url = build_url_from_fields(resolved, name)
       end
       local host = resolved.host
       if not host and url then

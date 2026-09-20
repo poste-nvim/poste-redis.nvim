@@ -479,21 +479,29 @@ function M.run_selection_async(buf, mode, opts, callbacks)
     -- what the source winbar displays. The old fallback (state context, then
     -- the file's LAST USE anywhere) ran a selection cross-connection when
     -- the cursor sat in an earlier USE section of a multi-USE file.
-    local url, name
+    local url, name, reason
     if entries[1] and entries[1].start_line then
-      url, name = M._use_above(buf, entries[1].start_line)
+      url, name, reason = M._use_above(buf, entries[1].start_line)
     end
     if not url then
-      url, name = M._connection_for(buf)
+      local fallback_url, fallback_name, fallback_reason = M._connection_for(buf)
+      url, name = fallback_url, fallback_name
+      -- keep the section-specific reason: it names the USE the cursor sits in
+      reason = reason or fallback_reason
     end
     if url then
       opts = vim.tbl_extend("keep", opts, { connection = url, connection_name = name })
     end
-  end
-  if not opts.connection then
-    guarded(run_seq, callbacks.on_error,
-      "No connection resolved — run :PosteRedisConnection or add a USE line", "")()
-    return nil
+    if not opts.connection then
+      -- Without the reason a typo'd `port = "{{REDISn_PORT}}"` looked like the
+      -- file had no USE at all, because the resolve failure was discarded.
+      -- It rides inside the message, not the stderr slot: the notifiers here
+      -- and in runner.lua only ever show the first argument.
+      guarded(run_seq, callbacks.on_error,
+        "No connection resolved — run :PosteRedisConnection or add a USE line"
+        .. (reason and ("\n" .. reason) or ""), "")()
+      return nil
+    end
   end
   return M.run_async(entries, opts, callbacks)
 end
@@ -502,22 +510,25 @@ end
 --- in the file.
 --- @param buf number
 --- @return string|nil, string|nil url, connection_name
+--- @return string|nil reason the last USE failed to resolve (nil on success)
 function M._connection_for(buf)
   local connections = require("poste-redis.connections")
   if redis_state.current_url then
     return redis_state.current_url, redis_state.context.connection
   end
   local entries = parser.buffer_entries(buf)
+  local resolve_err
   for i = #entries, 1, -1 do
     if entries[i].kind == "use" and entries[i].connection then
-      local url = connections.resolve(entries[i].connection)
+      local url, err = connections.resolve(entries[i].connection)
       if url then
         connections.apply_connection(entries[i].connection, url)
         return url, entries[i].connection
       end
+      resolve_err = err
     end
   end
-  return nil, nil
+  return nil, nil, resolve_err
 end
 
 --- The connection the file's own USE section establishes above `before_line`:
@@ -528,6 +539,7 @@ end
 --- @param buf number
 --- @param before_line number  1-based line the scan stops at (exclusive)
 --- @return string|nil url, string|nil connection_name
+--- @return string|nil reason the chosen USE failed to resolve
 function M._use_above(buf, before_line)
   local connections = require("poste-redis.connections")
   local entries = parser.buffer_entries(buf)
@@ -537,8 +549,8 @@ function M._use_above(buf, before_line)
     if e.kind == "use" and e.connection then chosen = e.connection end
   end
   if not chosen then return nil, nil end
-  local url = connections.resolve(chosen)
-  if not url then return nil, nil end
+  local url, err = connections.resolve(chosen)
+  if not url then return nil, nil, err end
   return url, chosen
 end
 
