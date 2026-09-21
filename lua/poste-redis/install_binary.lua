@@ -48,6 +48,27 @@ function M.ps_literal(path)
   return "'" .. (path:gsub("'", "''")) .. "'"
 end
 
+--- Build the curl argv for one release download. Same rule as poste-db's copy.
+--- Both downloads happen inside `ensure()`, which `setup()` calls, so each one
+--- blocks Neovim's startup. Without an explicit ceiling a blackholed
+--- connection — a captive portal, or a firewall that answers the SYN and drops
+--- the rest — leaves the editor frozen until the OS socket timeout expires,
+--- which is minutes and looks like a hung plugin load rather than a failed
+--- download.
+--- @param flags string curl's short flags, "-fL" or the silent "-sfL"
+--- @param url string
+--- @param out string path to write the body to
+--- @param max_time integer seconds
+--- @return string[] argv for `vim.fn.system` (list form, so no shell)
+function M.curl_argv(flags, url, out, max_time)
+  return {
+    "curl", flags,
+    "--connect-timeout", "10",
+    "--max-time", tostring(max_time),
+    url, "-o", out,
+  }
+end
+
 --- Archive extension for the platform.
 local function archive_ext(platform)
   if platform:find("windows") then return ".zip" end
@@ -82,7 +103,7 @@ local function verify_checksum(archive_path, platform, version)
   local url = M.checksum_url(platform, version)
   local tmp = BIN_DIR .. "/checksum.tmp"
 
-  vim.fn.system({ "curl", "-sfL", url, "-o", tmp })
+  vim.fn.system(M.curl_argv("-sfL", url, tmp, 20))
   if vim.v.shell_error ~= 0 then
     -- checksum file unavailable — skip verification
     pcall(os.remove, tmp)
@@ -90,7 +111,10 @@ local function verify_checksum(archive_path, platform, version)
   end
 
   local f = io.open(tmp, "r")
-  if not f then return true end
+  if not f then
+    pcall(os.remove, tmp)
+    return true
+  end
   local expected = f:read("*a"):match("^(%S+)")
   f:close()
   pcall(os.remove, tmp)
@@ -142,7 +166,7 @@ function M.download(version)
 
   vim.notify("[Poste] Downloading " .. url, vim.log.levels.INFO)
 
-  vim.fn.system({ "curl", "-fL", url, "-o", tmp_archive })
+  vim.fn.system(M.curl_argv("-fL", url, tmp_archive, 180))
   if vim.v.shell_error ~= 0 then
     vim.notify("[Poste] Download failed (exit " .. vim.v.shell_error .. ")", vim.log.levels.ERROR)
     pcall(os.remove, tmp_archive)

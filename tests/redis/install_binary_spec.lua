@@ -107,3 +107,50 @@ describe("poste-redis install ps_literal", function()
     assert.equals("'/tmp/x$(touch pwned)/bin'", install.ps_literal("/tmp/x$(touch pwned)/bin"))
   end)
 end)
+
+describe("poste-redis install curl_argv", function()
+  -- Both downloads happen inside ensure(), which setup() calls, so they block
+  -- Neovim's startup: a run without a ceiling can freeze the editor for as long
+  -- as the OS socket timeout, which reads as a hung plugin rather than a failed
+  -- download.
+  local function has(argv, flag, value)
+    for i, v in ipairs(argv) do
+      if v == flag and argv[i + 1] == value then return true end
+    end
+    return false
+  end
+
+  it("bounds both the connect and the whole transfer", function()
+    local argv = install.curl_argv("-fL", "https://example/poste.tar.gz", "/tmp/poste.tar.gz", 180)
+    assert.is_true(has(argv, "--connect-timeout", "10"))
+    assert.is_true(has(argv, "--max-time", "180"))
+  end)
+
+  it("keeps the flags the caller asked for, silent or not", function()
+    -- The checksum fetch is silent, the release download is not.
+    assert.equals("-sfL", install.curl_argv("-sfL", "u", "/tmp/o", 20)[2])
+    assert.equals("-fL", install.curl_argv("-fL", "u", "/tmp/o", 20)[2])
+  end)
+
+  it("passes url and output path as their own argv entries", function()
+    -- List form is what keeps a path with a space or a metacharacter out of a
+    -- shell; joining them back into one string would reintroduce Round 7's bug.
+    local url = "https://example/a b"
+    local out = "/tmp/out file$(touch pwned)"
+    local argv = install.curl_argv("-fL", url, out, 20)
+    assert.equals("curl", argv[1])
+    assert.equals(url, argv[7])
+    assert.equals("-o", argv[8])
+    assert.equals(out, argv[9])
+  end)
+
+  it("returns a fresh list per call", function()
+    -- The installer calls this twice; a shared table would let one call's
+    -- mutation leak into the other's command line.
+    local a = install.curl_argv("-fL", "u", "/tmp/a", 20)
+    local b = install.curl_argv("-fL", "u", "/tmp/b", 20)
+    a[7] = "mutated"
+    assert.is_not.equal(a, b)
+    assert.equals("u", b[7])
+  end)
+end)
