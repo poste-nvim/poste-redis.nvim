@@ -502,6 +502,13 @@ describe("poste-redis env.json var table", function()
     write_env_json('{"POSTE_TEST_FLAT": "flat-value"}')
     assert.equals("flat-value", connections.get_env_vars(tmpdir).POSTE_TEST_FLAT)
   end)
+
+  it("expands a reference whose name is not an identifier", function()
+    write_env_json('{"dev": {"POSTE_TEST-HYPHENATED": "h1"}}')
+    local vars = connections.get_env_vars(tmpdir)
+    assert.equals("h1", connections.substitute_vars("{{POSTE_TEST-HYPHENATED}}", vars))
+    assert.equals("{{ not a var }}", connections.substitute_vars("{{ not a var }}", vars))
+  end)
 end)
 
 describe("poste-redis context statusline", function()
