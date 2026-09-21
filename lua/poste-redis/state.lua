@@ -36,6 +36,11 @@ M.current_env = "dev"
 --- process that loaded the config: CI jobs and the busted child processes
 --- plenary spawns for each spec file start without it, while the environment is
 --- inherited.
+---
+--- This is the family's binary contract (see `poste.nvim/docs/schema.md`, Global
+--- conventions): a candidate is usable only when it is both readable and
+--- executable, and `install_binary.ensure()` asks this function instead of
+--- repeating the walk -- a second copy there had already drifted once.
 --- @return string|nil absolute path, or nil when no usable binary was found
 function M.find_poste_binary()
   -- Readable is not enough: a downloaded/copied file without the exec bit (or
