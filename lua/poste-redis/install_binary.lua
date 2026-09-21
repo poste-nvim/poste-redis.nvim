@@ -69,6 +69,19 @@ function M.curl_argv(flags, url, out, max_time)
   }
 end
 
+--- Compare the downloaded archive's digest with the release's. Same rule as
+--- poste-db's copy: hex SHA-256 is case-insensitive but the tools are not —
+--- `sha256sum`/`shasum` print lowercase (what the release asset holds) while
+--- `certutil -hashfile` prints uppercase, so an exact compare would call a good
+--- download corrupted on the one Windows box that has no other hasher, and
+--- delete it.
+--- @param actual string digest computed from the downloaded file
+--- @param expected string digest from the release asset
+--- @return boolean
+function M.checksum_matches(actual, expected)
+  return actual:lower() == expected:lower()
+end
+
 --- Archive extension for the platform.
 local function archive_ext(platform)
   if platform:find("windows") then return ".zip" end
@@ -141,7 +154,7 @@ local function verify_checksum(archive_path, platform, version)
     vim.notify("[Poste] No SHA256 tool found — skipped checksum verification", vim.log.levels.WARN)
     return true
   end
-  return actual == expected
+  return M.checksum_matches(actual, expected)
 end
 
 --- Download and install the poste binary.

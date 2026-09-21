@@ -154,3 +154,34 @@ describe("poste-redis install curl_argv", function()
     assert.equals("u", b[7])
   end)
 end)
+
+describe("poste-redis install checksum_matches", function()
+  -- The release asset holds sha256sum's lowercase hex; certutil -hashfile
+  -- prints the same digest uppercase, which is the only hasher on a Windows
+  -- box without Git in PATH.
+  local lower = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+  local upper = lower:upper()
+
+  it("accepts the uppercase spelling certutil prints", function()
+    assert.is_true(install.checksum_matches(upper, lower))
+  end)
+
+  it("accepts two lowercase digests, the sha256sum case", function()
+    assert.is_true(install.checksum_matches(lower, lower))
+  end)
+
+  it("rejects a digest that differs in one nibble", function()
+    local tampered = lower:sub(1, 63) .. (lower:sub(64) == "8" and "9" or "8")
+    assert.is_false(install.checksum_matches(tampered, lower))
+    assert.is_false(install.checksum_matches(lower, tampered))
+  end)
+
+  it("rejects a different digest of the same length", function()
+    -- Guards the fix against a compare loose enough to satisfy length alone.
+    assert.is_false(install.checksum_matches(string.rep("0", 64), lower))
+  end)
+
+  it("rejects a truncated digest", function()
+    assert.is_false(install.checksum_matches(upper:sub(1, 63), lower))
+  end)
+end)
