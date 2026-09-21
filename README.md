@@ -22,7 +22,9 @@ path, a local dev build or `PATH`, and only downloaded from poste.nvim releases
 on first setup when none of those exists — point `vim.g.poste_binary` at your
 own build to skip the download. `:checkhealth poste-redis` and `:PosteRedisInfo`
 print which of those candidates won, since the install path outranks `PATH` and
-a stray download would otherwise mask your own build silently.
+a stray download would otherwise mask your own build silently. The download is
+bounded (10s to connect, 180s for the archive), so a network that black-holes
+it reports a failed install instead of freezing startup.
 
 Connections live in the project `connections.toml`:
 
