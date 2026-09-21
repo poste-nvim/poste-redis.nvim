@@ -22,8 +22,18 @@ if vim.g.poste_binary == nil then
   else
     local dummy = vim.fn.tempname()
     vim.fn.writefile({ "# dummy poste binary for tests" }, dummy)
+    -- find_poste_binary requires the exec bit, so the dummy must carry one.
+    local uv = vim.uv or vim.loop
+    uv.fs_chmod(dummy, 493) -- 0o755
     vim.g.poste_binary = dummy
   end
+end
+
+-- Export the resolved path for the specs plenary runs in a *child* nvim: that
+-- process starts without `-u`, so it never evaluates this file and would fall
+-- back to "no binary at all"; the environment is the one thing it inherits.
+if vim.env.POSTE_BINARY == nil then
+  vim.env.POSTE_BINARY = vim.g.poste_binary
 end
 
 -- rtp alone is not enough for require(): Neovim only extends package.path

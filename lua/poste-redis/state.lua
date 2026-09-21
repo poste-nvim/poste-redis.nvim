@@ -27,12 +27,33 @@ M.config = {
 
 M.current_env = "dev"
 
+--- Locate the `poste` binary. Same order as poste-db.nvim's copy of this
+--- lookup: `vim.g.poste_binary`, then `$POSTE_BINARY`, then the configured
+--- install path, then a dev build next to the plugin or in the CWD, then
+--- `$PATH`.
+---
+--- The environment override exists because a config variable only reaches the
+--- process that loaded the config: CI jobs and the busted child processes
+--- plenary spawns for each spec file start without it, while the environment is
+--- inherited.
+--- @return string|nil absolute path, or nil when no usable binary was found
 function M.find_poste_binary()
+  -- Readable is not enough: a downloaded/copied file without the exec bit (or
+  -- a test dummy) would be picked over a working PATH entry and then fail at
+  -- spawn with an opaque error.
+  local function usable(p)
+    return p ~= nil and p ~= "" and vim.fn.filereadable(p) == 1 and vim.fn.executable(p) == 1
+  end
+  -- An in-memory config value wins over the environment: the user set it for
+  -- this session, while the variable may point at a build for other tooling.
   local g_val = vim.g.poste_binary
-  if g_val and g_val ~= "" and vim.fn.filereadable(g_val) == 1 then
+  if usable(g_val) then
     return vim.fn.fnamemodify(g_val, ":p")
   end
-  if M.config.poste_binary ~= "" and vim.fn.filereadable(M.config.poste_binary) == 1 then
+  if usable(vim.env.POSTE_BINARY) then
+    return vim.fn.fnamemodify(vim.env.POSTE_BINARY, ":p")
+  end
+  if M.config.poste_binary ~= "" and usable(M.config.poste_binary) then
     return vim.fn.fnamemodify(M.config.poste_binary, ":p")
   end
   local paths = {}
@@ -51,7 +72,7 @@ function M.find_poste_binary()
     end
   end
   for _, p in ipairs(paths) do
-    if vim.fn.filereadable(p) == 1 then return vim.fn.fnamemodify(p, ":p") end
+    if usable(p) then return vim.fn.fnamemodify(p, ":p") end
   end
   local path = vim.fn.exepath("poste")
   return path ~= "" and path or nil
