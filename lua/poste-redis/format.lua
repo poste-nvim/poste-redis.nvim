@@ -264,7 +264,12 @@ function M.status_summary(event)
   if status == "error" or (event and event.error) then return "✘ " .. lat end
   local v = event and event.value
   if v and v.type == "string" and type(v.value) == "string" then
-    status = "len " .. #v.value
+    -- `len` is the reply's real size and `value` is what the binary was
+    -- willing to print (--max-bytes): reporting `#v.value` called the cap
+    -- the size, so a 50 MB string read "len 65536" and looked complete.
+    local shown = #v.value
+    local total = tonumber(v.len) or shown
+    status = total > shown and ("len " .. total .. ", truncated") or ("len " .. shown)
   end
   if status == "" then return lat end
   return lat ~= "" and (lat .. " · " .. status) or status

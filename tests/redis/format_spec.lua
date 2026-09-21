@@ -235,6 +235,12 @@ describe("poste-redis format", function()
       status = "error", latency_ms = 1, error = "WRONGTYPE",
       value = { type = "string", value = "x" },
     }))
+    -- a reply the binary cut (--max-bytes): `len` is the real size, so the
+    -- winbar must not report the cap as the value's length
+    assert.equals("9 ms · len 50000000, truncated", format.status_summary({
+      status = ("x"):rep(64), latency_ms = 9,
+      value = { type = "string", value = ("x"):rep(64), len = 50000000, truncated = true },
+    }))
   end)
 
   it("flags dangerous commands", function()
