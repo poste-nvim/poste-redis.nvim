@@ -16,7 +16,8 @@ With lazy.nvim:
 ```
 
 The plugin shells out to the `poste` binary: a usable one (readable **and**
-executable) is resolved from `vim.g.poste_binary`, `$POSTE_BINARY`, the install
+executable, and on Windows also matched as `<candidate>.exe`) is resolved from
+`vim.g.poste_binary`, `$POSTE_BINARY`, the install
 path, a local dev build or `PATH`, and only downloaded from poste.nvim releases
 on first setup when none of those exists — point `vim.g.poste_binary` at your
 own build to skip the download. `:checkhealth poste-redis` and `:PosteRedisInfo`
