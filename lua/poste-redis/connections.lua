@@ -1,7 +1,6 @@
 --- Redis connection management: parse `connections.toml` (redis 段), resolve
 --- to a redis:// URL. The binary never reads config files — Lua resolves and
 --- passes the URL (poste-redis EXECUTION-PLAN §5).
-local state = require("poste-redis.state")
 local redis_state = require("poste-redis.state")
 local util = require("poste-redis.util")
 
@@ -152,7 +151,7 @@ local function load_env_json_vars(search_dir)
   local ok2, parsed = pcall(vim.json.decode, table.concat(data, "\n"))
   if not ok2 or type(parsed) ~= "table" then return {} end
   local envs = parsed.envs or parsed
-  local section = envs[state.current_env or "dev"]
+  local section = envs[redis_state.current_env or "dev"]
   if type(section) ~= "table" then section = envs end
   if type(section) ~= "table" then return {} end
   return scalar_env_vars(section)
