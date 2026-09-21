@@ -27,6 +27,38 @@ M.config = {
 
 M.current_env = "dev"
 
+--- Whether this is Windows, where the executable found by the installer or by
+--- cargo is always `poste.exe` and the bare name cannot be run. Derived the
+--- same way as `install_binary.detect_platform()` (which is what decides the
+--- written filename) so the two cannot disagree. A field, not a captured
+--- local, so a spec can exercise the Windows branch off Windows. Same rule as
+--- poste-db.nvim's copy.
+M.is_windows = ((vim.loop.os_uname().sysname or ""):find("Windows", 1, true) ~= nil)
+
+--- Resolve one candidate to the path that actually runs.
+--- @param p string|nil
+--- @return string|nil runnable path, nil when no form of it is usable
+local function resolve_candidate(p)
+  if p == nil or p == "" then return nil end
+  -- Readable is not enough: a downloaded/copied file without the exec bit (or
+  -- a test dummy) would be picked over a working PATH entry and then fail at
+  -- spawn with an opaque error.
+  local function usable(q)
+    return vim.fn.filereadable(q) == 1 and vim.fn.executable(q) == 1
+  end
+  if usable(p) then return p end
+  -- The candidates are all extension-less while on Windows that is one name
+  -- away from the `poste.exe` the installer writes and cargo builds: matching
+  -- only the bare name made this lookup miss the file startup had just
+  -- downloaded, so it re-downloaded at every launch and checkhealth saw no
+  -- binary. Either spelling also forgives a configured path without `.exe`.
+  if M.is_windows then
+    local exe = p .. ".exe"
+    if usable(exe) then return exe end
+  end
+  return nil
+end
+
 --- Locate the `poste` binary. Same order as poste-db.nvim's copy of this
 --- lookup: `vim.g.poste_binary`, then `$POSTE_BINARY`, then the configured
 --- install path, then a dev build next to the plugin or in the CWD, then
@@ -39,30 +71,27 @@ M.current_env = "dev"
 ---
 --- This is the family's binary contract (see `poste.nvim/docs/schema.md`, Global
 --- conventions): a candidate is usable only when it is both readable and
---- executable, and `install_binary.ensure()` asks this function instead of
---- repeating the walk -- a second copy there had already drifted once.
+--- executable, on Windows a candidate name also matches `<name>.exe`, and
+--- `install_binary.ensure()` asks this function instead of repeating the walk
+--- -- a second copy there had already drifted once.
 --- @return string|nil absolute path, or nil when no usable binary was found
 --- @return string|nil which candidate answered, for `:PosteRedisInfo` and
 ---   checkhealth: five sources can win, and "why is my build not being used"
 ---   is only answerable if the winner is named.
 function M.find_poste_binary()
-  -- Readable is not enough: a downloaded/copied file without the exec bit (or
-  -- a test dummy) would be picked over a working PATH entry and then fail at
-  -- spawn with an opaque error.
-  local function usable(p)
-    return p ~= nil and p ~= "" and vim.fn.filereadable(p) == 1 and vim.fn.executable(p) == 1
-  end
   -- An in-memory config value wins over the environment: the user set it for
   -- this session, while the variable may point at a build for other tooling.
-  local g_val = vim.g.poste_binary
-  if usable(g_val) then
-    return vim.fn.fnamemodify(g_val, ":p"), "g:poste_binary"
+  local run = resolve_candidate(vim.g.poste_binary)
+  if run then
+    return vim.fn.fnamemodify(run, ":p"), "g:poste_binary"
   end
-  if usable(vim.env.POSTE_BINARY) then
-    return vim.fn.fnamemodify(vim.env.POSTE_BINARY, ":p"), "$POSTE_BINARY"
+  run = resolve_candidate(vim.env.POSTE_BINARY)
+  if run then
+    return vim.fn.fnamemodify(run, ":p"), "$POSTE_BINARY"
   end
-  if M.config.poste_binary ~= "" and usable(M.config.poste_binary) then
-    return vim.fn.fnamemodify(M.config.poste_binary, ":p"), "installed release"
+  run = resolve_candidate(M.config.poste_binary)
+  if run then
+    return vim.fn.fnamemodify(run, ":p"), "installed release"
   end
   local paths = {}
   local cwd = vim.fn.getcwd()
@@ -80,8 +109,9 @@ function M.find_poste_binary()
     end
   end
   for _, cand in ipairs(paths) do
-    if usable(cand[1]) then
-      return vim.fn.fnamemodify(cand[1], ":p"), cand[2]
+    run = resolve_candidate(cand[1])
+    if run then
+      return vim.fn.fnamemodify(run, ":p"), cand[2]
     end
   end
   local path = vim.fn.exepath("poste")
