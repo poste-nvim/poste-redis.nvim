@@ -15,8 +15,11 @@ With lazy.nvim:
 }
 ```
 
-The plugin shells out to the `poste` binary (a release binary is downloaded on
-first setup; point `vim.g.poste_binary` at a local build to skip that).
+The plugin shells out to the `poste` binary: a usable one (readable **and**
+executable) is resolved from `vim.g.poste_binary`, `$POSTE_BINARY`, the install
+path, a local dev build or `PATH`, and only downloaded from poste.nvim releases
+on first setup when none of those exists — point `vim.g.poste_binary` at your
+own build to skip the download.
 
 Connections live in the project `connections.toml`:
 
