@@ -19,7 +19,9 @@ The plugin shells out to the `poste` binary: a usable one (readable **and**
 executable) is resolved from `vim.g.poste_binary`, `$POSTE_BINARY`, the install
 path, a local dev build or `PATH`, and only downloaded from poste.nvim releases
 on first setup when none of those exists — point `vim.g.poste_binary` at your
-own build to skip the download.
+own build to skip the download. `:checkhealth poste-redis` and `:PosteRedisInfo`
+print which of those candidates won, since the install path outranks `PATH` and
+a stray download would otherwise mask your own build silently.
 
 Connections live in the project `connections.toml`:
 
