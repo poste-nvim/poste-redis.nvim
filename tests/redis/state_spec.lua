@@ -15,14 +15,16 @@ describe("poste-redis.state binary resolution", function()
     return p
   end
 
-  local saved_g, saved_env, saved_cfg
+  local saved_g, saved_env, saved_cfg, saved_path
   before_each(function()
     saved_g, saved_env, saved_cfg = vim.g.poste_binary, vim.env.POSTE_BINARY, state.config.poste_binary
+    saved_path = vim.env.PATH
   end)
   after_each(function()
     if saved_g == nil then vim.cmd("unlet! g:poste_binary") else vim.g.poste_binary = saved_g end
     vim.env.POSTE_BINARY = saved_env
     state.config.poste_binary = saved_cfg
+    vim.env.PATH = saved_path
     for _, p in ipairs(files) do vim.fn.delete(p) end
     files = {}
   end)
@@ -59,5 +61,79 @@ describe("poste-redis.state binary resolution", function()
     vim.env.POSTE_BINARY = stub_binary(tonumber("644", 8))
     -- Must not return the inert env path: either a PATH `poste` or nothing.
     assert.is_not.equal(vim.fn.fnamemodify(vim.env.POSTE_BINARY, ":p"), state.find_poste_binary())
+  end)
+
+  -- The second return is what :PosteRedisInfo and checkhealth print. Five
+  -- candidates can win and the installed release outranks $PATH, so "why is my
+  -- own build not being used" has no answer without the name.
+  it("names the candidate that answered", function()
+    -- The install path is pinned to a missing file first: a release downloaded
+    -- into the test XDG dir by an earlier run would otherwise outrank the
+    -- candidates asserted below.
+    state.config.poste_binary = vim.fn.tempname() .. "-missing"
+    vim.g.poste_binary = stub_binary(tonumber("755", 8))
+    local g_only = { state.find_poste_binary() }
+    assert.equals("g:poste_binary", g_only[2])
+    vim.cmd("unlet! g:poste_binary")
+    vim.env.POSTE_BINARY = stub_binary(tonumber("755", 8))
+    assert.equals("$POSTE_BINARY", ({ state.find_poste_binary() })[2])
+    vim.env.POSTE_BINARY = nil
+    local exe = stub_binary(tonumber("755", 8))
+    state.config.poste_binary = exe
+    local found = { state.find_poste_binary() }
+    assert.equals("installed release", found[2])
+    assert.equals(vim.fn.fnamemodify(exe, ":p"), found[1])
+  end)
+
+  it("names $PATH when the binary comes from there", function()
+    vim.cmd("unlet! g:poste_binary")
+    vim.env.POSTE_BINARY = nil
+    state.config.poste_binary = vim.fn.tempname() .. "-missing"
+    local dir = vim.fn.tempname()
+    assert.truthy(vim.fn.mkdir(dir, "p"))
+    files[#files + 1] = dir
+    local p = dir .. "/poste"
+    vim.fn.writefile({ "#!/bin/sh", "echo poste 1.0.0" }, p)
+    assert.truthy(uv.fs_chmod(p, tonumber("755", 8)))
+    files[#files + 1] = p
+    vim.env.PATH = dir
+    local found = { state.find_poste_binary() }
+    assert.equals("$PATH", found[2])
+    assert.equals("poste", vim.fn.fnamemodify(found[1], ":t"))
+  end)
+
+  it("returns no source with no path when nothing is usable", function()
+    vim.cmd("unlet! g:poste_binary")
+    vim.env.POSTE_BINARY = nil
+    state.config.poste_binary = vim.fn.tempname() .. "-missing"
+    -- No dev build in this repo's CWD or next to the plugin, and nothing on PATH.
+    vim.env.PATH = vim.fn.tempname()
+    local path, source = state.find_poste_binary()
+    assert.is_nil(path)
+    assert.is_nil(source)
+  end)
+end)
+
+describe("poste-redis.state poste_version", function()
+  local dirs = {}
+  after_each(function()
+    for _, d in ipairs(dirs) do vim.fn.delete(d, "rf") end
+    dirs = {}
+  end)
+
+  it("answers nil when there is no binary to ask", function()
+    assert.is_nil(state.poste_version(vim.fn.tempname() .. "-missing"))
+  end)
+
+  it("reads the version without a shell, from a path that would break one", function()
+    -- The path has a space and a quote: an io.popen interpolation would run a
+    -- different command, vim.system cannot.
+    local dir = vim.fn.tempname() .. '/a b"c'
+    assert.equals(1, vim.fn.mkdir(dir, "p"))
+    local p = dir .. "/poste"
+    vim.fn.writefile({ "#!/bin/sh", "echo 'poste 9.9.9 (test)'" }, p)
+    assert.truthy(uv.fs_chmod(p, tonumber("755", 8)))
+    dirs[#dirs + 1] = dir
+    assert.equals("poste 9.9.9 (test)", state.poste_version(p))
   end)
 end)

@@ -20,27 +20,28 @@ function M.check()
   -- Poste binary + redis-exec subcommand (vendored state, family
   -- dissolution: the binary is REQUIRED here — redis-exec is the transport)
   local state = require("poste-redis.state")
-  local binary = state.find_poste_binary()
+  local binary, source = state.find_poste_binary()
   if binary then
-    ok("poste binary: " .. binary)
-    local handle = io.popen('"' .. binary .. '" --version 2>/dev/null')
-    if handle then
-      local version = handle:read("*a"):gsub("%s+$", "")
-      handle:close()
-      if version ~= "" then ok("poste version: " .. version) end
+    -- The source is the actionable half: five candidates can win, and the
+    -- installed release outranks a $PATH build the user expects to be used.
+    ok("poste binary: " .. binary .. " (from " .. source .. ")")
+    local version = state.poste_version(binary)
+    if version then ok("poste version: " .. version) end
+    -- Also shell-free, and it drops the `2>/dev/null` that only means something
+    -- to a POSIX shell -- under Windows' cmd.exe it would have created a file.
+    local help_ok, help = pcall(vim.system, { binary, "--help" }, { text = true, timeout = 5000 })
+    local help_text = ""
+    if help_ok then
+      local result = help:wait(5000)
+      help_text = result and (result.stdout or "") or ""
     end
-    local has_redis_exec = vim.fn.systemlist(vim.fn.shellescape(binary) .. " --help 2>/dev/null") or {}
-    local found = false
-    for _, line in ipairs(has_redis_exec) do
-      if line:match("redis%-exec") then found = true break end
-    end
-    if found then
+    if help_text:match("redis%-exec") then
       ok("redis-exec subcommand available")
     else
       warn("redis-exec subcommand missing — rebuild poste.nvim: cargo build --release")
     end
   else
-    error("poste binary not found — build poste.nvim (cargo build --release) or set vim.g.poste_binary")
+    error("poste binary not found — build poste.nvim (cargo build --release), or set vim.g.poste_binary / $POSTE_BINARY")
   end
 
   -- redis connections section

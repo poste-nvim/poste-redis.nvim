@@ -76,13 +76,13 @@ function M.setup()
     local redis_state = require("poste-redis.state")
     local connections = require("poste-redis.connections")
     local util = require("poste-redis.util")
-    local binary = state.find_poste_binary()
+    local binary, source = state.find_poste_binary()
     local buf_name = vim.api.nvim_buf_get_name(0)
     local search_dir = buf_name ~= "" and vim.fn.fnamemodify(buf_name, ":h") or vim.fn.getcwd()
     local config_path = connections.find_connections_toml(search_dir)
     local parts = {
       "─",
-      "poste_binary: " .. (binary or "not found"),
+      "poste_binary: " .. (binary and (binary .. "  (from " .. source .. ")") or "not found"),
       "connection:  " .. tostring(redis_state.context.connection or "(none)"),
       "url:         " .. (redis_state.current_url and util.redact_url(redis_state.current_url) or "(none)"),
       "config:      " .. (config_path or ("not found (searched from " .. search_dir .. ")")),

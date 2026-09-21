@@ -42,6 +42,9 @@ M.current_env = "dev"
 --- executable, and `install_binary.ensure()` asks this function instead of
 --- repeating the walk -- a second copy there had already drifted once.
 --- @return string|nil absolute path, or nil when no usable binary was found
+--- @return string|nil which candidate answered, for `:PosteRedisInfo` and
+---   checkhealth: five sources can win, and "why is my build not being used"
+---   is only answerable if the winner is named.
 function M.find_poste_binary()
   -- Readable is not enough: a downloaded/copied file without the exec bit (or
   -- a test dummy) would be picked over a working PATH entry and then fail at
@@ -53,34 +56,54 @@ function M.find_poste_binary()
   -- this session, while the variable may point at a build for other tooling.
   local g_val = vim.g.poste_binary
   if usable(g_val) then
-    return vim.fn.fnamemodify(g_val, ":p")
+    return vim.fn.fnamemodify(g_val, ":p"), "g:poste_binary"
   end
   if usable(vim.env.POSTE_BINARY) then
-    return vim.fn.fnamemodify(vim.env.POSTE_BINARY, ":p")
+    return vim.fn.fnamemodify(vim.env.POSTE_BINARY, ":p"), "$POSTE_BINARY"
   end
   if M.config.poste_binary ~= "" and usable(M.config.poste_binary) then
-    return vim.fn.fnamemodify(M.config.poste_binary, ":p")
+    return vim.fn.fnamemodify(M.config.poste_binary, ":p"), "installed release"
   end
   local paths = {}
   local cwd = vim.fn.getcwd()
   if cwd ~= "" then
-    table.insert(paths, cwd .. "/target/debug/poste")
-    table.insert(paths, cwd .. "/target/release/poste")
+    table.insert(paths, { cwd .. "/target/debug/poste", "dev build in cwd" })
+    table.insert(paths, { cwd .. "/target/release/poste", "dev build in cwd" })
   end
   local src = debug.getinfo(M.find_poste_binary, "S").source
   if src:sub(1, 1) == "@" then
     local dir = src:sub(2):match("^(.+/)lua/poste%-redis/") or ""
     if dir ~= "" then
-      table.insert(paths, dir .. "target/debug/poste")
-      table.insert(paths, dir .. "target/release/poste")
-      table.insert(paths, dir .. "bin/poste")
+      table.insert(paths, { dir .. "target/debug/poste", "dev build beside plugin" })
+      table.insert(paths, { dir .. "target/release/poste", "dev build beside plugin" })
+      table.insert(paths, { dir .. "bin/poste", "dev build beside plugin" })
     end
   end
-  for _, p in ipairs(paths) do
-    if usable(p) then return vim.fn.fnamemodify(p, ":p") end
+  for _, cand in ipairs(paths) do
+    if usable(cand[1]) then
+      return vim.fn.fnamemodify(cand[1], ":p"), cand[2]
+    end
   end
   local path = vim.fn.exepath("poste")
-  return path ~= "" and path or nil
+  if path ~= "" then return path, "$PATH" end
+  return nil
+end
+
+--- `poste --version`, spawned without a shell: the binary path is user config
+--- (`vim.g.poste_binary` / `$POSTE_BINARY`), and interpolating it into io.popen
+--- would let a path with shell metacharacters run arbitrary commands. Same
+--- rule as poste-db.nvim's copy.
+--- @param binary string|nil defaults to find_poste_binary()
+--- @return string|nil version text, or nil when the probe failed
+function M.poste_version(binary)
+  binary = binary or M.find_poste_binary()
+  if not binary then return nil end
+  local ok, obj = pcall(vim.system, { binary, "--version" }, { text = true, timeout = 5000 })
+  if not ok or not obj then return nil end
+  local result = obj:wait(5000)
+  if not result or result.code ~= 0 or type(result.stdout) ~= "string" then return nil end
+  local version = (result.stdout:gsub("%s+$", ""))
+  return version ~= "" and version or nil
 end
 
 function M.apply_highlight_overrides(group_names)
