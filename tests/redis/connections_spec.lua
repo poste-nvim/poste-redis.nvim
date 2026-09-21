@@ -454,6 +454,56 @@ port = 6379
 end)
 
 
+describe("poste-redis env.json var table", function()
+  local tmpdir
+  local repo_cwd = vim.fn.getcwd()
+
+  before_each(function()
+    tmpdir = vim.fn.tempname()
+    vim.fn.mkdir(tmpdir, "p")
+    connections._test.reset_caches()
+  end)
+
+  after_each(function()
+    vim.api.nvim_set_current_dir(repo_cwd)
+    vim.env.POSTE_TEST_HOST = nil
+    vim.env.POSTE_TEST_PORT = nil
+    vim.env.POSTE_TEST_DEBUG = nil
+    vim.env.POSTE_TEST_LABELS = nil
+    vim.env.POSTE_TEST_FLAT = nil
+    pcall(vim.fn.delete, tmpdir, "rf")
+  end)
+
+  local function write_env_json(content)
+    vim.fn.writefile({ content }, tmpdir .. "/env.json")
+  end
+
+  it("drops structure instead of aborting substitution", function()
+    write_env_json('{"dev": {"POSTE_TEST_HOST": "h1", "POSTE_TEST_LABELS": {"team": "db"},'
+      .. ' "POSTE_TEST_NOTHING": null}}')
+    local vars = connections.get_env_vars(tmpdir)
+    assert.is_nil(vars.POSTE_TEST_LABELS)
+    assert.is_nil(vars.POSTE_TEST_NOTHING)
+    -- A table reaching gsub's replacement raises
+    -- "invalid replacement value (a table)", which used to take the whole
+    -- config resolution down with it.
+    assert.equals("h1/{{POSTE_TEST_LABELS}}",
+      connections.substitute_vars("{{POSTE_TEST_HOST}}/{{POSTE_TEST_LABELS}}", vars))
+  end)
+
+  it("keeps env.json numbers and booleans as usable values", function()
+    write_env_json('{"dev": {"POSTE_TEST_PORT": 5432, "POSTE_TEST_DEBUG": true}}')
+    local vars = connections.get_env_vars(tmpdir)
+    assert.equals("5432", vars.POSTE_TEST_PORT)
+    assert.equals("true", vars.POSTE_TEST_DEBUG)
+  end)
+
+  it("reads a flat env.json as vars for every environment", function()
+    write_env_json('{"POSTE_TEST_FLAT": "flat-value"}')
+    assert.equals("flat-value", connections.get_env_vars(tmpdir).POSTE_TEST_FLAT)
+  end)
+end)
+
 describe("poste-redis context statusline", function()
   local statusline = require("poste-redis.statusline")
 

@@ -121,7 +121,27 @@ local function load_dotenv(search_dir)
   return vars
 end
 
---- Load env.json vars for the current env (matches Rust --env flow).
+--- Keep only scalar entries of an env section, as strings — the same rule as
+--- the CLI's `scalar_vars` and poste-db's reader of the same name. A nested
+--- object is structure, not a variable, and one reaching `gsub`'s replacement
+--- raises "invalid replacement value (a table)" mid-resolution.
+--- @param section table
+--- @return table<string,string>
+local function scalar_env_vars(section)
+  local result = {}
+  for k, v in pairs(section) do
+    local t = type(v)
+    if t == "string" then
+      result[k] = v
+    elseif t == "number" or t == "boolean" then
+      result[k] = tostring(v)
+    end
+  end
+  return result
+end
+
+--- Load env.json vars for the current env (matches Rust --env flow, incl. the
+--- flat `{"KEY": "v"}` form the CLI resolves for every environment).
 --- @param search_dir string
 --- @return table<string,string>
 local function load_env_json_vars(search_dir)
@@ -132,11 +152,10 @@ local function load_env_json_vars(search_dir)
   local ok2, parsed = pcall(vim.json.decode, table.concat(data, "\n"))
   if not ok2 or type(parsed) ~= "table" then return {} end
   local envs = parsed.envs or parsed
-  local vars = envs[state.current_env or "dev"]
-  if type(vars) ~= "table" then return {} end
-  local result = {}
-  for k, v in pairs(vars) do result[k] = v end
-  return result
+  local section = envs[state.current_env or "dev"]
+  if type(section) ~= "table" then section = envs end
+  if type(section) ~= "table" then return {} end
+  return scalar_env_vars(section)
 end
 
 --- Merge all env sources. Precedence: OS env > .env > env.json.
