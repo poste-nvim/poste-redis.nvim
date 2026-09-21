@@ -36,6 +36,18 @@ local function binary_path()
   return BIN_DIR .. "/poste"
 end
 
+--- Render a path as a PowerShell string literal.
+--- `vim.fn.system` in list form still hands everything after `-Command` to
+--- PowerShell as a *command line*, so a `stdpath("data")` containing a space
+--- (`C:\Users\Jane Smith\…`) split into two arguments there and the extract
+--- step failed. Single quotes suppress `$`/backtick expansion; the only
+--- escape inside them is '' for a literal '.
+--- @param path string
+--- @return string the path as a PowerShell single-quoted literal
+function M.ps_literal(path)
+  return "'" .. (path:gsub("'", "''")) .. "'"
+end
+
 --- Archive extension for the platform.
 local function archive_ext(platform)
   if platform:find("windows") then return ".zip" end
@@ -145,9 +157,8 @@ function M.download(version)
 
   if ext == ".zip" then
     vim.fn.system({ "powershell", "-Command",
-      "Expand-Archive", "-Force",
-      "-Path", tmp_archive,
-      "-DestinationPath", BIN_DIR
+      "Expand-Archive -Force -Path " .. M.ps_literal(tmp_archive)
+      .. " -DestinationPath " .. M.ps_literal(BIN_DIR)
     })
   else
     vim.fn.system({ "tar", "xzf", tmp_archive, "-C", BIN_DIR })
@@ -160,8 +171,8 @@ function M.download(version)
     -- tar/zip may create a subdirectory; flatten if needed
     if vim.fn.filereadable(final_path) ~= 1 then
       vim.fn.system({ "powershell", "-Command",
-        "Get-ChildItem -Recurse -Filter poste.exe " ..
-        "-Path " .. BIN_DIR .. " | Move-Item -Destination " .. BIN_DIR .. "/poste.exe -Force"
+        "Get-ChildItem -Recurse -Filter poste.exe -Path " .. M.ps_literal(BIN_DIR)
+        .. " | Move-Item -Destination " .. M.ps_literal(final_path) .. " -Force"
       })
     end
   else

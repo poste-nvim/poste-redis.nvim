@@ -87,3 +87,23 @@ describe("poste-redis install ensure", function()
     assert.equals(1, download_calls)
   end)
 end)
+
+describe("poste-redis install ps_literal", function()
+  -- Everything after `powershell -Command` is re-parsed as a PowerShell command
+  -- line even when it arrives through vim.fn.system's list form, so the paths
+  -- the installer builds from stdpath("data") must reach it as literals: a
+  -- username with a space or an apostrophe is ordinary on Windows.
+  it("keeps a path with a space in one piece", function()
+    assert.equals("'C:/Users/Jane Smith/nvim-data/poste/bin'",
+      install.ps_literal("C:/Users/Jane Smith/nvim-data/poste/bin"))
+  end)
+
+  it("escapes an apostrophe by doubling it, not by ending the literal", function()
+    assert.equals("'C:/Users/O''Brien/poste/bin'",
+      install.ps_literal("C:/Users/O'Brien/poste/bin"))
+  end)
+
+  it("leaves expansion metacharacters inside the literal", function()
+    assert.equals("'/tmp/x$(touch pwned)/bin'", install.ps_literal("/tmp/x$(touch pwned)/bin"))
+  end)
+end)
