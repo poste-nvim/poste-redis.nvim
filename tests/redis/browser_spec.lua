@@ -1706,6 +1706,34 @@ describe("poste-redis browser render cap", function()
     tree.last_truncated = 0
   end)
 
+  -- render_max_lines is a TOTAL row cap (the freeze it guards against comes
+  -- from the size of the buffer rewrite, not from one branch's share of it),
+  -- so the remaining budget has to survive the recursion: a child call that
+  -- only decrements its own copy restarts every sibling branch at the full
+  -- number.
+  it("spends the row budget across sibling branches, not per branch", function()
+    local db = tree.make_db_node({ db = 0 }, "c")
+    db.expanded = true
+    db.children = {}
+    for gi = 1, 2 do
+      local grp = tree.make_group_node("g" .. gi, "c", 0)
+      grp.parent = db
+      grp.expanded = true
+      grp.children = {}
+      for i = 1, 10 do
+        local k = tree.make_key_node("g" .. gi .. ":k" .. i, "c", 0)
+        k.parent = grp
+        grp.children[i] = k
+      end
+      db.children[gi] = grp
+    end
+    -- db + g1 + 3 keys fills the 5 rows; g2 and both key tails are skipped
+    local lines, _, _, skipped, budget_skipped = tree.flatten_tree({ db }, 0, nil, 5)
+    assert.equals(5, #lines)
+    assert.is_true(skipped > 0)
+    assert.equals(skipped, budget_skipped)
+  end)
+
   it("append_children refuses to append past the cap", function()
     local orig = config.config.render_max_lines
     config.config.render_max_lines = 10

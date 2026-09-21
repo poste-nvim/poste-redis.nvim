@@ -187,11 +187,13 @@ end
 ---   table multi-select yet; kept for tree.render parity)
 --- @param budget number|nil remaining total row budget (nil = unlimited,
 ---   used by the incremental-append delta path)
---- @return string[] lines, table[] node_map, number[] icon_cols, number skipped
+--- @return string[] lines, table[] node_map, number[] icon_cols, number skipped,
+---   number budget_skipped
 ---   icon_cols[i] is the 0-based byte column of the ICON start for line i
 ---   (right after any marker glyph), computed here so apply_highlights never
 ---   re-reads the buffer. skipped = rows not rendered by per-node or total
----   caps (the scans stop paging once this is non-zero).
+---   caps (the scans stop paging once this is non-zero). budget_skipped = the
+---   subset cut by the TOTAL cap: only that one appends a trailing notice row.
 --- @param ctx string|nil display-context prefix: when a node's children are
 ---   rendered this becomes the group's absolute prefix, so keys (and folded
 ---   chain prefixes) display relative to it in nested view. "" = the whole key.
@@ -238,6 +240,12 @@ function M.flatten_tree(nodes, depth, multi_select, budget, ctx)
       kids, child_depth, multi_select, budget, child_ctx)
     skipped = skipped + child_skipped
     budget_skipped = budget_skipped + child_budget
+    -- The recursion gets a COPY of the remaining budget, so what the subtree
+    -- spent has to come back up: #child_lines is exactly the rows it consumed.
+    -- Without this every sibling branch restarts at the full number, which made
+    -- render_max_lines a per-branch cap while the freeze it guards against
+    -- scales with the total rewrite.
+    if budget then budget = budget - #child_lines end
     node._desc_lines = #child_lines
     for _, cl in ipairs(child_lines) do table.insert(lines, cl) end
     for _, cn in ipairs(child_map) do table.insert(node_map, cn) end
