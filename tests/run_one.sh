@@ -17,9 +17,16 @@ fi
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/poste-redis-test-cache}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-/tmp/poste-redis-test-data}"
 export XDG_STATE_HOME="${XDG_STATE_HOME:-/tmp/poste-redis-test-state}"
+# `busted.run` directly instead of :PlenaryBustedFile: that command takes one
+# argument, so it cannot forward `minimal_init` and the spec process it spawns
+# starts with the USER's config (only `--noplugin` is added). A ColorScheme
+# autocmd from that config then fires inside a spec's stubbed window and a
+# highlight-count assertion sees an extra call — a green suite fails per file.
+# Running in this already-minimal instance makes targeted runs hermetic like
+# the gate. (`set rtp+=` above mirrors what the spawned child was given.)
 timeout "${RUN_ONE_TIMEOUT:-240}" nvim --headless \
   -u tests/minimal_init.lua \
   -c "set rtp+=$PLENARY_PATH" \
   -c "set rtp+=." \
   -c "runtime plugin/plenary.vim" \
-  -c "PlenaryBustedFile $F"
+  -c "lua require('plenary.busted').run('$F')"
