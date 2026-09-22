@@ -87,7 +87,7 @@ local function buffer_entries_cached(buf, line_1)
   if c and c.tick == tick and line_1 <= c.parsed_upto then
     return c.entries
   end
-  local entries
+  local entries, parsed_upto
   if c and c.tick == tick and line_1 > c.parsed_upto then
     -- extend: parse ONLY the extension and shift its line numbers; the
     -- prefix entries stay untouched. A continuation line at the boundary
@@ -101,10 +101,18 @@ local function buffer_entries_cached(buf, line_1)
       e.end_line = e.end_line and (e.end_line + c.parsed_upto) or e.end_line
       entries[#entries + 1] = e
     end
+    parsed_upto = line_1
   else
+    -- tick changed (or nothing cached): a FULL re-parse, but only down to the
+    -- cursor. `parsed_upto` must restart at `line_1` — keeping the old, larger
+    -- value advertised lines below the cursor as parsed when the reparse never
+    -- read them, so the next deep cursor move hit the "already parsed" fast
+    -- path and resolved its context from a truncated entry list (a USE/SELECT
+    -- below the edit line vanished from the statusline until the next edit).
     entries = parser.buffer_entries(buf, { max_line = line_1 })
+    parsed_upto = line_1
   end
-  entry_cache[buf] = { tick = tick, entries = entries, parsed_upto = math.max(line_1, c and c.parsed_upto or 0) }
+  entry_cache[buf] = { tick = tick, entries = entries, parsed_upto = parsed_upto }
   if not drop_group then
     drop_group = vim.api.nvim_create_augroup("PosteRedisCtxCache", { clear = true })
     vim.api.nvim_create_autocmd("BufDelete", {

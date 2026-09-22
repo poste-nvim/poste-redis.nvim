@@ -240,4 +240,27 @@ describe("poste-redis context file_context cache", function()
     parser.extract_entries = orig_extract
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  it("an edit near the top does not freeze the parsed range at the old depth", function()
+    -- Regression: the reparse kept `parsed_upto` at the previous (deeper)
+    -- value while its entries only reached the cursor line, so the next deep
+    -- cursor move hit the "already parsed" fast path and read the truncated
+    -- list — USE/SELECT below the edit disappeared from the statusline.
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      "GET a:1", "GET a:2", "GET a:3", "GET a:4", "GET a:5",
+      "USE prod", "SELECT 5", "GET b:1", "GET b:2", "GET b:3",
+    })
+    local deep = context.file_context(buf, 10)
+    assert.equals("prod", deep.connection)
+    assert.equals(5, deep.db)
+
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "GET edited" })
+    assert.is_nil(context.file_context(buf, 1).connection, "shallow cursor sees no USE")
+
+    local again = context.file_context(buf, 10)
+    assert.equals("prod", again.connection, "the USE below the edit must be found again")
+    assert.equals(5, again.db)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
 end)
