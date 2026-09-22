@@ -948,6 +948,27 @@ describe("poste-redis grid editing", function()
     assert.equals("HSET user:1 id:7 y", sent_cmds[#sent_cmds])
   end)
 
+  it("renames a member whose score arrived as the text inf", function()
+    -- poste.nvim sends an infinite score as `inf` (JSON has no spelling for
+    -- it), the prompt offers that text back, and the score is forwarded
+    -- verbatim — tonumber() only gates the input. A null score, which is what
+    -- used to arrive, left the row with no score cell, so the default read
+    -- "nil" and tonumber refuses it.
+    open_key_tab_conn({ type = "zset", value = { { member = "m", score = "inf" } }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    local prompts = {}
+    vim.ui.input = function(opts, cb)
+      prompts[#prompts + 1] = opts
+      cb(#prompts == 1 and "m2" or opts.default)
+    end
+    grid_edit.edit_cell(t)
+    assert.equals(2, #prompts)
+    assert.equals("inf", prompts[2].default)
+    assert.equals("ZADD user:1 inf m2", sent_cmds[#sent_cmds - 1])
+    assert.equals("ZREM user:1 m", sent_cmds[#sent_cmds])
+  end)
+
   it("add row on a set issues SADD", function()
     open_key_tab_conn({ type = "set", value = { "vim" }, len = 1 })
     vim.ui.input = function(opts, cb) cb("lua") end

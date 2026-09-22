@@ -45,6 +45,22 @@ describe("poste-redis format", function()
     assert.equals("1750000000000000", out.grid.to_display(out.grid.rows[1][3]))
   end)
 
+  it("renders a non-finite score the binary sends as text", function()
+    -- serde_json has no spelling for infinity, so poste.nvim sends the reading
+    -- Redis itself uses for such a score: `inf`. It has to reach the score
+    -- column as that text — before, an infinite score arrived as JSON null
+    -- and the panel said "(nil)" — stay right-aligned, and yank verbatim.
+    local out = lines_for({
+      type = "zset",
+      len = 1,
+      value = { { member = "m", score = "inf" } },
+    })
+    assert.same({ 1, "m", "inf" }, out.grid.rows[1])
+    assert.equals("inf", out.grid.to_display(out.grid.rows[1][3]))
+    assert.equals("inf", out.grid.to_copy(out.grid.rows[1][3]))
+    assert.same({ 3 }, out.grid.right_align)
+  end)
+
   it("renders a string reply through the type-labeled grid", function()
     local out = lines_for({ type = "string", value = "hello world" })
     assert.equals("table", out.kind)
