@@ -306,25 +306,54 @@ function M.is_dangerous(entry)
   return constants.is_dangerous_command(entry.command)
 end
 
+--- Command heads whose SECOND token is not a key name.
+---
+--- A key extracted here drives three visible things: the `gd` reveal in
+--- the browser tree, the result panel tab's `meta.key` (and the grid editors
+--- bound to it), and the winbar's best-effort `TTL <key>` probe. A false
+--- positive therefore sends a cursor, glob, channel, Lua body, subcommand
+--- word or credential to the server as if it were a key name.
+---
+--- Membership is by argument SHAPE, not by Redis command group: a head
+--- belongs here only when the command has no key or names it at another
+--- position. `HSCAN key 0`, `BLPOP key 5`, `SORT key BY …` and
+--- `XRANGE key - +` are deliberately absent — their key IS the second token.
+--- Callers pass `command_tokens` output, so the head is already unquoted and
+--- uppercased: `"scan"` cannot slip past this list (same rule as the danger
+--- blacklist in constants).
+local NOT_KEY_HEADS = {
+  -- session directives, never sent as key lookups
+  USE = true, SELECT = true,
+  -- scanning: the first argument is a cursor or a glob, not a key
+  SCAN = true, KEYS = true,
+  -- script/function: body or name comes first, keys follow a count
+  EVAL = true, EVALSHA = true, FCALL = true, FCALL_RO = true,
+  -- pubsub: channels live in their own namespace, not in the keyspace
+  SUBSCRIBE = true, UNSUBSCRIBE = true, PSUBSCRIBE = true, PUNSUBSCRIBE = true,
+  SSUBSCRIBE = true, SUNSUBSCRIBE = true, PUBLISH = true, PUBSUB = true,
+  -- streams read: the keys come after the STREAMS keyword
+  XREAD = true, XREADGROUP = true,
+  -- key-count-first: `LMPOP numkeys key …`
+  LMPOP = true, ZMPOP = true, SINTERCARD = true,
+  -- key at a LATER position: `<CMD> <subcommand> key …`
+  OBJECT = true, MEMORY = true, XGROUP = true, XINFO = true,
+  -- server administration: subcommand, section, number or path
+  CONFIG = true, CLIENT = true, COMMAND = true, ACL = true, SCRIPT = true,
+  FUNCTION = true, LATENCY = true, SLOWLOG = true, CLUSTER = true,
+  MODULE = true, INFO = true, DEBUG = true, SHUTDOWN = true,
+  -- connection handshake / server-to-server: host, port, db index, password
+  AUTH = true, HELLO = true, MIGRATE = true, SWAPDB = true, WAIT = true,
+  WAITAOF = true,
+}
+
 --- The key argument of a tokenized command (nil when the command does not
---- address a key). Shared by gd reveal, the result panel's tab binding and
---- grid editing: USE/SELECT target connections; CONFIG/CLIENT/COMMAND/ACL/
---- SCRIPT/FUNCTION/LATENCY/SLOWLOG/OBJECT/XGROUP/XINFO/MEMORY address the
---- server (or take the key at a later position — MEMORY USAGE puts it after
---- the USAGE subcommand), so revealing or editing their second token would
---- hit a word that is not a key.
+--- address a key). Shared by gd reveal, the result panel's tab binding, the
+--- history replay and grid editing.
 --- @param tokens string[]  command_tokens output (de-quoted, uppercased head)
 --- @return string|nil key
 function M.key_arg(tokens)
   if not tokens or #tokens < 2 then return nil end
-  local head = tokens[1]
-  if head == "USE" or head == "SELECT"
-      or head == "CONFIG" or head == "CLIENT" or head == "COMMAND"
-      or head == "ACL" or head == "SCRIPT" or head == "FUNCTION"
-      or head == "LATENCY" or head == "SLOWLOG" or head == "OBJECT"
-      or head == "XGROUP" or head == "XINFO" or head == "MEMORY" then
-    return nil
-  end
+  if NOT_KEY_HEADS[tokens[1]] then return nil end
   return tokens[2]
 end
 

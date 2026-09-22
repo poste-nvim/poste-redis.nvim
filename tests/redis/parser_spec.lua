@@ -213,6 +213,99 @@ describe("poste-redis parser", function()
   end)
 end)
 
+describe("poste-redis parser key_arg", function()
+  local function key_of(line)
+    local tokens = parser.command_tokens(line)
+    return parser.key_arg(tokens)
+  end
+
+  it("returns the key for commands whose second token IS the key", function()
+    assert.equals("user:1", key_of("GET user:1"))
+    assert.equals("session", key_of("HSET session user lex"))
+    assert.equals("board", key_of("ZADD board 99 alice"))
+    -- the SCAN family that leads with the key stays addressable; only the
+    -- cursor-first variants are wrong
+    assert.equals("user:1", key_of("HSCAN user:1 0 MATCH name* COUNT 10"))
+    assert.equals("user:1", key_of("SSCAN user:1 0"))
+    assert.equals("user:1", key_of("ZSCAN user:1 0"))
+    assert.equals("q", key_of("BLPOP q 5"))
+    assert.equals("s", key_of("XRANGE s - + COUNT 10"))
+    assert.equals("s", key_of("XACK s mygroup 1-1"))
+    assert.equals("a", key_of("COPY a b"))
+    assert.equals("mylist", key_of("SORT mylist BY w* DESC"))
+  end)
+
+  it("does not treat a cursor or a glob as a key", function()
+    -- SCAN's second token is a cursor and KEYS' is a pattern; both used to be
+    -- revealed as key names and probed with `TTL 0` / `TTL users:*`
+    assert.is_nil(key_of("SCAN 0 MATCH users:* COUNT 100"))
+    assert.is_nil(key_of("SCAN 123456"))
+    assert.is_nil(key_of("KEYS users:*"))
+  end)
+
+  it("does not treat a script body or function name as a key", function()
+    -- the whole Lua source ends up as the second token; revealing it points the
+    -- tree at text that is not a key, and the TTL probe sends it as one
+    assert.is_nil(key_of('EVAL "return redis.call(\'GET\', KEYS[1])" 1 user:1'))
+    assert.is_nil(key_of("EVALSHA 758b5c81f4 1 user:1"))
+    assert.is_nil(key_of("FCALL myfunc 1 user:1"))
+    assert.is_nil(key_of("FCALL_RO myfunc 1 user:1"))
+  end)
+
+  it("does not treat a pubsub channel as a key", function()
+    -- channels live in a different namespace from keys, so the tree has nothing
+    -- to reveal
+    assert.is_nil(key_of("SUBSCRIBE news"))
+    assert.is_nil(key_of("UNSUBSCRIBE news"))
+    assert.is_nil(key_of("PSUBSCRIBE news.*"))
+    assert.is_nil(key_of("PUNSUBSCRIBE news.*"))
+    assert.is_nil(key_of("SSUBSCRIBE news"))
+    assert.is_nil(key_of("SUNSUBSCRIBE news"))
+    assert.is_nil(key_of("PUBLISH news hello"))
+    assert.is_nil(key_of("PUBSUB CHANNELS"))
+  end)
+
+  it("does not treat a reader option or a key count as a key", function()
+    assert.is_nil(key_of("XREAD BLOCK 0 STREAMS s 0"))
+    assert.is_nil(key_of("XREADGROUP GROUP g c STREAMS s >"))
+    assert.is_nil(key_of("LMPOP 1 mylist LEFT"))
+    assert.is_nil(key_of("ZMPOP 1 myzset LEFT"))
+    assert.is_nil(key_of("SINTERCARD 2 a b"))
+  end)
+
+  it("does not treat server-scope, connection or admin arguments as a key", function()
+    assert.is_nil(key_of("CLUSTER KEYSLOT user:1"))
+    assert.is_nil(key_of("MODULE LOAD /etc/redis/extra.so"))
+    assert.is_nil(key_of("INFO keyspace"))
+    assert.is_nil(key_of("DEBUG SET-ACTIVE-EXPIRE 1"))
+    assert.is_nil(key_of("SWAPDB 0 1"))
+    assert.is_nil(key_of("MIGRATE host 6379 user:1 0 5000"))
+    assert.is_nil(key_of("WAIT 1 5000"))
+    assert.is_nil(key_of("WAITAOF 1 1 5000"))
+    assert.is_nil(key_of("HELLO 3"))
+    -- AUTH's second token is a username and its third a password; echoing
+    -- either into the tree or a TTL probe would leak it into a visible name
+    assert.is_nil(key_of("AUTH admin s3cret"))
+  end)
+
+  it("has no key for one-word commands and cannot be escaped by quoting", function()
+    assert.is_nil(key_of("RANDOMKEY"))
+    assert.is_nil(key_of("DBSIZE"))
+    assert.is_nil(key_of("SCAN"))
+    -- command_tokens decodes and uppercases the head, so the denylist is keyed
+    -- on the real name: `"scan"` is the same command to the server anyway
+    assert.is_nil(key_of('"scan" 0 MATCH users:*'))
+    assert.is_nil(key_of("'auth' admin s3cret"))
+    assert.is_nil(key_of('"EVAL" "return 1" 0'))
+  end)
+
+  it("tolerates missing input", function()
+    assert.is_nil(parser.key_arg(nil))
+    assert.is_nil(parser.key_arg({}))
+    assert.is_nil(parser.key_arg({ "GET" }))
+  end)
+end)
+
 describe("poste-redis parser bounded buffer_entries", function()
   it("parses only lines 1..max_line when bounded", function()
     local buf = vim.api.nvim_create_buf(false, true)

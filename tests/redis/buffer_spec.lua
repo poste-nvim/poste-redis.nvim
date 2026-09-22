@@ -158,6 +158,27 @@ describe("poste-redis result buffer", function()
     assert.equals("local", buffer._tabs()[1].meta.connection)
   end)
 
+  it("never binds a non-key command's grid tab to a key", function()
+    -- The binding is what makes a tab editable: key_context needs only a key
+    -- and the reply's type name, so `i`/`o`/`dd` on such a tab wrote to a key
+    -- named `user:*` or `0` (add_row's unnamed types take the SET branch).
+    -- Revealing the same token was the milder half.
+    buffer.render({
+      { seq = 1, command = "KEYS user:*", status = "2 elements", latency_ms = 1, db = 3,
+        value = { type = "list", value = { "user:1", "user:2" }, len = 2 } },
+      { seq = 2, command = "SCAN 0 MATCH user:*", status = "OK", latency_ms = 1, db = 3,
+        value = { type = "list", value = { "0", "user:1" }, len = 2 } },
+      { seq = 3, command = "HGETALL user:42", status = "OK", latency_ms = 1, db = 3,
+        value = { type = "hash", entries = { { "name", "Alice" } }, len = 1 } },
+    }, { render = false })
+    local tabs = buffer._tabs()
+    assert.equals("table", tabs[1].kind)
+    assert.is_nil(tabs[1].meta.key)
+    assert.is_nil(tabs[2].meta.key)
+    -- commands that DO name a key stay bound — the fix must not cost editing
+    assert.equals("user:42", tabs[3].meta.key)
+  end)
+
   it("reveal_current derives the key from a text tab's command", function()
     -- gd works from any tab kind: a GET's string reply renders as text but
     -- still names a key. The derivation must skip non-key commands.
