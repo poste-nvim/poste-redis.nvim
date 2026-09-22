@@ -113,6 +113,37 @@ local function verified_list_write(tab, url, key, idx_0, expected, build_cmd, db
   }, nil, { db = db, owner = "browser" })
 end
 
+--- Does a name-free probe reply say the name is taken? HEXISTS answers with
+--- the integer 0/1; ZSCORE answers with the member's score, or a nil reply
+--- when the member does not exist.
+local function name_taken(verb, ev)
+  local v = ev and ev.value
+  if not v then return false end
+  if verb == "HEXISTS" then return tonumber(v.value) == 1 end
+  return v.type ~= "nil" and v.value ~= nil
+end
+
+--- Probe that a name is free before a write that would otherwise clobber
+--- whatever already holds it. Renaming a hash field (or a zset member) onto
+--- an existing name overwrites that entry and then deletes the original, so
+--- one edit silently destroys two; the probe runs first and the write only
+--- runs through `on_clear`.
+local function guard_name_free(url, key, db, probe, taken_msg, on_clear)
+  local verb = probe[1]
+  session_conn.execute(url, probe, {
+    on_response = function(ev)
+      if name_taken(verb, ev) then
+        notify(taken_msg, vim.log.levels.WARN)
+        return
+      end
+      on_clear()
+    end,
+    on_error = function(msg)
+      notify(verb .. " failed: " .. tostring(msg), vim.log.levels.ERROR)
+    end,
+  }, nil, { db = db, owner = "browser" })
+end
+
 --- Edit the cell under the cursor (i). Index column is not editable.
 --- @param tab table
 function M.edit_cell(tab)
@@ -142,9 +173,13 @@ function M.edit_cell(tab)
     elseif type_name == "hash" then
       -- col 2 = field (editable → HSET new field, DEL old), col 3 = value
       if col == 2 and input ~= row_data[2] then
-        exec(tab, url, { "HSET", key, input, row_data[3] or "" }, db, function()
-          exec(tab, url, { "HDEL", key, row_data[2] }, db, function() refresh(tab) end)
-        end)
+        guard_name_free(url, key, db, { "HEXISTS", key, input },
+          ("Field '%s' already exists — edit that row instead of renaming onto it"):format(input),
+          function()
+            exec(tab, url, { "HSET", key, input, row_data[3] or "" }, db, function()
+              exec(tab, url, { "HDEL", key, row_data[2] }, db, function() refresh(tab) end)
+            end)
+          end)
       else
         exec(tab, url, { "HSET", key, row_data[2], input }, db, function() refresh(tab) end)
       end
@@ -164,9 +199,13 @@ function M.edit_cell(tab)
               notify("Score must be a number", vim.log.levels.ERROR)
               return
             end
-            exec(tab, url, { "ZADD", key, score, input }, db, function()
-              exec(tab, url, { "ZREM", key, row_data[2] }, db, function() refresh(tab) end)
-            end)
+            guard_name_free(url, key, db, { "ZSCORE", key, input },
+              ("Member '%s' already exists — edit that row instead of renaming onto it"):format(input),
+              function()
+                exec(tab, url, { "ZADD", key, score, input }, db, function()
+                  exec(tab, url, { "ZREM", key, row_data[2] }, db, function() refresh(tab) end)
+                end)
+              end)
           end)
       end
     elseif type_name == "list" then
@@ -203,8 +242,12 @@ function M.delete_row(tab)
     return
   end
 
-  local choice = vim.fn.confirm(("Delete row  %s  from %s?"):format(
-    tostring(type(raw) == "table" and "" or raw), key), "&Yes\n&No", 2, "Warning")
+  -- A string key is a single row, so dd deletes the KEY itself; asking about
+  -- "row <value>" read like one cell of a bigger value could survive it.
+  local subject = type_name == "string"
+      and ("the whole value of  %s  (DEL)"):format(key)
+      or ("row  %s  from %s"):format(tostring(type(raw) == "table" and "" or raw), key)
+  local choice = vim.fn.confirm(("Delete %s?"):format(subject), "&Yes\n&No", 2, "Warning")
   if choice ~= 1 then
     notify("Deletion cancelled")
     return
@@ -251,7 +294,13 @@ function M.add_row(tab)
       if not field or field == "" then return end
       vim.ui.input({ prompt = "Value for " .. field .. ": " }, function(value)
         if value == nil then return end
-        exec(tab, url, { "HSET", key, field, value }, db, function() refresh(tab) end)
+        -- adding a row that already exists is a mistake, not an update: HSET
+        -- would replace the other field's value with no warning
+        guard_name_free(url, key, db, { "HEXISTS", key, field },
+          ("Field '%s' already exists — press i on that row to edit its value"):format(field),
+          function()
+            exec(tab, url, { "HSET", key, field, value }, db, function() refresh(tab) end)
+          end)
       end)
     end)
   elseif type_name == "zset" then
@@ -262,7 +311,11 @@ function M.add_row(tab)
           notify("Score must be a number", vim.log.levels.ERROR)
           return
         end
-        exec(tab, url, { "ZADD", key, score, member }, db, function() refresh(tab) end)
+        guard_name_free(url, key, db, { "ZSCORE", key, member },
+          ("Member '%s' already exists — press i on that row to edit its score"):format(member),
+          function()
+            exec(tab, url, { "ZADD", key, score, member }, db, function() refresh(tab) end)
+          end)
       end)
     end)
   else

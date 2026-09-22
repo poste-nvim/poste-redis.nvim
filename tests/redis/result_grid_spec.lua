@@ -546,6 +546,8 @@ describe("poste-redis grid editing", function()
   local refreshes = 0
   local ttl_reply = 60  -- what the stub's TTL probe answers
   local lindex_reply = nil  -- what the stub's LINDEX probe answers (nil = skip)
+  local hexists_reply = 0  -- HEXISTS probe answer: 1 = the field is taken
+  local zscore_reply = nil  -- ZSCORE probe answer: non-nil = the member exists
 
   local function open_key_tab_conn(value)
     buffer.render({ {
@@ -568,6 +570,8 @@ describe("poste-redis grid editing", function()
     refreshes = 0
     ttl_reply = 60
     lindex_reply = nil
+    hexists_reply = 0
+    zscore_reply = nil
     -- counting refresh that still re-runs the tab command (M.refresh)
     grid_edit.set_refresh(function()
       refreshes = refreshes + 1
@@ -583,6 +587,21 @@ describe("poste-redis grid editing", function()
       if cmd[1] == "LINDEX" then
         if cbs and cbs.on_response then
           cbs.on_response({ value = { type = "string", value = lindex_reply } })
+        end
+        return "dispatched"
+      end
+      -- the name-free probes read the server, they are not edits either
+      if cmd[1] == "HEXISTS" then
+        if cbs and cbs.on_response then
+          cbs.on_response({ value = { type = "integer", value = hexists_reply } })
+        end
+        return "dispatched"
+      end
+      if cmd[1] == "ZSCORE" then
+        if cbs and cbs.on_response then
+          cbs.on_response({ value = zscore_reply ~= nil
+              and { type = "string", value = tostring(zscore_reply) }
+              or { type = "nil", value = nil } })
         end
         return "dispatched"
       end
@@ -680,6 +699,115 @@ describe("poste-redis grid editing", function()
     vim.ui.input = function(opts, cb) cb("Bob") end
     grid_edit.edit_cell(t)
     assert.equals("HSET user:1 name Bob", sent_cmds[#sent_cmds])
+  end)
+
+  --- Capture vim.notify for the duration of one action.
+  local function capture_notify(fn)
+    local msgs = {}
+    local orig = vim.notify
+    vim.notify = function(msg, _level, _opts) msgs[#msgs + 1] = tostring(msg) end
+    local ok, err = pcall(fn)
+    vim.notify = orig
+    assert.is_true(ok, tostring(err))
+    return msgs
+  end
+
+  local function any_contains(msgs, needle)
+    for _, m in ipairs(msgs) do
+      if m:find(needle, 1, true) then return true end
+    end
+    return false
+  end
+
+  it("renaming a hash field onto an existing field writes nothing", function()
+    -- HSET onto a taken name would replace that field's value and HDEL would
+    -- then remove the original: one edit, two entries gone
+    open_key_tab_conn({ type = "hash", entries = { { "name", "Alice" }, { "nick", "Al" } }, len = 2 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    hexists_reply = 1
+    vim.ui.input = function(_, cb) cb("nick") end
+    local msgs = capture_notify(function() grid_edit.edit_cell(t) end)
+    assert.same({}, sent_cmds)
+    assert.is_true(any_contains(msgs, "already exists"))
+    assert.equals(0, refreshes, "a refused write has nothing to refresh")
+  end)
+
+  it("renaming a hash field onto a free name probes then rewrites the pair", function()
+    open_key_tab_conn({ type = "hash", entries = { { "name", "Alice" }, { "nick", "Al" } }, len = 2 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    vim.ui.input = function(_, cb) cb("fullname") end
+    grid_edit.edit_cell(t)
+    assert.same({ "HSET user:1 fullname Alice", "HDEL user:1 name" }, sent_cmds)
+  end)
+
+  it("renaming a zset member onto an existing member writes nothing", function()
+    open_key_tab_conn({ type = "zset",
+      value = { { member = "alice", score = 99 }, { member = "bob", score = 1 } }, len = 2 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    zscore_reply = 1
+    local prompts = 0
+    vim.ui.input = function(_, cb)
+      prompts = prompts + 1
+      cb(prompts == 1 and "bob" or "50")
+    end
+    local msgs = capture_notify(function() grid_edit.edit_cell(t) end)
+    assert.same({}, sent_cmds)
+    assert.is_true(any_contains(msgs, "already exists"))
+  end)
+
+  it("renaming a zset member onto a free name probes then moves the score", function()
+    open_key_tab_conn({ type = "zset", value = { { member = "alice", score = 99 } }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    local prompts = 0
+    vim.ui.input = function(_, cb)
+      prompts = prompts + 1
+      cb(prompts == 1 and "bob" or "50")
+    end
+    grid_edit.edit_cell(t)
+    assert.same({ "ZADD user:1 50 bob", "ZREM user:1 alice" }, sent_cmds)
+  end)
+
+  it("add row refuses a field or member that already exists", function()
+    open_key_tab_conn({ type = "hash", entries = { { "name", "Alice" } }, len = 1 })
+    local t = buffer.active_tab()
+    local prompts = 0
+    vim.ui.input = function(_, cb)
+      prompts = prompts + 1
+      cb(prompts == 1 and "name" or "value")
+    end
+    hexists_reply = 1
+    capture_notify(function() grid_edit.add_row(t) end)
+    assert.same({}, sent_cmds)
+    hexists_reply = 0
+    prompts = 0
+    capture_notify(function() grid_edit.add_row(t) end)
+    assert.same({ "HSET user:1 name value" }, sent_cmds)
+
+    sent_cmds = {}
+    open_key_tab_conn({ type = "zset", value = { { member = "alice", score = 99 } }, len = 1 })
+    prompts = 0
+    vim.ui.input = function(_, cb)
+      prompts = prompts + 1
+      cb(prompts == 1 and "alice" or "50")
+    end
+    zscore_reply = 99
+    capture_notify(function() grid_edit.add_row(buffer.active_tab()) end)
+    assert.same({}, sent_cmds)
+  end)
+
+  it("dd on a string key asks about deleting the key, not a row", function()
+    open_key_tab_conn({ type = "string", value = "hello" })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    local asked = nil
+    vim.fn.confirm = function(msg) asked = msg; return 2 end  -- answer No
+    grid_edit.delete_row(t)
+    assert.truthy(asked:find("whole value", 1, true), asked)
+    assert.same({}, sent_cmds, "answering No must not delete anything")
   end)
 
   it("hash row delete issues HDEL field", function()
