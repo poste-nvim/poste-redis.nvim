@@ -151,4 +151,21 @@ describe("poste-redis util", function()
       assert.same({ "ok" }, dst)
     end)
   end)
+
+  describe("escape_for_line", function()
+    it("replaces line breaks and tabs", function()
+      assert.equals("a⏎b", util.escape_for_line("a\r\nb"))
+      assert.equals("a⏎b", util.escape_for_line("a\nb"))
+      assert.equals("a  b", util.escape_for_line("a\tb"))
+    end)
+
+    it("returns only the string, never gsub's count", function()
+      -- format.lua builds text lines as `{ cell(v) }`; a second return value
+      -- here would land in the list as a phantom line (and nvim_buf_set_lines
+      -- rejects a number where it expects a string)
+      assert.equals(1, select("#", util.escape_for_line("a\nb")))
+      assert.equals(1, select("#", util.escape_for_line("plain")))
+      assert.equals(1, select("#", util.escape_for_line(42)))
+    end)
+  end)
 end)

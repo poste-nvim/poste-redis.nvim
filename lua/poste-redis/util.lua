@@ -114,11 +114,14 @@ function M.pad_left(s, width)
 end
 
 --- Escape control chars for display in a single table line.
+--- The parens are the function: `gsub` returns the count as a second value,
+--- and a caller that splices this into a table constructor (`{ cell(v) }` in
+--- format.lua) would append that number as an extra "line" of the panel.
 --- @param s string
 --- @return string
 function M.escape_for_line(s)
   if type(s) ~= "string" then return tostring(s) end
-  return s:gsub("\r\n", "⏎"):gsub("\n", "⏎"):gsub("\r", "⏎"):gsub("\t", "  ")
+  return (s:gsub("\r\n", "⏎"):gsub("\n", "⏎"):gsub("\r", "⏎"):gsub("\t", "  "))
 end
 
 --- Escape redis glob metacharacters so a literal string (a key name or a

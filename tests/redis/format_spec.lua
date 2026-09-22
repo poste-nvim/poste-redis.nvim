@@ -153,6 +153,38 @@ describe("poste-redis format", function()
     assert.equals("hex: 48 65 ff 00", out.lines[2])
   end)
 
+  it("shows the binary marker in a hash row, not (nil)", function()
+    -- The binary shape carries a one-line `value` for exactly this: a nested
+    -- cell holds the child's scalar, and a msgpack/protobuf field with no
+    -- scalar read as an empty row while the key holds bytes.
+    local out = lines_for({
+      type = "hash",
+      entries = { { "blob", "(binary) 4 bytes hex: 48 65 ff 00" } },
+      len = 1,
+    })
+    assert.equals("table", out.kind)
+    assert.same({ 1, "blob", "(binary) 4 bytes hex: 48 65 ff 00" }, out.grid.rows[1])
+    assert.equals("(binary) 4 bytes hex: 48 65 ff 00", out.grid.to_display(out.grid.rows[1][3]))
+  end)
+
+  it("renders RESP3 typed scalars as their value", function()
+    -- `?protocol=resp3` in the connection URL types replies the RESP2 shapes
+    -- never carry; an unlisted type name still has to print something useful
+    local number = lines_for({ type = "number", value = 1.5 })
+    assert.equals("1.5", table.concat(number.lines, ""))
+    assert.equals("true", table.concat(lines_for({ type = "boolean", value = true }).lines, ""))
+    -- a wide integer arrives as digits in a string so it does not round
+    local big = lines_for({ type = "integer", value = "123456789012345678901234567890" })
+    assert.equals("123456789012345678901234567890", table.concat(big.lines, ""))
+    -- A string-valued text line must stay ONE line: `cell` returns gsub's
+    -- substitution count as a second value, and `{ cell(v) }` splices it in as
+    -- a phantom extra row the panel then writes into the buffer.
+    for _, out in ipairs({ big, number, lines_for({ type = "unknown", value = "SomeReply" }) }) do
+      assert.equals(1, #out.lines)
+      assert.equals("string", type(out.lines[1]))
+    end
+  end)
+
   it("renders an unknown type as its raw text", function()
     local out = lines_for({ type = "unknown", value = "Something" })
     assert.equals("Something", out.lines[1])
