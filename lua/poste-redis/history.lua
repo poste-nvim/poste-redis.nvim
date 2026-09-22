@@ -108,6 +108,11 @@ function M.activate(idx, enter)
       latency_ms = e.latency_ms,
       error = e.error,
       value = e.value,
+      -- An entry is a whole batch: its `status` is the batch verdict while the
+      -- value/error below belong to the FIRST command. Without the flag a batch
+      -- whose later command failed would replay as an error block and lose the
+      -- result the user actually saw (`runner.on_done` says the same).
+      batch = true,
     })
     out.meta.connection = e.connection
     out.meta.db = e.db
@@ -122,12 +127,13 @@ function M.activate(idx, enter)
     -- A rejected write has no result set, but it does have the server's
     -- reason. The "no snapshot" hint would read as if the entry were lost,
     -- when what the user came looking for is why `RENAME` failed.
-    if e.error and e.error ~= "" then
+    local rejected, err_text = require("poste-redis.format").command_failed(e)
+    if rejected then
       buffer.render_snapshot(
-        require("poste-redis.format").format_error(e.error, e.command), {
+        require("poste-redis.format").format_error(err_text, e.command), {
           command = e.command,
           status = e.status,
-          error = e.error,
+          error = err_text,
           value = e.value,
         }, { enter = enter })
       return
@@ -176,11 +182,14 @@ end
 --- with `status == "error"`. The two are not the same: a batch whose later
 --- command failed reports status "error" while its stored message is the
 --- first (successful) result's — nil. Both the ✗ column and its highlight read
---- this, so the rule lives in one place.
+--- this, so the rule lives in one place: `format.command_failed`, which also
+--- filters out the message shapes that say nothing (`vim.NIL`, "").
+--- The sidebar marks the BATCH, so it must not pass `batch` — only the replay
+--- of a first command's value honours that exception.
 --- @param e table|nil
 --- @return boolean
 local function failed(e)
-  return e ~= nil and ((e.error and e.error ~= "") or e.status == "error") and true or false
+  return require("poste-redis.format").command_failed(e)
 end
 
 --- Render the float body: `✓ <command padded>  <HH:MM:SS>` — the command

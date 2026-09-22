@@ -223,7 +223,7 @@ describe("poste-redis format", function()
     assert.truthy(out.meta.error)
   end)
 
-  it("does not mistake a status-less error for a value", function()
+  it("renders an error that carries no value as an ERROR block", function()
     local out = format.format_result({
       command = "FLUSHALL",
       status = "error",
@@ -307,5 +307,72 @@ describe("poste-redis format", function()
     local out = lines_for({ type = "string", value = "日本語" })
     assert.equals("table", out.kind)
     assert.same({ 1, "日本語" }, out.grid.rows[1])
+  end)
+end)
+
+--- `status` is the verdict, `error` is its explanation, and they arrive as two
+--- fields. `redis_executor` itself emits `status: ""` with a message for an empty
+--- command and it is the CLI that stamps `status = "error"` (redis_exec.rs,
+--- redis_session.rs) — so the panel must read either field as the failure it is,
+--- while a history entry (a whole BATCH) keeps replaying its first command's
+--- result. Both directions are pinned here.
+describe("poste-redis format command_failed", function()
+  local function event(over)
+    return vim.tbl_extend("force", {
+      seq = 1, command = "SET k v", status = "ok", latency_ms = 1,
+    }, over or {})
+  end
+
+  it("takes either field as the verdict", function()
+    local function failed(over) return (format.command_failed(event(over))) end
+    assert.is_true(failed({ status = "error" }))
+    assert.is_true(failed({ status = "", error = "Empty command" }))
+    assert.is_false(failed({}))
+    assert.is_false((format.command_failed(nil)))
+  end)
+
+  it("does not mistake an absent message for a failure", function()
+    -- `vim.NIL` is truthy in Lua; taking it as a message put a ✗ beside commands
+    -- the server had answered.
+    local function failed(err) return (format.command_failed(event({ error = err }))) end
+    assert.is_false(failed(vim.NIL))
+    assert.is_false(failed(""))
+  end)
+
+  it("renders a message-only rejection as an ERROR block", function()
+    local out = format.format_result(event({ status = "", error = "Empty command",
+      value = { type = "nil", value = nil } }))
+    assert.equals("ERROR", out.lines[1])
+    assert.truthy(table.concat(out.lines, "\n"):find("Empty command", 1, true))
+  end)
+
+  it("names a rejection that arrived without a message", function()
+    -- `(nil)` is a legitimate reply the user must be able to tell apart from a
+    -- rejected command; both producers pair an error with the nil placeholder.
+    local out = format.format_result(event({ status = "error",
+      value = { type = "nil", value = nil } }))
+    assert.equals("ERROR", out.lines[1])
+    assert.truthy(table.concat(out.lines, "\n"):find("(unknown error)", 1, true))
+  end)
+
+  it("keeps a batch replay on its first command's result", function()
+    -- The entry's status is the batch verdict; its value belongs to the first
+    -- command, which succeeded. The sidebar still marks it ✗.
+    local out = format.format_result(event({ status = "error", batch = true,
+      value = { type = "integer", value = 1 } }))
+    assert.equals("text", out.kind)
+    assert.equals("1", out.lines[1])
+  end)
+
+  it("shows the message when the batch's first command itself failed", function()
+    local out = format.format_result(event({ status = "error", batch = true,
+      error = "WRONGTYPE Operation against a key", value = { type = "nil" } }))
+    assert.equals("ERROR", out.lines[1])
+  end)
+
+  it("marks every failed shape with the winbar cross", function()
+    assert.truthy(format.status_summary(event({ status = "error" })):find("✘", 1, true))
+    assert.truthy(format.status_summary(
+      event({ status = "", error = "Empty command" })):find("✘", 1, true))
   end)
 end)

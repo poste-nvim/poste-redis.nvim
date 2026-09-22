@@ -56,10 +56,13 @@ local function present(results, summaries, opts)
 
   buffer.render(results, { render = true, connection = opts.connection })
   local first = results[1]
+  -- The same rule the panel and the history sidebar use (lazy require: format
+  -- pulls in result.grid, which reaches back to this module).
+  local command_failed = require("poste-redis.format").command_failed
   local any_failed = false
   local total_latency = 0
   for _, ev in ipairs(results or {}) do
-    if ev.status == "error" or ev.error then any_failed = true end
+    if command_failed(ev) then any_failed = true end
     total_latency = total_latency + (tonumber(ev.latency_ms) or 0)
   end
   history.push({
@@ -104,7 +107,7 @@ local function present(results, summaries, opts)
         line_0 = batch_lines[ev.seq]
       end
       if line_0 ~= nil then
-        if ev.status == "error" or ev.error then
+        if command_failed(ev) then
           indicators.set_indicator(src, line_0, "error")
         else
           indicators.set_indicator(src, line_0, "success")

@@ -185,9 +185,35 @@ local RENDERERS = {
 --- Public API
 -----------------------------------------------------------------------
 
+--- Did this command fail, and with what text?
+---
+--- `status` is the verdict and `error` is its explanation, and they are separate
+--- fields on the way here: `redis_executor` reports an empty command with
+--- `status: ""` plus a message, and it is the CLI that stamps `status = "error"`
+--- whenever a message is present (`redis_exec.rs`, `redis_session.rs`). The plugin
+--- must not assume that stamp survives a version change, so either field alone
+--- counts as a failure — with one exception the caller has to name:
+---
+--- A history entry stands for a whole batch. Its `status` is the batch verdict
+--- ("some command failed") while its `value` and `error` belong to the FIRST
+--- command (see `runner.on_done`), so a batch whose later command failed must keep
+--- replaying the result the user saw at run time. Those events arrive with
+--- `batch = true`, which makes the verdict alone non-decisive; a message still is.
+---
+--- @param event table|nil { status, error, batch? }
+--- @return boolean failed, string|nil text nil text means "no reason was given"
+function M.command_failed(event)
+  if type(event) ~= "table" then return false, nil end
+  -- `vim.NIL` is a truthy userdata and an empty string says nothing; neither is
+  -- a message, and `format_error` supplies the placeholder.
+  local text = event.error
+  if text == vim.NIL or text == "" then text = nil end
+  return text ~= nil or (event.status == "error" and event.batch ~= true), text
+end
+
 --- Format a single result event into a tab payload.
 --- Returns kind "table" (grid) for collections, kind "text" (lines) otherwise.
---- @param event table  { seq, command, status, latency_ms, value, error }
+--- @param event table  { seq, command, status, latency_ms, value, error, batch? }
 --- @return table { kind = "text"|"table", lines = string[]|nil, grid = table|nil, meta = table }
 function M.format_result(event)
   event = event or {}
@@ -201,9 +227,15 @@ function M.format_result(event)
     dangerous = M.is_dangerous_command(event.command or ""),
   }
 
-  if event.error and event.status == "error" then
-    meta.error = event.error
-    return { kind = "text", lines = M.format_error(event.error, meta.command), meta = meta }
+  -- A rejected command must not fall through to the value renderer: the binary
+  -- sends `{"type":"nil"}` beside every error, so the old conjunction of
+  -- "message present AND status is error" printed `(nil)` — indistinguishable
+  -- from a genuine nil reply — for any failure that arrived without a stamp,
+  -- while the sign column and the winbar already showed ✘.
+  local failed, err_text = M.command_failed(event)
+  if failed then
+    meta.error = err_text
+    return { kind = "text", lines = M.format_error(err_text, meta.command), meta = meta }
   end
 
   local value = event.value
