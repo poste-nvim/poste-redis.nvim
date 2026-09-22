@@ -52,9 +52,10 @@ GET session:abc
 - Results render in a bottom panel: scalars as text, collections
   (list/set/hash/zset) as a sortable grid with a frozen header, cell
   navigation, search, paging and yank. `i`/`o`/`dd` edit cells/rows back to
-  Redis (with stale-cell guards); `r` re-runs the tab's command; `gd` jumps
-  to the tab's key in the browser; `E` exports the whole grid to a file
-  (CSV / TSV / JSON).
+  Redis (with stale-cell guards, and a rename onto a field/member the key
+  already has is refused instead of overwriting it); `r` re-runs the tab's
+  command; `gd` jumps to the tab's key in the browser; `E` exports the whole
+  grid to a file (CSV / TSV / JSON).
 - `<Esc>` cancels an in-flight execution. Dangerous commands (`FLUSHALL`,
   `FLUSHDB`, `SHUTDOWN`, `CONFIG`) are flagged in the panel and, on `<CR>` or
   a file run, ask for an explicit yes before anything is dispatched
