@@ -134,6 +134,47 @@ function M.glob_escape(s)
   return (s:gsub("[%*%?%[%]\\]", "\\%0"))
 end
 
+--- Is `s` exactly `<hh> <hh> …` — the body of one of the binary markers?
+---
+--- Written as a loop rather than `^%x%x( %x%x)*$` because Lua's matcher will
+--- not anchor a capture through a repetition: that pattern returns nil on
+--- "ff fe" in this runtime (Lua 5.1 leaves a capture inside a repeated item
+--- unspecified), which is how the first version of this check silently
+--- matched nothing. Splitting on whitespace says "every run is one byte", and
+--- counting the spaces says the joins were single — `hex:ff  fe` is not a
+--- rendering the binary produces.
+--- @param s string
+--- @return boolean
+local function hex_pairs(s)
+  local n = 0
+  for part in s:gmatch("%S+") do
+    if not part:match("^%x%x$") then return false end
+    n = n + 1
+  end
+  if n == 0 then return false end
+  return (s:gsub("%S", "")) == string.rep(" ", n - 1)
+end
+
+--- Does this text stand in for bytes the transport cannot carry?
+---
+--- poste.nvim's redis executor renders non-UTF-8 payloads two ways: a NAME (a
+--- hash field, a zset member) becomes `hex:<pairs>` and a VALUE becomes
+--- `(binary) N bytes hex: <pairs>` (capped previews, so always whole pairs).
+--- Both are for reading only — `HDEL key "hex:ff fe"` matches no field and
+--- still answers OK. Anything that writes a cell back has to know.
+---
+--- A UTF-8 entry genuinely named `hex:ff fe` matches too, and the guard this
+--- feeds refuses it: losing the grid editor on such a name is the cheap side
+--- of the trade, since the other option is writing to the wrong entry.
+--- @param s any
+--- @return boolean
+function M.is_hex_display(s)
+  if type(s) ~= "string" then return false end
+  local hex = s:match("^hex:(.*)$")
+      or s:match("^%(binary%) %d+ bytes hex:%s*(.*)$")
+  return hex ~= nil and hex_pairs(hex)
+end
+
 --- Render a command token list as the display/history line. Tokens that are
 --- empty or contain whitespace, a double quote or a backslash are double-
 --- quoted with escapes, so a key `a b` records as `DEL "a b"` instead of the

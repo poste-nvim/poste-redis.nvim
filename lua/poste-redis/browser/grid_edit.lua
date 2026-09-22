@@ -144,6 +144,34 @@ local function guard_name_free(url, key, db, probe, taken_msg, on_clear)
   }, nil, { db = db, owner = "browser" })
 end
 
+--- Why this row's name cannot go on the wire, or nil when it can.
+---
+--- A name-bound write sends the cell's TEXT as the command argument, so it
+--- works only while that text is the real name. A non-UTF-8 field name or
+--- zset member renders as `hex:…` (and a set member as `(binary) N bytes
+--- hex: …`, since set members arrive through the value path) — text that is
+--- for reading only: HSET/ZADD with it creates a SECOND entry named after the
+--- rendering, while HDEL/ZREM/SREM delete nothing and still answer OK, so the
+--- refresh leaves the row exactly where it was.
+---
+--- A binary VALUE cell is not a reason to refuse: the row's name still
+--- addresses it, and replacing those bytes with typed text is what the user
+--- asked for. Lists never come here — their writes are index-addressed and
+--- verified with LINDEX.
+--- @param type_name string
+--- @param row_data table|nil  the row's raw cells (name column at [2])
+--- @return string|nil reason
+local function display_only_name(type_name, row_data)
+  if type_name ~= "hash" and type_name ~= "zset" and type_name ~= "set" then
+    return nil
+  end
+  local name = row_data and row_data[2]
+  if not util.is_hex_display(name) then return nil end
+  return ("'%s' is how a non-UTF-8 name renders — it is not the name on the "
+    .. "server, so this row cannot be edited or deleted from the grid. "
+    .. "Send the command yourself, with the bytes escaped"):format(tostring(name))
+end
+
 --- Edit the cell under the cursor (i). Index column is not editable.
 --- @param tab table
 function M.edit_cell(tab)
@@ -160,6 +188,17 @@ function M.edit_cell(tab)
   local raw, col, row_data = cursor_cell(tab)
   if not raw then
     notify("Move to a value cell to edit it", vim.log.levels.WARN)
+    return
+  end
+  local reason = display_only_name(type_name, row_data)
+  if type_name == "string" and tab.meta.value.truncated then
+    -- the transport capped the value, so the cell holds a PREFIX of it — and
+    -- `SET key <prefix>` would cut the key down to what fit on screen
+    reason = "This value is longer than the display cap, so the panel only holds its "
+      .. "prefix — editing would store that prefix as the whole value"
+  end
+  if reason then
+    notify(reason, vim.log.levels.WARN)
     return
   end
   local current = type(raw) == "string" and raw or tostring(raw)
@@ -239,6 +278,11 @@ function M.delete_row(tab)
   local raw, _, row_data = cursor_cell(tab)
   if not raw then
     notify("Move to a value cell to delete its row", vim.log.levels.WARN)
+    return
+  end
+  local reason = display_only_name(type_name, row_data)
+  if reason then
+    notify(reason, vim.log.levels.WARN)
     return
   end
 

@@ -114,6 +114,39 @@ describe("poste-redis util", function()
     end)
   end)
 
+  describe("is_hex_display", function()
+    it("recognises the name marker the binary uses for non-UTF-8 names", function()
+      -- redis_executor.rs key_display: `format!("hex:{}", hex_preview(b, 16))`
+      assert.is_true(util.is_hex_display("hex:ff fe"))
+      assert.is_true(util.is_hex_display("hex:c3 28"))
+      -- one byte, and the 16-pair cap
+      assert.is_true(util.is_hex_display("hex:0a"))
+      assert.is_true(util.is_hex_display(
+        "hex:00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"))
+    end)
+
+    it("recognises the value marker, preview capped at 64 pairs", function()
+      -- redis_executor.rs child_cell: `(binary) {bytes} bytes hex: {preview}`
+      assert.is_true(util.is_hex_display("(binary) 4 bytes hex: 48 65 ff 00"))
+      assert.is_true(util.is_hex_display("(binary) 900 bytes hex: " .. string.rep("ff ", 63) .. "ff"))
+    end)
+
+    it("does not match text that merely starts with the marker", function()
+      -- the guard is a refusal, so a false positive costs an editable row; the
+      -- patterns must stay as narrow as the marker really is
+      assert.is_false(util.is_hex_display("hex:zz"))
+      assert.is_false(util.is_hex_display("hex:ffz"))
+      assert.is_false(util.is_hex_display("hex:ff  fe"))
+      assert.is_false(util.is_hex_display("0xhex:ff"))
+      assert.is_false(util.is_hex_display("(binary) 4 bytes"))
+      assert.is_false(util.is_hex_display("hash:ff fe"))
+      assert.is_false(util.is_hex_display(""))
+      assert.is_false(util.is_hex_display(nil))
+      assert.is_false(util.is_hex_display(7))
+      assert.is_false(util.is_hex_display({ "hex:ff fe" }))
+    end)
+  end)
+
   describe("render_command", function()
     it("joins clean tokens verbatim", function()
       assert.equals("DEL user:1", util.render_command({ "DEL", "user:1" }))

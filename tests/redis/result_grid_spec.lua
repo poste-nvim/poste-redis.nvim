@@ -869,6 +869,85 @@ describe("poste-redis grid editing", function()
     assert.equals("ZADD user:1 100 alice", sent_cmds[#sent_cmds])
   end)
 
+  -- What the panel shows and what the server calls an entry are two different
+  -- things once the transport had to render bytes it cannot carry: a non-UTF-8
+  -- name arrives as `hex:<pairs>`, a non-UTF-8 value as `(binary) N bytes
+  -- hex: …`, and an oversized string as its own prefix. Writing any of those
+  -- back is a command against something that isn't there.
+  it("refuses a hash edit on a row whose field name is a binary rendering", function()
+    open_key_tab_conn({ type = "hash", entries = { { "hex:ff fe", "v" } }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 3 }
+    vim.ui.input = function(_, cb) cb("edited") end
+    local msgs = capture_notify(function() grid_edit.edit_cell(t) end)
+    -- HSET with the rendering would add a SECOND field and leave the binary
+    -- one alone; HDEL of it deletes nothing and answers OK
+    assert.same({}, sent_cmds)
+    assert.is_true(any_contains(msgs, "not the name on the server"), vim.inspect(msgs))
+  end)
+
+  it("refuses dd on a hash row whose field name is a binary rendering", function()
+    open_key_tab_conn({ type = "hash", entries = { { "hex:ff fe", "v" } }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    local asked = 0
+    vim.fn.confirm = function()
+      asked = asked + 1
+      return 1
+    end
+    local msgs = capture_notify(function() grid_edit.delete_row(t) end)
+    assert.equals(0, asked, "must not ask before a delete it cannot perform")
+    assert.same({}, sent_cmds)
+    assert.is_true(any_contains(msgs, "not the name on the server"), vim.inspect(msgs))
+  end)
+
+  it("refuses a zset score edit on a member that is a binary rendering", function()
+    open_key_tab_conn({ type = "zset", value = { { member = "hex:c3 28", score = 1 } }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 3 }
+    vim.ui.input = function(_, cb) cb("100") end
+    local msgs = capture_notify(function() grid_edit.edit_cell(t) end)
+    assert.same({}, sent_cmds, "ZADD would add a member literally named hex:c3 28")
+    assert.is_true(any_contains(msgs, "not the name on the server"), vim.inspect(msgs))
+  end)
+
+  it("refuses a set edit when the member renders as binary", function()
+    open_key_tab_conn({ type = "set", value = { "(binary) 2 bytes hex: ff 00" }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    vim.ui.input = function(_, cb) cb("plain") end
+    local msgs = capture_notify(function() grid_edit.edit_cell(t) end)
+    -- SREM of a member that is not there removes nothing, so the "edit" leaves
+    -- the set with both the old bytes and the new text
+    assert.same({}, sent_cmds)
+    assert.is_true(any_contains(msgs, "not the name on the server"), vim.inspect(msgs))
+  end)
+
+  it("refuses editing a string value the transport cut off", function()
+    open_key_tab_conn({ type = "string", value = "0123456789", len = 4096, truncated = true })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    vim.ui.input = function(_, cb) cb("0123456789!") end
+    local msgs = capture_notify(function() grid_edit.edit_cell(t) end)
+    assert.same({}, sent_cmds, "SET would store the visible prefix as the whole value")
+    assert.is_true(any_contains(msgs, "prefix"), vim.inspect(msgs))
+  end)
+
+  it("keeps editing names that only look like the marker at a glance", function()
+    -- `hex:zz` is not hex pairs, so it is an ordinary field name; refusing it
+    -- would put the grid editor out of use for every hash with a colon in it
+    open_key_tab_conn({ type = "hash", entries = { { "hex:zz", "v" }, { "id:7", "x" } }, len = 2 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 3 }
+    vim.ui.input = function(_, cb) cb("edited") end
+    grid_edit.edit_cell(t)
+    assert.equals("HSET user:1 hex:zz edited", sent_cmds[#sent_cmds])
+    t.cursor = { row = 2, col = 3 }
+    vim.ui.input = function(_, cb) cb("y") end
+    grid_edit.edit_cell(t)
+    assert.equals("HSET user:1 id:7 y", sent_cmds[#sent_cmds])
+  end)
+
   it("add row on a set issues SADD", function()
     open_key_tab_conn({ type = "set", value = { "vim" }, len = 1 })
     vim.ui.input = function(opts, cb) cb("lua") end
