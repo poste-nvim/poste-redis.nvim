@@ -88,6 +88,18 @@ local function exec(tab, url, cmd, db, on_ok)
     end,
     on_error = function(msg)
       notify(rendered .. " failed: " .. tostring(msg), vim.log.levels.ERROR)
+      -- The rejected write records itself, like the browser's key-level
+      -- actions: `history.activate` renders the ERROR block for it, and the
+      -- sidebar shows ✗. The read probes on this path (LINDEX, HEXISTS/ZSCORE)
+      -- stay unrecorded — a failure there changed nothing.
+      require("poste-redis.history").push({
+        command = rendered,
+        connection = tab and tab.meta and tab.meta.connection or "",
+        db = db,
+        kind = "write",
+        status = "error",
+        error = tostring(msg),
+      })
     end,
   }, nil, { db = db, owner = "browser" })
 end

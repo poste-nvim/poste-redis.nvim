@@ -548,6 +548,11 @@ describe("poste-redis grid editing", function()
   local lindex_reply = nil  -- what the stub's LINDEX probe answers (nil = skip)
   local hexists_reply = 0  -- HEXISTS probe answer: 1 = the field is taken
   local zscore_reply = nil  -- ZSCORE probe answer: non-nil = the member exists
+  -- Failure injection: when set, the matching branch answers on_error instead
+  -- of a result. Write-side failures have to land in the history the same way
+  -- a rejected `.redis` command does; probe-side failures must not.
+  local lindex_fail = nil
+  local write_fail = nil
 
   local function open_key_tab_conn(value)
     buffer.render({ {
@@ -572,6 +577,8 @@ describe("poste-redis grid editing", function()
     lindex_reply = nil
     hexists_reply = 0
     zscore_reply = nil
+    lindex_fail = nil
+    write_fail = nil
     -- counting refresh that still re-runs the tab command (M.refresh)
     grid_edit.set_refresh(function()
       refreshes = refreshes + 1
@@ -585,6 +592,10 @@ describe("poste-redis grid editing", function()
         return "dispatched"
       end
       if cmd[1] == "LINDEX" then
+        if lindex_fail then
+          if cbs and cbs.on_error then cbs.on_error(lindex_fail) end
+          return "dispatched"
+        end
         if cbs and cbs.on_response then
           cbs.on_response({ value = { type = "string", value = lindex_reply } })
         end
@@ -606,6 +617,10 @@ describe("poste-redis grid editing", function()
         return "dispatched"
       end
       sent_cmds[#sent_cmds + 1] = table.concat(cmd, " ")
+      if write_fail then
+        if cbs and cbs.on_error then cbs.on_error(write_fail) end
+        return "dispatched"
+      end
       if cbs and cbs.on_response then
         cbs.on_response({ value = { type = "string", value = "OK" } })
       end
@@ -689,6 +704,45 @@ describe("poste-redis grid editing", function()
     assert.equals("SET user:1 world KEEPTTL", items[1].command)
     assert.equals("write", items[1].kind)
     assert.equals("stubconn", items[1].connection)
+    history.clear()
+  end)
+
+  it("a rejected write records one entry, with the server's reason", function()
+    -- The notify line ("SET ... failed: ...") is gone the moment the command
+    -- line redraws. Without the record the sidebar shows nothing at all for a
+    -- cell edit the server refused, while the same SET run from a `.redis`
+    -- buffer sits there with a ✗.
+    local history = require("poste-redis.history")
+    history.clear()
+    write_fail = "READONLY You can't write against a read only replica."
+    open_key_tab_conn({ type = "string", value = "hello" })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    vim.ui.input = function(_, cb) cb("world") end
+    grid_edit.edit_cell(t)
+    local items = history.list()
+    assert.equals(1, #items, "one entry, and it is the failure")
+    assert.equals("SET user:1 world KEEPTTL", items[1].command)
+    assert.equals("write", items[1].kind)
+    assert.equals("error", items[1].status)
+    assert.equals("READONLY You can't write against a read only replica.", items[1].error)
+    assert.equals(0, refreshes, "a refused write has nothing to refresh")
+    history.clear()
+  end)
+
+  it("a failed LINDEX pre-check records nothing and never writes", function()
+    -- The pre-check only reads. Recording it would put a ✗ row on the ledger
+    -- for an edit that never reached the keyspace.
+    local history = require("poste-redis.history")
+    history.clear()
+    lindex_fail = "Connection refused by redis"
+    open_key_tab_conn({ type = "list", value = { "job-1", "job-2" }, len = 2 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    vim.ui.input = function(_, cb) cb("edited") end
+    grid_edit.edit_cell(t)
+    assert.same({}, sent_cmds, "the probe failed, so no LSET may run")
+    assert.equals(0, history.count())
     history.clear()
   end)
 

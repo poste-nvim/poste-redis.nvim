@@ -533,4 +533,224 @@ describe("poste-redis browser actions", function()
       end
     end)
   end)
+
+  ------------------------------------------------------------------
+  -- A rejected write has to leave the same trace a rejected `.redis`
+  -- command leaves (a ✗ row in the sidebar, the server's message on
+  -- activate). A notify line is gone as soon as the command line
+  -- redraws, so without a record the only evidence that `RENAME` was
+  -- tried and refused is gone. The record sites split by what the call
+  -- could have changed: a failed mutation records, a failed read probe
+  -- (the estimate SCAN, the EXISTS/TTL pre-checks) does not — nothing
+  -- changed, and a ✗ row for it would claim otherwise.
+  ------------------------------------------------------------------
+  describe("failed writes reach the history, failed probes do not", function()
+    local history = require("poste-redis.history")
+    -- what a real server says when the connection is a replica
+    local RO = "READONLY You can't write against a read only replica."
+    local notices, orig_notify
+
+    before_each(function()
+      orig_notify = vim.notify
+      notices = {}
+      vim.notify = function(msg) notices[#notices + 1] = tostring(msg) end
+      -- Drain whatever the previous test left scheduled: its batch chains
+      -- (SCAN → DEL → record) can still be mid-flight, and would otherwise
+      -- push rows into the history and command log asserted on below.
+      vim.wait(150, function() return false end, 5)
+      history.clear()
+      calls = {}
+    end)
+    after_each(function() vim.notify = orig_notify end)
+
+    --- Wrap the transport so a command matching `pred` answers on_error
+    --- (deferred, like a real round trip) instead of the shared auto-response.
+    local function fail_when(pred, msg)
+      local inner = session_conn.execute
+      session_conn.execute = function(conn_url, cmd, cbs, bufnr, opts)
+        if not pred(cmd) then return inner(conn_url, cmd, cbs, bufnr, opts) end
+        calls[#calls + 1] = { cmd = cmd, opts = opts }
+        vim.schedule(function()
+          if cbs and cbs.on_error then cbs.on_error(msg) end
+        end)
+        return "dispatched"
+      end
+    end
+
+    local function dispatched(verb, arg)
+      for _, c in ipairs(calls) do
+        if c.cmd and c.cmd[1] == verb and (arg == nil or c.cmd[2] == arg) then return true end
+      end
+      return false
+    end
+
+    local function notice_matching(pattern)
+      for _, n in ipairs(notices) do
+        if n:find(pattern, 1, true) then return n end
+      end
+      return nil
+    end
+
+    --- The entry the rejected write must have left behind, or a failure.
+    local function recorded()
+      assert.is_true(wait_for(function() return history.count() > 0 end),
+        "the rejected write left no history entry")
+      return history.list()[1]
+    end
+
+    local function settled()
+      vim.wait(150, function() return false end, 5)
+    end
+
+    it("rejected DEL records one entry with the server's reason", function()
+      fail_when(function(c) return c[1] == "DEL" end, RO)
+      local parent = tree.make_group_node("user", "my-redis", 0)
+      parent.meta.url = "redis://h:6379/0"
+      parent.loaded = true
+      local k1 = key_node("user:1", "my-redis", 0)
+      local k2 = key_node("user:2", "my-redis", 0)
+      k1.meta.url, k2.meta.url = "redis://h:6379/0", "redis://h:6379/0"
+      k1.parent, k2.parent = parent, parent
+      parent.children = { k1, k2 }
+      actions.delete_key(k1, {})
+      local e = recorded()
+      assert.equals("DEL user:1", e.command)
+      assert.equals("write", e.kind)
+      assert.equals("error", e.status)
+      assert.equals(RO, e.error)
+      assert.equals(1, history.count(), "one line, not a success line plus a failure line")
+      -- the row survives: the server refused, so the keyspace is untouched
+      assert.equals(2, #parent.children)
+    end)
+
+    it("rejected RENAME records the attempted command, not the outcome", function()
+      fail_when(function(c) return c[1] == "RENAME" end, "ERR no such key for RENAME")
+      local node = key_node("user:1", "my-redis", 0)
+      node.meta.url = "redis://h:6379/0"
+      actions.rename_key(node, {})
+      local e = recorded()
+      assert.equals("RENAME user:1 newkey", e.command)
+      assert.equals("error", e.status)
+      assert.equals("ERR no such key for RENAME", e.error)
+    end)
+
+    it("a failed EXISTS pre-check records nothing and never renames", function()
+      fail_when(function(c) return c[1] == "EXISTS" end, "Connection refused by redis")
+      local node = key_node("user:1", "my-redis", 0)
+      node.meta.url = "redis://h:6379/0"
+      actions.rename_key(node, {})
+      settled()
+      assert.is_false(dispatched("RENAME"), "the write must not run after a failed probe")
+      assert.equals(0, history.count())
+    end)
+
+    it("rejected EXPIRE records; a failed TTL pre-check records nothing", function()
+      fail_when(function(c) return c[1] == "EXPIRE" end, RO)
+      local node = key_node("user:1", "my-redis", 0)
+      node.meta.url = "redis://h:6379/0"
+      actions.set_ttl(node, {})
+      local e = recorded()
+      assert.equals("EXPIRE user:1 60", e.command)
+      assert.equals("error", e.status)
+      assert.equals(RO, e.error)
+
+      history.clear()
+      calls = {}
+      fail_when(function(c) return c[1] == "TTL" end, "Connection refused by redis")
+      actions.set_ttl(node, {})
+      settled()
+      assert.is_false(dispatched("EXPIRE"), "no write after the read probe failed")
+      assert.equals(0, history.count())
+    end)
+
+    it("partial prefix delete records one line that says how many survived", function()
+      -- the shared SCAN hands back user:1 and user:2; only the first DEL fails
+      fail_when(function(c) return c[1] == "DEL" and c[2] == "user:1" end, RO)
+      local group = tree.make_group_node("user", "stubconn", 0)
+      group.meta.url = "redis://h:6379/0"
+      actions.delete_prefix(group, {})
+      local e = recorded()
+      assert.equals("DEL user:*", e.command)
+      assert.equals(2, e.count, "count stays the batch size, not the deleted size")
+      assert.equals("error", e.status)
+      assert.equals("1 of 2 key(s) not deleted: " .. RO, e.error)
+      assert.is_true(notice_matching("Deleted 1/2 key(s) under user:*") ~= nil,
+        "the notice must not claim a clean run: " .. table.concat(notices, " / "))
+    end)
+
+    it("a failed estimate SCAN records nothing and deletes nothing", function()
+      fail_when(function(c) return c[1] == "SCAN" end, "Connection refused by redis")
+      local group = tree.make_group_node("user", "stubconn", 0)
+      group.meta.url = "redis://h:6379/0"
+      actions.delete_prefix(group, {})
+      settled()
+      assert.is_false(dispatched("DEL"))
+      assert.equals(0, history.count())
+    end)
+
+    it("partial delete_nodes records one line that says how many survived", function()
+      fail_when(function(c) return c[1] == "DEL" and c[2] == "a:1" end, RO)
+      local a = key_node("a:1", "stubconn", 0)
+      local b = key_node("b:1", "stubconn", 0)
+      a.meta.url, b.meta.url = "redis://h:6379/0", "redis://h:6379/0"
+      actions.delete_nodes({ a, b }, {})
+      local e = recorded()
+      assert.equals("DEL a:1 b:1", e.command)
+      assert.equals(2, e.count)
+      assert.equals("error", e.status)
+      assert.equals("1 of 2 key(s) not deleted: " .. RO, e.error)
+    end)
+
+    it("delete_nodes reports a group whose scan died and keeps its row", function()
+      -- The batch can only delete what SCAN collected. Without the note the
+      -- ledger said "Deleted 1 key(s) across 2 node(s)" for a selection whose
+      -- second node was never even counted, and dropping its row hid the keys
+      -- that were still in the keyspace.
+      fail_when(function(c) return c[1] == "SCAN" end, "Connection refused by redis")
+      local db_node = tree.make_db_node({ db = 0 }, "stubconn")
+      local key = key_node("user:1", "stubconn", 0)
+      local group = tree.make_group_node("cache", "stubconn", 0)
+      key.meta.url, group.meta.url = "redis://h:6379/0", "redis://h:6379/0"
+      key.parent, group.parent = db_node, db_node
+      db_node.children = { key, group }
+      local question
+      vim.fn.confirm = function(q) question = q; return 1 end
+      actions.delete_nodes({ key, group }, { db_node = db_node })
+      local e = recorded()
+      assert.equals("DEL user:1 cache:*", e.command)
+      assert.equals(1, e.count, "only the collected key counts as the batch")
+      assert.equals("error", e.status)
+      assert.equals("1 of 2 node(s) not scanned: Connection refused by redis", e.error)
+      assert.is_true(dispatched("DEL", "user:1"), "the collected key still gets deleted")
+      assert.is_true((question or ""):find("could not be scanned") ~= nil,
+        "the confirm must not quote a count the user cannot trust: " .. tostring(question))
+      assert.equals(group, db_node.children[1], "the unscanned node keeps its row")
+      -- the yank line for the failed node is exactly the retry command
+      assert.truthy(e.yank:find("redis-cli --scan --pattern 'cache:*'", 1, true))
+    end)
+
+    it("partial set_ttl_nodes records one line that says how many were set", function()
+      fail_when(function(c) return c[1] == "EXPIRE" and c[2] == "user:1" end, RO)
+      local k1 = key_node("user:1", "stubconn", 0)
+      local k2 = key_node("user:2", "stubconn", 0)
+      k1.meta.url, k2.meta.url = "redis://h:6379/0", "redis://h:6379/0"
+      actions.set_ttl_nodes({ k1, k2 }, {})
+      local e = recorded()
+      assert.equals("EXPIRE user:1 user:2", e.command)
+      assert.equals(2, e.count)
+      assert.equals("error", e.status)
+      assert.equals("1 of 2 key(s) not set: " .. RO, e.error)
+      assert.is_true(notice_matching("TTL set on 1/2 key(s)") ~= nil,
+        "the notice must not claim a clean run: " .. table.concat(notices, " / "))
+    end)
+
+    it("a clean run still records no error row", function()
+      local group = tree.make_group_node("user", "stubconn", 0)
+      group.meta.url = "redis://h:6379/0"
+      actions.delete_prefix(group, {})
+      local e = recorded()
+      assert.equals("", e.status, "history.push normalizes a missing status to \"\"")
+      assert.is_nil(e.error)
+    end)
+  end)
 end)

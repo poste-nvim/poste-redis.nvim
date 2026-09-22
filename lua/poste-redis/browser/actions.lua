@@ -32,6 +32,13 @@ end
 --- `a b` reads back as `DEL "a b"`, not the ambiguous `DEL a b`). `yank`
 --- carries an executable form for batch deletes (a bare `DEL prefix:*` glob
 --- cannot run as-is).
+--- A FAILED mutation records too, with `status = "error"` and the server's
+--- message in `error` (see history.push): a notify line is gone as soon as the
+--- command line redraws, so the alternative is that a rejected `RENAME` leaves
+--- no trace at all while the same command run from a `.redis` buffer sits in
+--- the sidebar with a ✗. Read-only steps on a write path (the estimate SCAN,
+--- the `EXISTS`/`TTL` probes) are deliberately NOT recorded — a failure there
+--- means nothing changed.
 local function record(cmd, opts)
   require("poste-redis.history").push(vim.tbl_extend("force", {
     command = util.render_command(cmd),
@@ -205,6 +212,10 @@ function M.delete_key(node, ctx)
     end,
     on_error = function(msg)
       notify("DEL failed: " .. tostring(msg), vim.log.levels.ERROR)
+      record({ "DEL", key }, {
+        connection = node.meta and node.meta.connection, db = node.meta and node.meta.db,
+        status = "error", error = tostring(msg),
+      })
     end,
   }, nil, { db = node.meta and node.meta.db, owner = "browser" })
 end
@@ -237,16 +248,29 @@ local function delete_prefix_keys(node, ctx, opts)
       notify("Deletion cancelled")
       return
     end
+    -- A per-key DEL failure does not stop the batch, so the one aggregated
+    -- history line has to carry the failures too — otherwise a run where 2 of
+    -- 5 keys survived records as "Deleted 5".
+    local failed, first_err = 0, nil
     -- delete one by one via DEL (no Lua scripting in M2 scope)
     local function del_next(i)
       if i > #key_list then
-        notify(("Deleted %d key(s) under %s:*"):format(#key_list, prefix))
+        if failed == 0 then
+          notify(("Deleted %d key(s) under %s:*"):format(#key_list, prefix))
+        else
+          notify(("Deleted %d/%d key(s) under %s:*"):format(#key_list - failed, #key_list, prefix),
+            vim.log.levels.WARN)
+        end
         -- one history line for the whole batch, not one per key
         record({ "DEL", prefix .. ":*" }, {
           connection = node.meta and node.meta.connection,
           db = db,
           count = #key_list,
           yank = scan_pipeline(prefix),
+          status = failed > 0 and "error" or nil,
+          error = failed > 0
+            and ("%d of %d key(s) not deleted: %s"):format(failed, #key_list, tostring(first_err))
+            or nil,
         })
         -- the prefix's whole subtree is gone: drop its row, no rescan
         refresh_tree(db_node, ctx.render, function() detach_node(node) end)
@@ -255,6 +279,8 @@ local function delete_prefix_keys(node, ctx, opts)
       session_conn.execute(url, { "DEL", key_list[i] }, {
         on_response = function() del_next(i + 1) end,
         on_error = function(msg)
+          failed = failed + 1
+          first_err = first_err or msg
           notify(("DEL %s failed: %s"):format(key_list[i], tostring(msg)), vim.log.levels.ERROR)
           del_next(i + 1)
         end,
@@ -344,6 +370,11 @@ function M.delete_nodes(nodes, ctx)
     end
   end
   local pending_scans = 0
+  -- A group whose SCAN dies contributes zero keys to the batch, so the count
+  -- the user confirms and the aggregated history line are both understated.
+  -- Track it and say so — otherwise a partially-collected batch reads as the
+  -- whole selection having been deleted.
+  local scan_failed, first_scan_err = 0, nil
   -- Batch delete helper. Defined BEFORE the group-scan loop: scan callbacks
   -- (which may fire synchronously in tests) call confirm_and_run, so it must
   -- be bound before any group's scan_next dispatches.
@@ -351,7 +382,11 @@ function M.delete_nodes(nodes, ctx)
     if pending_scans > 0 then return end
     local total = 0
     for _, job in ipairs(jobs) do total = total + #job.keys end
-    if not confirm(("Delete %d selected node(s) and their %d key(s)?"):format(#jobs, total)) then
+    local question = ("Delete %d selected node(s) and their %d key(s)?"):format(#jobs, total)
+    if scan_failed > 0 then
+      question = question .. ("\n(%d node(s) could not be scanned — their keys are NOT included)"):format(scan_failed)
+    end
+    if not confirm(question) then
       notify("Deletion cancelled")
       return
     end
@@ -364,9 +399,18 @@ function M.delete_nodes(nodes, ctx)
         flat[#flat + 1] = { key = k, db = job.node.meta and job.node.meta.db }
       end
     end
+    local failed, first_err = 0, nil
     local function del_next(i)
       if i > #flat then
-        notify(("Deleted %d key(s) across %d node(s)"):format(#flat, #jobs))
+        if failed == 0 and scan_failed == 0 then
+          notify(("Deleted %d key(s) across %d node(s)"):format(#flat, #jobs))
+        else
+          local msg = ("Deleted %d/%d key(s) across %d node(s)"):format(#flat - failed, #flat, #jobs)
+          if scan_failed > 0 then
+            msg = msg .. ("; %d node(s) not scanned"):format(scan_failed)
+          end
+          notify(msg, vim.log.levels.WARN)
+        end
         -- one aggregated history line: literal keys + prefix globs; the yank
         -- form splits globs into redis-cli scan pipelines (a bare glob DEL
         -- cannot be pasted into redis-cli)
@@ -385,14 +429,29 @@ function M.delete_nodes(nodes, ctx)
         if #lit > 0 then yank_lines[#yank_lines + 1] = "DEL " .. table.concat(lit, " ") end
         local cmd_toks = { "DEL" }
         vim.list_extend(cmd_toks, patterns)
+        -- What the batch could not finish, in the order the user saw it: the
+        -- DELs the server refused, then the collections that never completed.
+        local note = nil
+        if failed > 0 then
+          note = ("%d of %d key(s) not deleted: %s"):format(failed, #flat, tostring(first_err))
+        end
+        if scan_failed > 0 then
+          local s = ("%d of %d node(s) not scanned: %s"):format(scan_failed, #jobs, tostring(first_scan_err))
+          note = note and (note .. "; " .. s) or s
+        end
         record(cmd_toks, {
           connection = nodes[1].meta and nodes[1].meta.connection,
           db = nodes[1].meta and nodes[1].meta.db,
           count = #flat,
           yank = table.concat(yank_lines, "\n"),
+          status = note and "error" or nil,
+          error = note,
         })
         for _, job in ipairs(jobs) do
-          detach_node(job.node)
+          -- A node whose keys were never collected stays in the tree: dropping
+          -- its row would hide keys that are still in the keyspace, and the
+          -- user would have no handle left to retry them.
+          if not job.scan_failed then detach_node(job.node) end
         end
         refresh_tree(db_node, ctx.render, nil)
         if ctx.on_done then ctx.on_done() end
@@ -401,6 +460,8 @@ function M.delete_nodes(nodes, ctx)
       session_conn.execute(url, { "DEL", flat[i].key }, {
         on_response = function() del_next(i + 1) end,
         on_error = function(msg)
+          failed = failed + 1
+          first_err = first_err or msg
           notify(("DEL %s failed: %s"):format(flat[i].key, tostring(msg)), vim.log.levels.ERROR)
           del_next(i + 1)
         end,
@@ -429,6 +490,12 @@ function M.delete_nodes(nodes, ctx)
           end,
           on_error = function(msg)
             notify("SCAN failed: " .. tostring(msg), vim.log.levels.ERROR)
+            -- once per node, even if a later page of the same walk also dies
+            if not job.scan_failed then
+              job.scan_failed = true
+              scan_failed = scan_failed + 1
+              first_scan_err = first_scan_err or msg
+            end
             pending_scans = pending_scans - 1
             if pending_scans == 0 then confirm_and_run() end
           end,
@@ -492,6 +559,10 @@ function M.set_ttl(node, _ctx)
           end,
           on_error = function(msg)
             notify("TTL update failed: " .. tostring(msg), vim.log.levels.ERROR)
+            record(cmd, {
+              connection = node.meta and node.meta.connection, db = db,
+              status = "error", error = tostring(msg),
+            })
           end,
         }, nil, { db = db, owner = "browser" })
       end)
@@ -535,7 +606,7 @@ function M.set_ttl_nodes(nodes, ctx)
       notify("Invalid TTL: " .. input, vim.log.levels.ERROR)
       return
     end
-    local failed = 0
+    local failed, first_err = 0, nil
     local function apply(i)
       if i > #keys then
         if failed == 0 then
@@ -556,6 +627,10 @@ function M.set_ttl_nodes(nodes, ctx)
           db = keys[1].meta and keys[1].meta.db,
           count = #keys,
           yank = table.concat(yank_lines, "\n"),
+          status = failed > 0 and "error" or nil,
+          error = failed > 0
+            and ("%d of %d key(s) not set: %s"):format(failed, #keys, tostring(first_err))
+            or nil,
         })
         if ctx.on_done then ctx.on_done() end
         return
@@ -569,6 +644,7 @@ function M.set_ttl_nodes(nodes, ctx)
         on_response = function() apply(i + 1) end,
         on_error = function(msg)
           failed = failed + 1
+          first_err = first_err or msg
           notify(("TTL %s failed: %s"):format(node.meta.key, tostring(msg)), vim.log.levels.ERROR)
           apply(i + 1)
         end,
@@ -618,6 +694,10 @@ function M.rename_key(node, ctx)
           end,
           on_error = function(msg)
             notify("RENAME failed: " .. tostring(msg), vim.log.levels.ERROR)
+            record({ "RENAME", key, new_key }, {
+              connection = node.meta and node.meta.connection, db = db,
+              status = "error", error = tostring(msg),
+            })
           end,
         }, nil, { db = db, owner = "browser" })
       end,

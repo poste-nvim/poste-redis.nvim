@@ -147,6 +147,18 @@ describe("poste-redis history", function()
     assert.equals("✗", lines[1]:sub(spans[1].mark[1] + 1, spans[1].mark[2]))
   end)
 
+  it("a rejected write shows ✗, not the + of a write that landed", function()
+    -- Browser mutations mark "+" (they have no result set to check). The
+    -- failed branch has to win the ordering or a refused `DEL` reads as a
+    -- successful one in the only column that says what happened.
+    history.push(entry({
+      command = "DEL user:1", kind = "write", lines = {},
+      status = "error", error = "READONLY",
+    }))
+    local lines = history._test.build(60)
+    assert.equals("✗", lines[1]:sub(1, #"✗"))
+  end)
+
   it("long commands truncate and keep the time column aligned", function()
     history.push(entry({
       command = "GET " .. string.rep("k", 120),
@@ -171,7 +183,25 @@ describe("poste-redis history", function()
       vim.fn.getreg('"'))
   end)
 
-  it("activate on a write entry renders the no-snapshot hint into the panel", function()
+  it("activate on a REJECTED write renders the ERROR block, not the hint", function()
+    -- The entry has no result set, but it does have the server's reason —
+    -- that is what the user came back for. The "no result snapshot" hint
+    -- reads as if the entry itself were lost.
+    history.push(entry({
+      command = "RENAME user:1 newkey", kind = "write", lines = {},
+      status = "error", error = "ERR no such key for RENAME",
+    }))
+    local buffer = require("poste-redis.buffer")
+    history.activate(1)
+    local text = table.concat(vim.api.nvim_buf_get_lines(buffer.buf(), 0, -1, false), "\n")
+    assert.truthy(text:find("ERR no such key for RENAME", 1, true), text)
+    assert.truthy(text:find("RENAME user:1 newkey", 1, true), text)
+    assert.is_false(text:find("No result snapshot", 1, true) ~= nil,
+      "the hint must not replace the failure the entry carries")
+    buffer.close()
+  end)
+
+  it("a write entry with no error still renders the no-snapshot hint", function()
     history.push(entry({ command = "DEL k", kind = "write", lines = {} }))
     local buffer = require("poste-redis.buffer")
     history.activate(1)

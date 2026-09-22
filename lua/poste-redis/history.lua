@@ -119,6 +119,19 @@ function M.activate(idx, enter)
     return
   end
   if not e.lines or #e.lines == 0 then
+    -- A rejected write has no result set, but it does have the server's
+    -- reason. The "no snapshot" hint would read as if the entry were lost,
+    -- when what the user came looking for is why `RENAME` failed.
+    if e.error and e.error ~= "" then
+      buffer.render_snapshot(
+        require("poste-redis.format").format_error(e.error, e.command), {
+          command = e.command,
+          status = e.status,
+          error = e.error,
+          value = e.value,
+        }, { enter = enter })
+      return
+    end
     buffer.render_snapshot({
       "No result snapshot for this entry.",
       "",
