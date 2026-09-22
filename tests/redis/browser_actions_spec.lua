@@ -406,4 +406,131 @@ describe("poste-redis browser actions", function()
       assert.not_equals("EXPIRE", c.cmd and c.cmd[1], "no keys selected → no server call")
     end
   end)
+
+  -- A key whose name is not valid UTF-8 reaches Lua as a rendering of its
+  -- bytes — `(binary) N bytes hex: …` through the value path (SCAN's key list)
+  -- or `hex:…` where a name is rendered. Writing it back addresses a key with
+  -- THAT TEXT as its name: DEL answers 0 (so "Deleted … (0 key(s))") and
+  -- EXPIRE answers 0 while the panel reports success and detaches the row.
+  describe("writes on a key whose name only renders", function()
+    local notices
+    local orig_notify
+    local BIN = "(binary) 2 bytes hex: ff 00"
+    local HEXNAME = "hex:ff fe"
+
+    before_each(function()
+      orig_notify = vim.notify
+      notices = {}
+      vim.notify = function(msg) notices[#notices + 1] = tostring(msg) end
+    end)
+    after_each(function() vim.notify = orig_notify end)
+
+    local function any_cmd(...)
+      local wanted = { ... }
+      for _, c in ipairs(calls) do
+        if type(c) == "table" and c.cmd then
+          for _, w in ipairs(wanted) do
+            if c.cmd[1] == w then return true end
+          end
+        end
+      end
+      return false
+    end
+
+    local function notice_matching(pattern)
+      for _, n in ipairs(notices) do
+        if n:find(pattern) then return n end
+      end
+      return nil
+    end
+
+    for _, marker in ipairs({ { BIN, "SCAN-list rendering" }, { HEXNAME, "name rendering" } }) do
+      local name = marker[1]
+      it("delete_key refuses " .. marker[2], function()
+        local node = key_node(name, "stubconn", 0)
+        node.meta.url = "redis://h:6379/0"
+        actions.delete_key(node, {})
+        vim.wait(150, function() return false end, 5)
+        assert.is_false(any_cmd("DEL"), "no DEL against a name that is only a rendering")
+        assert.is_true(notice_matching("not the name") ~= nil,
+          "the notice must say why: " .. table.concat(notices, " / "))
+      end)
+
+      it("set_ttl refuses " .. marker[2], function()
+        local node = key_node(name, "stubconn", 0)
+        node.meta.url = "redis://h:6379/0"
+        actions.set_ttl(node, {})
+        vim.wait(150, function() return false end, 5)
+        assert.is_false(any_cmd("TTL", "EXPIRE", "PERSIST"),
+          "not even the current-TTL query runs")
+        assert.is_true(notice_matching("not the name") ~= nil)
+      end)
+
+      it("rename_key refuses " .. marker[2] .. " before prompting", function()
+        local node = key_node(name, "stubconn", 0)
+        node.meta.url = "redis://h:6379/0"
+        actions.rename_key(node, {})
+        vim.wait(150, function() return false end, 5)
+        -- vim.ui.input records into `calls` too, so this covers "no prompt"
+        assert.equals(0, #calls)
+        assert.is_true(notice_matching("not the name") ~= nil)
+      end)
+
+      it("delete_prefix refuses " .. marker[2] .. " before its estimate SCAN", function()
+        local group = tree.make_group_node(name, "stubconn", 0)
+        group.meta.url = "redis://h:6379/0"
+        actions.delete_prefix(group, {})
+        vim.wait(150, function() return false end, 5)
+        assert.equals(0, #calls, "the estimate SCAN must not run either")
+        assert.is_true(notice_matching("not the name") ~= nil)
+      end)
+    end
+
+    it("delete_nodes skips only the unaddressable keys", function()
+      local good = key_node("user:1", "stubconn", 0)
+      good.meta.url = "redis://h:6379/0"
+      local bad = key_node(BIN, "stubconn", 0)
+      bad.meta.url = "redis://h:6379/0"
+      actions.delete_nodes({ good, bad }, {})
+      assert.is_true(wait_for(function() return any_cmd("DEL") end), "batch delete stalled")
+      vim.wait(150, function() return false end, 5)
+      local dels = {}
+      for _, c in ipairs(calls) do
+        if c.cmd and c.cmd[1] == "DEL" then dels[#dels + 1] = c.cmd[2] end
+      end
+      assert.same({ "user:1" }, dels)
+      assert.is_true(notice_matching("1 selected") ~= nil,
+        "the skip must be reported: " .. table.concat(notices, " / "))
+    end)
+
+    it("set_ttl_nodes skips only the unaddressable keys", function()
+      local good = key_node("user:1", "stubconn", 0)
+      good.meta.url = "redis://h:6379/0"
+      local bad = key_node(HEXNAME, "stubconn", 0)
+      bad.meta.url = "redis://h:6379/0"
+      actions.set_ttl_nodes({ good, bad }, {})
+      assert.is_true(wait_for(function() return any_cmd("EXPIRE") end), "batch TTL stalled")
+      vim.wait(150, function() return false end, 5)
+      local expires = {}
+      for _, c in ipairs(calls) do
+        if c.cmd and c.cmd[1] == "EXPIRE" then expires[#expires + 1] = c.cmd[2] end
+      end
+      assert.same({ "user:1" }, expires)
+      assert.is_true(notice_matching("1 selected") ~= nil)
+    end)
+
+    it("over-fire control: technical-looking names stay writable", function()
+      -- the marker wants whole hex pairs after `hex:`, so a plain UTF-8 key
+      -- that merely looks like one is not caught by the guard
+      for _, name in ipairs({ "hex:zz", "hex:ffzz", "binary:key", "id:7" }) do
+        calls = {}
+        local node = key_node(name, "stubconn", 0)
+        node.meta.url = "redis://h:6379/0"
+        actions.delete_key(node, {})
+        assert.is_true(wait_for(function() return any_cmd("DEL") end),
+          name .. " must still delete")
+        assert.same({ "DEL", name }, calls[1].cmd)
+      end
+    end)
+  end)
 end)

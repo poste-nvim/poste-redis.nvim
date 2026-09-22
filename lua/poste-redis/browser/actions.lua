@@ -126,6 +126,56 @@ local function detach_node(node)
   end
 end
 
+--- Refuse a write whose target name exists only as a rendering. A key whose
+--- name is not valid UTF-8 cannot cross the JSON transport as bytes, so the
+--- tree holds its hex preview instead: `(binary) N bytes hex: …` (SCAN hands
+--- key names through the value path). The text addresses nothing — DEL and
+--- EXPIRE answer 0 for it, which this module reports as success, and RENAME
+--- answers "no such key". Identical rule to grid_edit's name guard; see
+--- util.is_hex_display for what counts as a rendering.
+--- @param name string|nil
+--- @return string|nil reason
+local function display_only_name(name)
+  if not util.is_hex_display(name) then return nil end
+  return ("'%s' is how a non-UTF-8 key name renders — it is not the name on "
+    .. "the server, so nothing can be changed under it from the browser. "
+    .. "Send the command yourself, with the bytes escaped"):format(tostring(name))
+end
+
+--- Notify-and-refuse form of display_only_name, for the single-node actions.
+--- @param name string|nil
+--- @return boolean refused
+local function refuse_display_only(name)
+  local why = display_only_name(name)
+  if not why then return false end
+  notify(why, vim.log.levels.WARN)
+  return true
+end
+
+--- Drop the selected nodes whose name is only a rendering (batch actions):
+--- key nodes by their key, group nodes by the prefix their DEL-batch would
+--- SCAN. Reports how many went missing so a short count is never silent.
+--- @param nodes table[]
+--- @return table[] kept, number skipped
+local function addressable(nodes)
+  local kept, skipped = {}, 0
+  for _, node in ipairs(nodes) do
+    local name = node.meta and (node.node_type == "key" and node.meta.key
+      or node.meta.prefix)
+    if name and display_only_name(name) then
+      skipped = skipped + 1
+    else
+      kept[#kept + 1] = node
+    end
+  end
+  if skipped > 0 then
+    notify(("%d selected node(s) are skipped: their names are only a rendering "
+      .. "of non-UTF-8 bytes, not the name on the server"):format(skipped),
+      vim.log.levels.WARN)
+  end
+  return kept, skipped
+end
+
 ----------------------------------------------------------------------
 -- Delete
 ----------------------------------------------------------------------
@@ -141,6 +191,7 @@ function M.delete_key(node, ctx)
     notify("Cannot resolve key/connection: " .. tostring(err), vim.log.levels.ERROR)
     return
   end
+  if refuse_display_only(key) then return end
   if not confirm(("Delete key  %s  ?"):format(key)) then
     notify("Deletion cancelled")
     return
@@ -175,6 +226,7 @@ local function delete_prefix_keys(node, ctx, opts)
     notify("Cannot resolve prefix/connection: " .. tostring(err), vim.log.levels.ERROR)
     return
   end
+  if refuse_display_only(prefix) then return end
   local db = node.meta and node.meta.db
   -- SCAN pages may repeat a key (at-least-once) and this list is both the
   -- confirm count and the DEL batch, so it goes through the dedup collector
@@ -265,13 +317,16 @@ function M.delete_node(node, ctx)
 end
 
 --- Batch-delete several selected nodes (multi-select) with one confirm.
---- Key nodes DEL directly; group nodes SCAN their prefix first.
+--- Key nodes DEL directly; group nodes SCAN their prefix first. A selection
+--- whose nodes are all display-only is dropped before the confirm (see
+--- addressable), like a cancelled batch: multi-select stays where it was.
 --- @param nodes table[] selected nodes
---- @param ctx table { db_node, render }
---- @param on_done fun()|nil  called after the batch (e.g. exit multi-select)
+--- @param ctx table { db_node, render, on_done }  on_done runs after the batch
 function M.delete_nodes(nodes, ctx)
   ctx = ctx or {}
   if not nodes or #nodes == 0 then return end
+  nodes = addressable(nodes)
+  if #nodes == 0 then return end
   local db_node = ctx.db_node
   local url, err = conn_url_for(nodes[1])
   if not url then
@@ -403,6 +458,7 @@ function M.set_ttl(node, _ctx)
     notify("Cannot resolve key/connection: " .. tostring(err), vim.log.levels.ERROR)
     return
   end
+  if refuse_display_only(key) then return end
   local db = node.meta and node.meta.db
 
   session_conn.execute(url, { "TTL", key }, {
@@ -459,6 +515,7 @@ function M.set_ttl_nodes(nodes, ctx)
       keys[#keys + 1] = node
     end
   end
+  keys = addressable(keys)
   if #keys == 0 then
     notify("No key nodes selected", vim.log.levels.WARN)
     return
@@ -536,6 +593,7 @@ function M.rename_key(node, ctx)
     notify("Cannot resolve key/connection: " .. tostring(err), vim.log.levels.ERROR)
     return
   end
+  if refuse_display_only(key) then return end
   local db = node.meta and node.meta.db
 
   vim.ui.input({ prompt = ("Rename %s to: "):format(key), default = key }, function(new_key)
