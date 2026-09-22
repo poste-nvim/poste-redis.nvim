@@ -201,6 +201,25 @@ describe("poste-redis history", function()
     buffer.close()
   end)
 
+  it("activate on a rejected write with no message says so, not the hint", function()
+    -- `status` is the verdict and `error` is its explanation. An entry carrying
+    -- only the verdict used to render "No result snapshot for this entry", which
+    -- reads as if the record were lost rather than the command refused.
+    history.push(entry({
+      command = "EXPIRE user:1 60", kind = "write", lines = {},
+      status = "error",
+    }))
+    local buffer = require("poste-redis.buffer")
+    history.activate(1)
+    local text = table.concat(vim.api.nvim_buf_get_lines(buffer.buf(), 0, -1, false), "\n")
+    assert.truthy(text:find("ERROR", 1, true), text)
+    assert.truthy(text:find("(unknown error)", 1, true), text)
+    assert.truthy(text:find("EXPIRE user:1 60", 1, true), text)
+    assert.is_false(text:find("No result snapshot", 1, true) ~= nil,
+      "a verdict with no message is still a verdict")
+    buffer.close()
+  end)
+
   it("a write entry with no error still renders the no-snapshot hint", function()
     history.push(entry({ command = "DEL k", kind = "write", lines = {} }))
     local buffer = require("poste-redis.buffer")
