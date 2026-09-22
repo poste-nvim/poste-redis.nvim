@@ -129,6 +129,58 @@ describe("poste-redis runner indicators", function()
     assert.equals(3, history.list()[1].db)
   end)
 
+  it("history keeps the server's error message, not a boolean", function()
+    -- regression: present() pushed `error = any_failed`, and history replay
+    -- renders `tostring(error)` — the entry's preview read
+    -- "ERROR / true" where the server's reason should be.
+    exec_run.run_selection_async = function(_buf, _mode, _opts, callbacks)
+      callbacks.on_done({
+        {
+          seq = 1, command = "SELECT 99", status = "error", latency_ms = 1,
+          error = "ERR DB index is out of range",
+        },
+      }, {})
+    end
+    runner.run_selection("cursor")
+    local e = history.list()[1]
+    assert.equals("error", e.status)
+    assert.equals("ERR DB index is out of range", e.error)
+    history.activate(1)
+    local tab = buffer.active_tab()
+    local text = table.concat(tab.lines or {}, "\n")
+    assert.truthy(text:find("DB index is out of range", 1, true))
+    assert.is_nil(text:find("\n  true", 1, true))
+  end)
+
+  it("a later command's failure does not replay the first result as an error", function()
+    -- the batch's FIRST result is what the panel showed; an `error = true`
+    -- flag on the entry sent replay down format_result's error branch and
+    -- replaced the successful value with an error block. ✗ still shows in the
+    -- sidebar (status is "error").
+    vim.api.nvim_buf_set_lines(src, 0, -1, false, { "GET k", "SET" })
+    exec_run.run_selection_async = function(_buf, _mode, _opts, callbacks)
+      callbacks.on_done({
+        {
+          seq = 1, command = "GET k", status = "OK", latency_ms = 1,
+          value = { type = "string", value = "payload" },
+        },
+        {
+          seq = 2, command = "SET", status = "error", latency_ms = 1,
+          error = "ERR wrong number of arguments for 'set' command",
+        },
+      }, {})
+    end
+    runner.run_selection("visual", { start_line = 1, end_line = 2 })
+    local e = history.list()[1]
+    assert.equals("error", e.status)
+    assert.is_nil(e.error)
+    history.activate(1)
+    local tab = buffer.active_tab()
+    -- a real result tab (strings render as a one-row grid), not an ERROR block
+    assert.equals("table", tab.kind)
+    assert.is_nil(tab.meta.error)
+  end)
+
   it("line runs show no indicator on the inherited SELECT line", function()
     vim.api.nvim_buf_set_lines(src, 0, -1, false, { "USE local", "SELECT 3", "GET session:abc" })
     vim.api.nvim_win_set_cursor(0, { 3, 0 })

@@ -67,7 +67,13 @@ local function present(results, summaries, opts)
     connection = opts.connection or state.context.connection,
     status = any_failed and "error" or (first and first.status or ""),
     latency_ms = total_latency,
-    error = any_failed,
+    -- the FIRST result's message, not the `any_failed` boolean: history replay
+    -- hands this straight to format_result, which renders `tostring(error)` —
+    -- users saw the literal word "true" where the server's reason should be.
+    -- It also keeps a batch whose LATER command failed from being replayed as
+    -- an error block: the panel showed the first (successful) result at run
+    -- time, and `status` above still marks the entry ✗ in the sidebar.
+    error = first and first.error or nil,
     -- the first result's db: a replayed entry renders as a real tab bound to
     -- meta.db — without it, grid edits / refresh / TTL probes run unsteered
     -- on the shared session's CURRENT db (a silent wrong-db write)

@@ -50,6 +50,8 @@ end
 --- Push a run / write into history.
 --- @param entry table { command, connection, status, latency_ms, error,
 ---   lines, value, kind ("exec"|"write"), yank, count, db }
+---   error: the server's message for a failed run — a string, never a boolean,
+---     because replay renders it verbatim (see runner.present).
 ---   value: the raw (transport-truncated) result value — rides the snapshot
 ---   so `K` in the panel can preview the entry's detail
 function M.push(entry)
@@ -157,6 +159,17 @@ end
 -- Sidebar (beside the result panel as a real split of the panel row)
 -----------------------------------------------------------------------
 
+--- An entry counts as failed when it carries an error message OR was pushed
+--- with `status == "error"`. The two are not the same: a batch whose later
+--- command failed reports status "error" while its stored message is the
+--- first (successful) result's — nil. Both the ✗ column and its highlight read
+--- this, so the rule lives in one place.
+--- @param e table|nil
+--- @return boolean
+local function failed(e)
+  return e ~= nil and ((e.error and e.error ~= "") or e.status == "error") and true or false
+end
+
 --- Render the float body: `✓ <command padded>  <HH:MM:SS>` — the command
 --- left-aligned (truncated to fit), the time pinned to the right edge.
 --- @param width number  float width (display cells)
@@ -171,7 +184,7 @@ local function build(width)
     -- blank arm needs the explicit comparison: an entry that never reported a
     -- status must not read as a success
     local status = e.status or ""
-    local mark = e.error and "✗"
+    local mark = failed(e) and "✗"
       or (e.kind == "write" and "+")
       or (status ~= "" and "✓" or " ")
     local time = os.date("%H:%M:%S", e.ts or os.time())
@@ -203,7 +216,7 @@ local function refresh()
   vim.api.nvim_buf_clear_namespace(buf, hl_ns, 0, -1)
   for offset, span in ipairs(spans) do
     local e = history[#history - (offset - 1)]
-    if e and e.error and span.mark then
+    if span.mark and failed(e) then
       -- the full mark glyph (3 bytes for ✗) — a 1-byte range used to clamp
       -- at the char boundary and color nothing
       vim.api.nvim_buf_add_highlight(buf, hl_ns, "PosteRedisHistoryError",

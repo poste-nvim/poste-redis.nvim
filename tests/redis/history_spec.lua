@@ -131,10 +131,20 @@ describe("poste-redis history", function()
   it("build spans the error mark glyph in full (3 bytes for ✗)", function()
     -- Regression: the error highlight covered 1 byte of the 3-byte ✗, which
     -- clamps at the char boundary and colors nothing.
-    history.push(entry({ command = "GET k", error = true }))
+    history.push(entry({ command = "GET k", status = "error", error = "WRONGTYPE" }))
     local lines, spans = history._test.build(60)
     assert.equals("✗", lines[1]:sub(spans[1].mark[1] + 1, spans[1].mark[2]))
     assert.equals(3, spans[1].mark[2] - spans[1].mark[1])
+  end)
+
+  it("build marks a batch-level failure ✗ even when no message is stored", function()
+    -- When a batch's LATER command fails, runner.present keeps the entry's
+    -- message as the first (successful) result's — nil — but status is
+    -- "error". The ✗ column used to read only the error field, so that entry
+    -- silently showed ✓.
+    history.push(entry({ command = "SET k v", status = "error" }))
+    local lines, spans = history._test.build(60)
+    assert.equals("✗", lines[1]:sub(spans[1].mark[1] + 1, spans[1].mark[2]))
   end)
 
   it("long commands truncate and keep the time column aligned", function()
