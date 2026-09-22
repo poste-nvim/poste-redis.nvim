@@ -212,6 +212,24 @@ local function percent_encode(s)
   end))
 end
 
+--- Bracket an IPv6 literal so it is legal in a URL authority (RFC 3986 §3.2.2).
+--- Without the brackets the URL never reaches a socket: `host = "::1"` built
+--- `redis://::1:6379/0`, and the binary answered
+--- `Redis URL did not parse- InvalidClientConfig` for a config that is not
+--- actually wrong. Only hex digits plus colons qualify, so a port left in the
+--- host field (`localhost:6379`) is not rebracketed into something else; a
+--- host that already carries brackets passes through, which is the form that
+--- worked before this existed.
+--- @param host string
+--- @return string
+local function url_host(host)
+  if host:sub(1, 1) == "[" then return host end
+  if host:find(":", 1, true) and host:match("^[%x:]+$") then
+    return "[" .. host .. "]"
+  end
+  return host
+end
+
 -----------------------------------------------------------------------
 -- Config parsing
 -----------------------------------------------------------------------
@@ -294,7 +312,7 @@ local function build_url_from_fields(conn, name)
   elseif conn.username then
     auth = percent_encode(conn.username) .. "@"
   end
-  return string.format("%s://%s%s:%d/%d", scheme, auth, host, port, db)
+  return string.format("%s://%s%s:%d/%d", scheme, auth, url_host(host), port, db)
 end
 
 --- Resolve a connection name to a redis:// URL.
@@ -367,9 +385,13 @@ function M.list_connections_sync(search_dir)
       if not host and url then
         -- URL-derived host for display: strip the userinfo FIRST, or the
         -- capture grabs `user:password` whole (credentials must never land
-        -- in a host field, even one nothing renders today)
+        -- in a host field, even one nothing renders today). The balanced
+        -- branch comes first because an IPv6 literal is full of the colons
+        -- that end the plain class — `%b[]` keeps `[::1]` whole where
+        -- `[^:/]+` reports `[`.
         local no_userinfo = url:gsub("//([^/@]+)@", "//")
-        host = no_userinfo:match("^rediss?://([^:/]+)")
+        host = no_userinfo:match("^rediss?://(%b[])")
+          or no_userinfo:match("^rediss?://([^:/]+)")
       end
       local db = resolved.db
       if not db and url then db = url:match("/(%d+)$") end
@@ -513,6 +535,7 @@ end
 M._test = {
   get_search_dir = get_search_dir,
   build_url_from_fields = build_url_from_fields,
+  url_host = url_host,
   parse_dotenv = parse_dotenv,
   apply_env = apply_env,
   percent_encode = percent_encode,

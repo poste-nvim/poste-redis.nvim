@@ -87,6 +87,46 @@ db = 0
     assert.equals("rediss://db.internal:6379/0", url)
   end)
 
+  -- An IPv6 literal needs brackets in a URL authority, and the binary is the
+  -- one that says so: `redis://::1:6379/0` is refused before any socket is
+  -- opened, with `Error: Redis URL did not parse- InvalidClientConfig`, while
+  -- `redis://[::1]:6379/0` gets as far as `Connection refused`. So the builder
+  -- brackets, and a `host = "::1"` in the file is a usable connection.
+  it("brackets an IPv6 host so the URL parses", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "::1"
+port = 6380
+db = 2
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(err)
+    assert.equals("redis://[::1]:6380/2", url)
+  end)
+
+  it("keeps credentials outside the brackets when the host is IPv6", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "fe80::1"
+password = "pa ss"
+]])
+    local url = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.equals("redis://:pa%20ss@[fe80::1]:6379/0", url)
+  end)
+
+  it("brackets nothing that is not an IPv6 literal", function()
+    local t = connections._test
+    -- already bracketed (the form that worked before), a port left in the host
+    -- field (a mistake this must not rewrite into something else), plain names,
+    -- IPv4, and a hex-only hostname without a colon
+    for _, host in ipairs({ "[::1]", "localhost:6379", "db.internal", "10.0.0.1",
+      "abcdef", "example.com" }) do
+      assert.equals(host, t.url_host(host), host)
+    end
+  end)
+
   it("expands {{VAR}} from .env into the password and percent-encodes", function()
     write("connections.toml", [[
 [srv]
@@ -363,6 +403,22 @@ url = "redis://alice:s3cret@db.internal:6380/2"
     assert.equals("db.internal", list[1].host)
     assert.equals("2", list[1].db)
     assert.is_nil(list[1].host:find("s3cret", 1, true))
+  end)
+
+  -- The same capture has to survive an IPv6 literal, which is full of the
+  -- colons that end the plain pattern: `[^:/]+` alone reports `[`.
+  it("URL-derived host keeps a bracketed IPv6 literal whole", function()
+    write("connections.toml", [[
+[v6]
+dialect = "redis"
+url = "rediss://alice:pa1ss@[::1]:6379/1"
+]])
+    local list = {}
+    connections.list_connections(function(l) list = l end, { search_dir = tmpdir })
+    assert.equals(true, vim.wait(500, function() return #list > 0 end, 5))
+    assert.equals("[::1]", list[1].host)
+    assert.equals("1", list[1].db)
+    assert.is_nil(list[1].host:find("pa1ss", 1, true))
   end)
 
   it("get_connection_config returns env-expanded values", function()
