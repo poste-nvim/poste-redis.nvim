@@ -46,6 +46,28 @@ describe("poste-redis parser", function()
     assert.same({ "LPUSH", "q", "'{\"to\":\"a#b\"}'" }, entries[1].tokens)
   end)
 
+  it("keeps a # glued to a word part of the word — a key, not a comment", function()
+    -- redis keys are binary-safe: `user#1` is one key. The comment starter
+    -- must sit at a word boundary (whitespace before it), matching the
+    -- syntax file's `\s\+#` highlight rule; mid-word it silently retargeted
+    -- the command — `SET user#1 v` ran as `SET user v`.
+    local entries = parser.extract_entries("SET user#1 v\n")
+    assert.equals(1, #entries)
+    assert.same({ "SET", "user#1", "v" }, entries[1].tokens)
+  end)
+
+  it("keeps a -- glued to a word part of the word", function()
+    local entries = parser.extract_entries("GET hash--tag\n")
+    assert.equals(1, #entries)
+    assert.same({ "GET", "hash--tag" }, entries[1].tokens)
+  end)
+
+  it("a key that itself starts with -- still needs quoting", function()
+    local entries = parser.extract_entries('GET "--key"\n')
+    assert.equals(1, #entries)
+    assert.same({ "GET", "--key" }, parser.entry_args(entries[1]))
+  end)
+
   it("strips inline comments after a bare #", function()
     local entries = parser.extract_entries("GET user:42  # fetch the token\n")
     assert.equals(1, #entries)

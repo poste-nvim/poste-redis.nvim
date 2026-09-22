@@ -15,9 +15,17 @@ local function split_lines(content)
 end
 
 --- Tokenize a physical line body (before continuation-join) into tokens,
---- stopping at the first bare `#` or `--` comment. Quote-aware: `#` inside
---- quotes never starts a comment. Quotes are kept on the token (stripped
---- later by unquote) so `a # b` inside a string round-trips.
+--- stopping at the first *standalone* `#` or `--` comment. Quote-aware: `#`
+--- inside quotes never starts a comment. Quotes are kept on the token
+--- (stripped later by unquote) so `a # b` inside a string round-trips.
+---
+--- "Standalone" mirrors the syntax file (`\s\+#` / `\s\+--`): a comment
+--- starter must sit at a word boundary, i.e. right after whitespace. Redis
+--- keys are binary-safe — `user#1` and `hash--tag` are legal key names — and
+--- a comment check that fires mid-word silently retargets the command
+--- (`SET user#1 v` would become `SET user v`, a write to a key that was
+--- never named). Quoted tokens keep the old behaviour available for a key
+--- that itself starts with `--` (`GET "--key"`).
 --- @param line string
 --- @return string[]
 local function tokenize_line(line)
@@ -26,11 +34,13 @@ local function tokenize_line(line)
   local n = #line
   while i <= n do
     local c = line:sub(i, i)
+    local prev = i > 1 and line:sub(i - 1, i - 1) or " "
+    local at_boundary = prev == " " or prev == "\t"
     if c == " " or c == "\t" then
       i = i + 1
-    elseif c == "#" then
+    elseif c == "#" and at_boundary then
       break
-    elseif c == "-" and line:sub(i, i + 1) == "--" then
+    elseif c == "-" and at_boundary and line:sub(i, i + 1) == "--" then
       break
     elseif c == '"' or c == "'" then
       local close = line:find(c, i + 1, true)
@@ -51,7 +61,10 @@ local function tokenize_line(line)
       tokens[#tokens + 1] = line:sub(i, close)
       i = close + 1
     else
-      local word_end = line:find("[%s#]", i)
+      -- A bare word runs to whitespace; a `#` glued to it belongs to the word
+      -- (the comment decision happened at the top of the loop, where the
+      -- boundary was still visible).
+      local word_end = line:find("%s", i)
       if not word_end then word_end = n + 1 end
       tokens[#tokens + 1] = line:sub(i, word_end - 1)
       i = word_end
