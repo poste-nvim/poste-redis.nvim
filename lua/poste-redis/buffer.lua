@@ -131,12 +131,29 @@ end
 -- Refresh
 ------------------------------------------------------------------------
 
---- Re-run the active tab's command against its recorded connection and
---- replace the tab with the fresh result. Works for browser value-viewer
---- tabs (meta.connection + meta.db) and exec tabs that carry a connection.
-function M.refresh()
-  local tab = state.tabs[state.active]
-  if not tab or not tab.meta or not tab.meta.command or tab.meta.command == "" then
+--- Re-run a tab's command against its recorded connection and replace that
+--- tab with the fresh result. Works for browser value-viewer tabs
+--- (meta.connection + meta.db) and exec tabs that carry a connection.
+--- Without an argument the active tab is refreshed; `grid_edit` passes the tab
+--- a write came from, which may have stopped being the active one while the
+--- write was in flight (a rename is two round trips, a verified list write is
+--- three). Re-running whatever is active instead would spend an unrelated
+--- command and leave the edited grid showing the value the write replaced.
+function M.refresh(tab)
+  if not tab then tab = state.tabs[state.active] end
+  local slot
+  for i, t in ipairs(state.tabs) do
+    if t == tab then
+      slot = i
+      break
+    end
+  end
+  if not slot then
+    -- Closed, or already replaced by an earlier refresh: there is no tab left
+    -- to bring up to date, and the active one is somebody else's business.
+    return
+  end
+  if not tab.meta or not tab.meta.command or tab.meta.command == "" then
     vim.notify("Nothing to refresh on this tab", vim.log.levels.INFO,
       { title = constants.TITLE })
     return
@@ -163,6 +180,10 @@ function M.refresh()
   local session_conn = require("poste-redis.session_conn")
   local dispatched = session_conn.execute(url, tokens, {
     on_response = function(ev)
+      -- The user can close or refresh this tab while the re-run is in flight,
+      -- and closing shifts the slots; identity is what says this result still
+      -- belongs where it is going.
+      if state.tabs[slot] ~= tab then return end
       local out = format.format_result(ev)
       -- Keep the tab's identity stamps (connection/db/key/search state) but
       -- let the FRESH result own the time-varying fields: a wholesale
@@ -184,10 +205,14 @@ function M.refresh()
         out.search_matches = {}
         out.search_idx = 0
       end
-      state.tabs[state.active] = out
-      state.last_value = out.meta and out.meta.value
-      view.render_active()
-      fetch_ttl()
+      state.tabs[slot] = out
+      -- Only the tab on screen has a render to redo, a `last_value` to keep
+      -- (it feeds the K preview), or a TTL line to recount.
+      if slot == state.active then
+        state.last_value = out.meta and out.meta.value
+        view.render_active()
+        fetch_ttl()
+      end
     end,
     on_error = function(msg)
       vim.notify("Refresh failed: " .. tostring(msg), vim.log.levels.ERROR,
@@ -586,7 +611,7 @@ function setup_keymaps()
 
   -- Grid editing (poste-db dataset pattern): i edit cell, o add row, dd delete
   local grid_edit = require("poste-redis.browser.grid_edit")
-  grid_edit.set_refresh(function() M.refresh() end)
+  grid_edit.set_refresh(function(tab) M.refresh(tab) end)
   k = config.get_keymap("redis_result", "edit_cell", "i")
   if k then
     vim.keymap.set("n", k, function()

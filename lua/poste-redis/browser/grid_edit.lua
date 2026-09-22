@@ -36,10 +36,13 @@ end
 
 local buffer_refresh = nil  -- set by buffer.lua (M.refresh)
 
-local function refresh()
-  -- writes invalidate completion's key-prefix cache
+--- What every write ends with: the key-prefix completion cache is stale, and
+--- the tab this write came from has to be re-read from the server. The tab is
+--- passed on rather than left to the panel, because the user may have switched
+--- tabs while the write (or the verification in front of it) was in flight.
+local function refresh(tab)
   pcall(function() require("poste-redis.completion.data").clear_key_cache() end)
-  if buffer_refresh then buffer_refresh() end
+  if buffer_refresh then buffer_refresh(tab) end
 end
 
 --- The key + type a tab is bound to (nil when the tab isn't key-bound).
@@ -275,7 +278,8 @@ function M.add_row(tab)
   end
 end
 
---- Wire the refresh used after writes (set once by buffer.lua).
+--- Wire the refresh used after writes (set once by buffer.lua). It is called
+--- with the tab the write came from.
 function M.set_refresh(fn)
   buffer_refresh = fn
 end
@@ -283,8 +287,9 @@ end
 M._test = {
   resolve_conn = resolve_conn,
   key_context = key_context,
+  cursor_cell = cursor_cell,
   DELETE_SENTINEL = DELETE_SENTINEL,
-  set_buffer_refresh = function(fn) buffer_refresh = fn end,
+  set_buffer_refresh = M.set_refresh,
 }
 
 return M

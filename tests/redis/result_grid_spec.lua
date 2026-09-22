@@ -142,6 +142,88 @@ describe("poste-redis result grid", function()
       connections.resolve_redis_url = orig_resolve
     end)
 
+    it("refresh(tab) replaces THAT tab's slot and leaves the active tab alone", function()
+      -- Regression: refresh always took state.tabs[state.active], so a write
+      -- whose response landed after the user switched tabs re-ran an
+      -- unrelated command and overwrote the tab on screen.
+      local session_conn = require("poste-redis.session_conn")
+      local connections = require("poste-redis.connections")
+      local orig_execute, orig_resolve = session_conn.execute, connections.resolve_redis_url
+      local ran = {}
+      connections.resolve_redis_url = function() return "redis://stub:6379/0", nil end
+      session_conn.execute = function(_url, cmd, cbs)
+        -- the winbar TTL probe runs on every tab switch; it is not a refresh
+        if cmd[1] ~= "TTL" then ran[#ran + 1] = table.concat(cmd, " ") end
+        if cbs and cbs.on_response then
+          cbs.on_response({ seq = 1, command = table.concat(cmd, " "), status = "",
+            latency_ms = 1, value = { type = "hash", entries = { { "fresh", "1" } }, len = 1 } })
+        end
+        return "dispatched"
+      end
+      buffer.render({
+        { seq = 1, command = "HGETALL key-a", status = "", latency_ms = 1,
+          value = { type = "hash", entries = { { "name", "Alice" } }, len = 1 } },
+        { seq = 2, command = "HGETALL key-b", status = "", latency_ms = 1,
+          value = { type = "hash", entries = { { "other", "Bob" } }, len = 1 } },
+      }, { render = true, connection = "stub" })
+      local tabs = buffer._tabs()
+      local first, second = tabs[1], tabs[2]
+      buffer.next_tab()
+      assert.equals(second, buffer.active_tab())
+
+      buffer.refresh(first)
+
+      assert.same({ "HGETALL key-a" }, ran, "only the written tab's command re-runs")
+      local replaced = buffer._tabs()[1]
+      assert.are_not.equal(first, replaced)
+      assert.equals("fresh", replaced.grid.rows[1][2])
+      -- the active tab is untouched, and so is the panel: refreshing a
+      -- background tab must not repaint the screen with it
+      assert.equals(second, buffer._tabs()[2])
+      local shown = table.concat(vim.api.nvim_buf_get_lines(buffer.buf(), 0, -1, false), "\n")
+      assert.truthy(shown:find("Bob", 1, true))
+      assert.is_nil(shown:find("fresh", 1, true))
+      -- `K` previews state.last_value, which only the tab on screen owns: a
+      -- background refresh must not hijack it
+      local preview_mod = require("poste-redis.buffer.preview")
+      local orig_raw, previewed = preview_mod.raw, nil
+      preview_mod.raw = function(v) previewed = v end
+      buffer.preview_raw()
+      preview_mod.raw = orig_raw
+      assert.same({ type = "hash", entries = { { "other", "Bob" } }, len = 1 }, previewed)
+      session_conn.execute = orig_execute
+      connections.resolve_redis_url = orig_resolve
+    end)
+
+    it("a refresh response for a tab that is gone is dropped", function()
+      local session_conn = require("poste-redis.session_conn")
+      local connections = require("poste-redis.connections")
+      local orig_execute, orig_resolve = session_conn.execute, connections.resolve_redis_url
+      connections.resolve_redis_url = function() return "redis://stub:6379/0", nil end
+      local pending = nil
+      session_conn.execute = function(_url, _cmd, cbs)
+        pending = cbs
+        return "dispatched"
+      end
+      buffer.render({ {
+        seq = 1, command = "HGETALL k", status = "", latency_ms = 1,
+        value = { type = "hash", entries = { { "name", "Alice" } }, len = 1 },
+      } }, { render = true, connection = "stub" })
+      local tab = buffer.active_tab()
+      buffer.refresh(tab)
+      assert.truthy(pending)
+      buffer.clear()  -- the tabs are gone before the answer lands
+
+      local ok, err = pcall(function()
+        pending.on_response({ seq = 1, command = "HGETALL k", status = "", latency_ms = 1,
+          value = { type = "hash", entries = { { "fresh", "1" } }, len = 1 } })
+      end)
+      session_conn.execute = orig_execute
+      connections.resolve_redis_url = orig_resolve
+      assert.is_true(ok, tostring(err))
+      assert.equals(0, #buffer._tabs(), "a dead tab must not be resurrected")
+    end)
+
     it("colors cells: index gray, numbers Number, text String", function()
       open_grid({ { "name", "Alice" }, { "age", "30" } })
       local b = buffer.buf()
@@ -527,6 +609,46 @@ describe("poste-redis grid editing", function()
     grid_edit.edit_cell(buffer.active_tab())
     assert.equals("SET user:1 world KEEPTTL", sent_cmds[1])
     assert.equals(1, refreshes)
+  end)
+
+  it("a write that lands after a tab switch refreshes ITS OWN tab", function()
+    -- the panel's refresh takes the tab the write came from: the user can
+    -- switch tabs while the write is in flight, and refreshing whatever is
+    -- active then spends an unrelated command on someone else's tab
+    local write_tab = nil
+    local pending_write = nil
+    session_conn.execute = function(_url, cmd, cbs)
+      if cmd[1] == "TTL" then
+        cbs.on_response({ value = { type = "number", value = ttl_reply } })
+        return "dispatched"
+      end
+      pending_write = cbs
+      return "dispatched"
+    end
+    buffer.render({
+      { seq = 1, command = "GET user:1", status = "", latency_ms = 1,
+        value = { type = "string", value = "hello" }, connection = "stubconn" },
+      { seq = 2, command = "GET other:2", status = "", latency_ms = 1,
+        value = { type = "string", value = "world" }, connection = "stubconn" },
+    }, { render = true, connection = "stubconn" })
+    local tabs = buffer._tabs()
+    -- render's show_panel re-wired the refresh back to M.refresh: re-assert the
+    -- capture on top, and count only (calling through would hit the stub again)
+    grid_edit.set_refresh(function(t)
+      refreshes = refreshes + 1
+      write_tab = t
+    end)
+    tabs[1].cursor = { row = 1, col = 2 }
+    vim.ui.input = function(_, cb) cb("edited") end
+    grid_edit.edit_cell(tabs[1])
+    assert.equals(0, refreshes, "no refresh before the server answers")
+
+    buffer.next_tab()
+    assert.equals(tabs[2], buffer.active_tab())
+    pending_write.on_response({ value = { type = "string", value = "OK" } })
+
+    assert.equals(1, refreshes)
+    assert.equals(tabs[1], write_tab, "the written tab is the refreshed tab")
   end)
 
   it("string add_row issues SET with KEEPTTL too", function()
