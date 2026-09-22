@@ -18,13 +18,18 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/poste-redis-test-cache}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-/tmp/poste-redis-test-data}"
 export XDG_STATE_HOME="${XDG_STATE_HOME:-/tmp/poste-redis-test-state}"
 # `busted.run` directly instead of :PlenaryBustedFile: that command takes one
-# argument, so it cannot forward `minimal_init` and the spec process it spawns
-# starts with the USER's config (only `--noplugin` is added). A ColorScheme
-# autocmd from that config then fires inside a spec's stubbed window and a
-# highlight-count assertion sees an extra call — a green suite fails per file.
-# Running in this already-minimal instance makes targeted runs hermetic like
-# the gate. (`set rtp+=` above mirrors what the spawned child was given.)
-timeout "${RUN_ONE_TIMEOUT:-240}" nvim --headless \
+# argument, so it cannot forward `minimal_init` and the process Plenary spawns
+# runs `--noplugin -u <minimal_init>` — while the targeted runner used to load
+# the developer's own config. A ColorScheme autocmd from that config fires
+# inside specs that stub nvim_set_hl and count the calls, so the gate is green
+# and the same file fails per spec.
+# `--noplugin` completes the equality: tests/minimal_init.lua appends "." to
+# rtp, so without the flag Neovim also sources this repo's plugin/poste-redis.lua
+# — i.e. setup({}) and the binary installer's ensure() run before every spec,
+# and a spec that replaces `package.loaded[...]` at file scope binds modules
+# that were already loaded. No per-file count moved here (641 with and without
+# the flag), but in poste-db the same preload fails 38 stub-order cases.
+timeout "${RUN_ONE_TIMEOUT:-240}" nvim --headless --noplugin \
   -u tests/minimal_init.lua \
   -c "set rtp+=$PLENARY_PATH" \
   -c "set rtp+=." \
