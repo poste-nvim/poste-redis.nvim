@@ -10,9 +10,19 @@ describe("poste-redis config", function()
     assert.equals(65536, config.defaults.preview_max_bytes)
     assert.equals(500, config.defaults.scan_count)
     assert.equals(500, config.defaults.value_page_size)
+    -- panel split + history cap are wired: setup() feeds these to
+    -- buffer.show_panel / history.set_max_history
+    assert.equals(0.4, config.defaults.result_height_ratio)
+    assert.equals(200, config.defaults.history_max)
     assert.truthy(config.defaults.keymaps.redis_source.run)
     assert.truthy(config.defaults.keymaps.redis_result.close)
     assert.truthy(config.defaults.keymaps.redis_browser)
+  end)
+
+  it("merge accepts the new scalar options (result_height_ratio, history_max)", function()
+    config.merge({ result_height_ratio = 0.6, history_max = 50 })
+    assert.equals(0.6, config.config.result_height_ratio)
+    assert.equals(50, config.config.history_max)
   end)
 
   it("exposes the keymaps from EXECUTION-PLAN §6", function()

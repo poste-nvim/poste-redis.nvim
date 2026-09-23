@@ -19,6 +19,10 @@ function M.setup(opts)
   require("poste-redis.autocmds").setup()
   require("poste-redis.commands").setup()
 
+  -- history cap (config.history_max, default 200): an option declared by the
+  -- set_max_history API since M1 but only ever fed the constant
+  require("poste-redis.history").set_max_history(config.config.history_max)
+
   -- Shared poste binary (vendored installer, family dissolution): make sure
   -- it is available once per session. vim.g.poste_binary keeps its
   -- first-class override role (a dev/worktree build never triggers a

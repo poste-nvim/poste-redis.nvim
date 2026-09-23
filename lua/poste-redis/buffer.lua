@@ -503,9 +503,12 @@ function M.show_panel(enter)
   vim.api.nvim_buf_set_name(state.buf, "poste://redis_result")
   vim.bo[state.buf].filetype = "poste_redis_result"
 
+  -- result_height_ratio is user config; the constant is only the fallback
+  -- for a setup() that predates it (this option was declared and documented
+  -- for a while while the panel read the constant — the setting did nothing).
   local height = math.max(
     constants.RESULT_MIN_HEIGHT,
-    math.floor(vim.o.lines * constants.RESULT_HEIGHT_RATIO)
+    math.floor(vim.o.lines * (config.config.result_height_ratio or constants.RESULT_HEIGHT_RATIO))
   )
   local src_win = vim.api.nvim_get_current_win()
   local src_view = vim.fn.winsaveview()

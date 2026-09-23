@@ -30,7 +30,8 @@ M.BINARY_PREVIEW_BYTES = 64
 --- SCAN batch size for browser/cursor-key enumeration (config.scan_count).
 M.SCAN_COUNT = 500
 
---- History (in-memory) cap.
+--- History (in-memory) cap. The starting value: setup() overrides it from
+--- config.history_max.
 M.HISTORY_MAX = 200
 
 --- Floating-chrome z-index tiers. The browser's pinned header overlay sits

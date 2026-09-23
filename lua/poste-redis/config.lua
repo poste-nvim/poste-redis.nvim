@@ -60,6 +60,9 @@ M.defaults = {
   browser_width_max_ratio = 0.7,
   -- Result panel split: share of the editor height.
   result_height_ratio = 0.4,
+  -- In-memory execution history cap (history.lua). Beyond it the oldest
+  -- entries are dropped as new ones are pushed.
+  history_max = 200,
   -- Context winbar on .redis source buffers: shows the effective USE/SELECT
   -- context at the cursor (connection + db), repainted on cursor move. The
   -- same info rides the statusline via poste-redis.statusline; this is the
@@ -70,8 +73,6 @@ M.defaults = {
   -- an explicit yes before any job starts. Applies to the <CR> / run-file
   -- paths in runner.lua; false disables the prompt.
   confirm_commands = true,
-  -- Debug commands (:PosteRedisDiag, ...). Off by default.
-  debug = false,
   keymaps = {
     redis_source = {
       run = "<CR>",
