@@ -203,6 +203,33 @@ describe("poste-redis browser actions", function()
     assert.equals("SCAN", calls[1].cmd[1])
   end)
 
+  it("EXPIRE 0 (delete now) asks before destroying the key", function()
+    -- the prompt names it, and the destructive act gets DEL's gate: a
+    -- fat-fingered 0 used to delete the key with no confirm at all
+    confirm_answer = 2
+    vim.ui.input = function(opts, cb) cb("0") end
+    local node = key_node("user:1", "my-redis", 0)
+    node.meta.url = "redis://h:6379/0"
+    actions.set_ttl(node, {})
+    vim.wait(300, function() return #calls >= 1 end, 5)
+    assert.equals("TTL", calls[1].cmd[1])
+    assert.equals(1, #calls, "no EXPIRE after a declined confirm")
+
+    confirm_answer = 1
+    actions.set_ttl(node, {})
+    assert.is_true(wait_for(function()
+      for _, c in ipairs(calls) do
+        if type(c) == "table" and c.cmd and c.cmd[1] == "EXPIRE" then return true end
+      end
+      return false
+    end))
+    local expire = nil
+    for _, c in ipairs(calls) do
+      if type(c) == "table" and c.cmd and c.cmd[1] == "EXPIRE" then expire = c.cmd end
+    end
+    assert.same({ "EXPIRE", "user:1", "0" }, expire)
+  end)
+
   it("set_ttl prompts and issues EXPIRE with the given seconds", function()
     local node = key_node("user:1", "my-redis", 0)
     node.meta.url = "redis://h:6379/0"

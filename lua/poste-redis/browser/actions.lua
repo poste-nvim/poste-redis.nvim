@@ -551,7 +551,8 @@ function M.set_ttl(node, _ctx)
       local ttl = ev.value and ev.value.value
       local ttl_str = ttl == nil and "?" or tostring(ttl)
       vim.ui.input({
-        prompt = ("TTL for %s (seconds, -1 = PERSIST, current: %s): "):format(key, ttl_str),
+        prompt = ("TTL for %s (seconds, -1 = PERSIST, 0 = delete now, current: %s): ")
+          :format(key, ttl_str),
         default = "-1",
       }, function(input)
         if not input or input == "" then return end
@@ -565,6 +566,13 @@ function M.set_ttl(node, _ctx)
           cmd = { "PERSIST", key }
         else
           cmd = { "EXPIRE", key, tostring(secs) }
+        end
+        -- `EXPIRE key 0` is how Redis spells "delete now": the prompt says so,
+        -- and the destructive act gets the same explicit gate as DEL — the TTL
+        -- prompt never asked, so a fat-fingered 0 destroyed the key silently.
+        if secs == 0 and not confirm(("EXPIRE %s 0 deletes the key now. Delete  %s  ?"):format(key, key)) then
+          notify("Cancelled — the key keeps its value")
+          return
         end
         session_conn.execute(url, cmd, {
           on_response = function()
