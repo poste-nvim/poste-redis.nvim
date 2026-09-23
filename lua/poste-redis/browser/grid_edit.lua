@@ -125,21 +125,21 @@ local function verified_list_write(tab, url, key, idx_0, expected, build_cmd, db
   }, nil, { db = db, owner = "browser" })
 end
 
---- Does a name-free probe reply say the name is taken? HEXISTS answers with
---- the integer 0/1; ZSCORE answers with the member's score, or a nil reply
---- when the member does not exist.
+--- Does a name-free probe reply say the name is taken? HEXISTS and SISMEMBER
+--- answer with the integer 0/1; ZSCORE answers with the member's score, or a
+--- nil reply when the member does not exist.
 local function name_taken(verb, ev)
   local v = ev and ev.value
   if not v then return false end
-  if verb == "HEXISTS" then return tonumber(v.value) == 1 end
+  if verb == "HEXISTS" or verb == "SISMEMBER" then return tonumber(v.value) == 1 end
   return v.type ~= "nil" and v.value ~= nil
 end
 
 --- Probe that a name is free before a write that would otherwise clobber
---- whatever already holds it. Renaming a hash field (or a zset member) onto
---- an existing name overwrites that entry and then deletes the original, so
---- one edit silently destroys two; the probe runs first and the write only
---- runs through `on_clear`.
+--- whatever already holds it. Renaming a hash field (a zset member, a set
+--- member) onto an existing name overwrites or loses that entry and then
+--- deletes the original, so one edit silently destroys a member; the probe
+--- runs first and the write only runs through `on_clear`.
 local function guard_name_free(url, key, db, probe, taken_msg, on_clear)
   local verb = probe[1]
   session_conn.execute(url, probe, {
@@ -265,9 +265,17 @@ function M.edit_cell(tab)
         return { "LSET", key, tostring((row_data[1] or 1) - 1), input }
       end, db, function() refresh(tab) end)
     elseif type_name == "set" then
-      exec(tab, url, { "SREM", key, raw }, db, function()
-        exec(tab, url, { "SADD", key, input }, db, function() refresh(tab) end)
-      end)
+      -- Renaming a member onto one that already exists loses the SOURCE
+      -- member: SREM removes it, then SADD finds the target present and adds
+      -- nothing — same one-edit-destroys-one shape the hash/zset renames
+      -- probe for (the guard_name_free doc says it for hash/zset).
+      guard_name_free(url, key, db, { "SISMEMBER", key, input },
+        ("Member '%s' already exists — delete that row instead of renaming onto it"):format(input),
+        function()
+          exec(tab, url, { "SREM", key, raw }, db, function()
+            exec(tab, url, { "SADD", key, input }, db, function() refresh(tab) end)
+          end)
+        end)
     else
       notify("Editing type '" .. tostring(type_name) .. "' is not supported", vim.log.levels.WARN)
     end

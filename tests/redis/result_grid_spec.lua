@@ -548,6 +548,7 @@ describe("poste-redis grid editing", function()
   local lindex_reply = nil  -- what the stub's LINDEX probe answers (nil = skip)
   local hexists_reply = 0  -- HEXISTS probe answer: 1 = the field is taken
   local zscore_reply = nil  -- ZSCORE probe answer: non-nil = the member exists
+  local sismember_reply = 0  -- SISMEMBER probe answer: 1 = the member is taken
   -- Failure injection: when set, the matching branch answers on_error instead
   -- of a result. Write-side failures have to land in the history the same way
   -- a rejected `.redis` command does; probe-side failures must not.
@@ -577,6 +578,7 @@ describe("poste-redis grid editing", function()
     lindex_reply = nil
     hexists_reply = 0
     zscore_reply = nil
+    sismember_reply = 0
     lindex_fail = nil
     write_fail = nil
     -- counting refresh that still re-runs the tab command (M.refresh)
@@ -613,6 +615,12 @@ describe("poste-redis grid editing", function()
           cbs.on_response({ value = zscore_reply ~= nil
               and { type = "string", value = tostring(zscore_reply) }
               or { type = "nil", value = nil } })
+        end
+        return "dispatched"
+      end
+      if cmd[1] == "SISMEMBER" then
+        if cbs and cbs.on_response then
+          cbs.on_response({ value = { type = "integer", value = sismember_reply } })
         end
         return "dispatched"
       end
@@ -1028,6 +1036,34 @@ describe("poste-redis grid editing", function()
     vim.ui.input = function(opts, cb) cb("lua") end
     grid_edit.add_row(buffer.active_tab())
     assert.equals("SADD user:1 lua", sent_cmds[#sent_cmds])
+  end)
+
+  it("set rename onto a FREE member probes SISMEMBER then SREM+SADD", function()
+    open_key_tab_conn({ type = "set", value = { "vim" }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    vim.ui.input = function(_, cb) cb("lua") end
+    grid_edit.edit_cell(t)
+    -- SISMEMBER is a probe: the stub answers it without recording (same as
+    -- HEXISTS/ZSCORE), so the recorded writes start at the SREM
+    assert.equals("SREM user:1 vim", sent_cmds[1])
+    assert.equals("SADD user:1 lua", sent_cmds[2])
+    assert.equals(1, refreshes)
+  end)
+
+  it("set rename onto an EXISTING member is refused before any write", function()
+    -- SREM+SADD without the probe lost the source member: SREM removed it,
+    -- then SADD found the target already present and added nothing — one
+    -- "edit" silently deleted a member
+    sismember_reply = 1
+    open_key_tab_conn({ type = "set", value = { "vim" }, len = 1 })
+    local t = buffer.active_tab()
+    t.cursor = { row = 1, col = 2 }
+    vim.ui.input = function(_, cb) cb("lua") end
+    local msgs = capture_notify(function() grid_edit.edit_cell(t) end)
+    assert.same({}, sent_cmds, "no write may follow a taken probe")
+    assert.equals(0, refreshes)
+    assert.is_true(any_contains(msgs, "already exists"), vim.inspect(msgs))
   end)
 
   it("add row on a hash prompts field then value", function()
