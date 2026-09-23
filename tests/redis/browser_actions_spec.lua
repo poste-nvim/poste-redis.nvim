@@ -2,6 +2,7 @@
 --- Transport stubbed: session_conn.execute + vim.fn.confirm + vim.ui.input
 --- are replaced so specs never touch a real redis or block on a dialog.
 local actions = require("poste-redis.browser.actions")
+local M = actions
 local session_conn = require("poste-redis.session_conn")
 local tree = require("poste-redis.browser.tree")
 
@@ -260,6 +261,21 @@ describe("poste-redis browser actions", function()
       "yank must carry an executable pipeline, not a bare glob")
   end)
 
+  it("delete_prefix yank survives a single quote in the prefix", function()
+    -- a raw \'user\'s:*\' pipeline broke at the quote and pasted a broken
+    -- shell line; the prefix is shell-single-quoted (POSIX \'\'\' escaping)
+    local history = require("poste-redis.history")
+    history.clear()
+    local group = tree.make_group_node("user's", "stubconn", 0)
+    group.meta.url = "redis://h:6379/0"
+    actions.delete_prefix(group, {})
+    assert.is_true(wait_for(function() return history.count() > 0 end),
+      "batch delete did not finish")
+    local e = history.list()[1]
+    assert.truthy(e.yank:find("redis%-cli %-%-scan %-%-pattern 'user'\\''s:%*'", 1, false),
+      "prefix quote must be escaped: " .. e.yank)
+  end)
+
   it("delete_nodes aggregates the selection into one history entry", function()
     local history = require("poste-redis.history")
     history.clear()
@@ -376,8 +392,24 @@ describe("poste-redis browser actions", function()
     assert.equals(1, history.count())
     assert.equals("EXPIRE user:1 user:2", history.list()[1].command)
     assert.equals(2, history.list()[1].count)
-    assert.match("redis%-cli EXPIRE 'user:1' 60", history.list()[1].yank)
-    assert.match("redis%-cli EXPIRE 'user:2' 60", history.list()[1].yank)
+    -- render_command leaves clean tokens unquoted and quotes what needs it
+    assert.match("redis%-cli EXPIRE user:1 60", history.list()[1].yank)
+    assert.match("redis%-cli EXPIRE user:2 60", history.list()[1].yank)
+  end)
+
+  it("set_ttl_nodes yank line quotes a key with whitespace", function()
+    -- a raw `redis-cli EXPIRE a b 60` read back as two keys; the quoted form
+    -- keeps one key per line
+    vim.ui.input = function(opts, cb) cb("60") end
+    local history = require("poste-redis.history")
+    history.clear()
+    local done = false
+    local node = key_node("we ird", "stubconn", 0)
+    node.meta.url = "redis://h:6379/0"
+    M.set_ttl_nodes({ node }, { on_done = function() done = true end })
+    assert.is_true(wait_for(function() return done end))
+    local e = history.list()[1]
+    assert.match('redis%-cli EXPIRE "we ird" 60', e.yank)
   end)
 
   it("set_ttl_nodes with a negative prompt PERSISTs every selected key", function()

@@ -46,12 +46,21 @@ local function record(cmd, opts)
   }, opts or {}))
 end
 
+--- Shell-single-quote a word for a redis-cli pipeline: a prefix containing
+--- `'` (or a space) must survive the paste into a terminal — the raw form
+--- broke the pipeline at the quote and ran an unintended command.
+--- @param s string
+--- @return string
+local function shell_quote(s)
+  return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
 --- Executable redis-cli pipeline for every key matching a glob. The prefix
 --- is glob-escaped so it matches only itself (a key `a*b:1` under folder
 --- `a*b` must not drag `aXb:1` into the delete).
 local function scan_pipeline(prefix)
-  return ("redis-cli --scan --pattern '%s:*' | xargs redis-cli del")
-    :format(util.glob_escape(prefix))
+  return ("redis-cli --scan --pattern %s | xargs redis-cli del")
+    :format(shell_quote(util.glob_escape(prefix) .. ":*"))
 end
 
 --- Unified confirm gate for destructive browser actions. Swappable in tests
@@ -420,13 +429,22 @@ function M.delete_nodes(nodes, ctx)
             patterns[#patterns + 1] = job.node.meta.key
             lit[#lit + 1] = job.node.meta.key
           else
-            if #lit > 0 then yank_lines[#yank_lines + 1] = "DEL " .. table.concat(lit, " "); lit = {} end
+            if #lit > 0 then
+              -- render_command quotes keys with whitespace/quotes so the
+              -- pasted DEL keeps one arg per key
+              yank_lines[#yank_lines + 1] = util.render_command(
+                vim.list_extend({ "DEL" }, lit))
+              lit = {}
+            end
             local pfx = job.node.meta.prefix or ""
             patterns[#patterns + 1] = pfx .. ":*"
             yank_lines[#yank_lines + 1] = scan_pipeline(pfx)
           end
         end
-        if #lit > 0 then yank_lines[#yank_lines + 1] = "DEL " .. table.concat(lit, " ") end
+        if #lit > 0 then
+          yank_lines[#yank_lines + 1] = util.render_command(
+            vim.list_extend({ "DEL" }, lit))
+        end
         local cmd_toks = { "DEL" }
         vim.list_extend(cmd_toks, patterns)
         -- What the batch could not finish, in the order the user saw it: the
@@ -616,11 +634,13 @@ function M.set_ttl_nodes(nodes, ctx)
             vim.log.levels.WARN)
         end
         -- one aggregated history line (a bare multi-key EXPIRE is not a real
-        -- command — the yank form carries one redis-cli line per key)
+        -- command — the yank form carries one redis-cli line per key, keys
+        -- quoted so a space lands back on the same side of the transport)
         local toks, yank_lines = { "EXPIRE" }, {}
         for _, node in ipairs(keys) do
           toks[#toks + 1] = node.meta.key
-          yank_lines[#yank_lines + 1] = ("redis-cli EXPIRE '%s' %s"):format(node.meta.key, tostring(secs))
+          yank_lines[#yank_lines + 1] = util.render_command(
+            { "redis-cli", "EXPIRE", node.meta.key, tostring(secs) })
         end
         record(toks, {
           connection = keys[1].meta and keys[1].meta.connection,
