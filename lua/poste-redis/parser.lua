@@ -27,9 +27,13 @@ end
 --- never named). Quoted tokens keep the old behaviour available for a key
 --- that itself starts with `--` (`GET "--key"`).
 --- @param line string
---- @return string[]
+--- @return string[] tokens
+--- @return boolean open_bare  true when the line ends inside a bare word
+---   (it ran to end-of-input without closing whitespace) — the signal a
+---   continuation needs to re-join the word split across the two lines
 local function tokenize_line(line)
   local tokens = {}
+  local open_bare = false
   local i = 1
   local n = #line
   while i <= n do
@@ -37,12 +41,14 @@ local function tokenize_line(line)
     local prev = i > 1 and line:sub(i - 1, i - 1) or " "
     local at_boundary = prev == " " or prev == "\t"
     if c == " " or c == "\t" then
+      open_bare = false
       i = i + 1
     elseif c == "#" and at_boundary then
       break
     elseif c == "-" and at_boundary and line:sub(i, i + 1) == "--" then
       break
     elseif c == '"' or c == "'" then
+      open_bare = false
       local close = line:find(c, i + 1, true)
       while close and line:sub(close - 1, close - 1) == "\\" do
         local bs = close - 1
@@ -68,16 +74,22 @@ local function tokenize_line(line)
       if not word_end then word_end = n + 1 end
       tokens[#tokens + 1] = line:sub(i, word_end - 1)
       i = word_end
+      -- Ran off the end of the input: this word is still open. A continuation
+      -- right after means the word continues on the next physical line.
+      open_bare = word_end > n
     end
   end
-  return tokens
+  return tokens, open_bare
 end
 
---- Strip surrounding quotes from a token. Double quotes: JSON-compatible
---- escapes (\", \\, \n, \t, \r). Single quotes: literal (redis-cli style).
---- Decoding is ONE pass over `\x` pairs: sequential gsub passes would let
---- `\\n` (backslash + n per JSON) re-match as `\n` after `\\` → `\` and
---- decode to a newline instead of the literal two characters.
+--- Strip surrounding quotes from a token. Double quotes: the redis-cli
+--- escape set (`sdssplitargs`): \", \\, \n, \t, \r, and \xHH byte escapes —
+--- the only way a binary-safe key/value gets into a command line, since the
+--- parser has no `\<byte>` form. An unknown or malformed escape (\x with
+--- non-hex following) keeps its characters verbatim. Single quotes: literal
+--- (redis-cli style). Decoding is ONE pass over `\x` pairs: sequential gsub
+--- passes would let `\\n` (backslash + n per JSON) re-match as `\n` after
+--- `\\` → `\` and decode to a newline instead of the literal two characters.
 --- @param tok string
 --- @return string
 local function unquote(tok)
@@ -86,14 +98,32 @@ local function unquote(tok)
   if (first == '"' or first == "'") and last == first and #tok >= 2 then
     local inner = tok:sub(2, -2)
     if first == '"' then
-      inner = inner:gsub("\\(.)", function(e)
-        if e == '"' then return '"' end
-        if e == "\\" then return "\\" end
-        if e == "n" then return "\n" end
-        if e == "t" then return "\t" end
-        if e == "r" then return "\r" end
-        return "\\" .. e  -- unknown escape: keep both characters verbatim
-      end)
+      local SIMPLE = { ['"'] = '"', ["\\"] = "\\", n = "\n", t = "\t", r = "\r" }
+      local out = {}
+      local i = 1
+      while i <= #inner do
+        local c = inner:sub(i, i)
+        if c == "\\" and i < #inner then
+          local e = inner:sub(i + 1, i + 1)
+          if e == "x" then
+            local hex = inner:sub(i + 2, i + 3)
+            if hex:match("^%x%x$") then
+              out[#out + 1] = string.char(tonumber(hex, 16))
+              i = i + 4
+            else
+              out[#out + 1] = "\\x"  -- malformed: keep both characters verbatim
+              i = i + 2
+            end
+          else
+            out[#out + 1] = SIMPLE[e] or ("\\" .. e)  -- unknown escape: verbatim
+            i = i + 2
+          end
+        else
+          out[#out + 1] = c
+          i = i + 1
+        end
+      end
+      return table.concat(out)
     end
     return inner
   end
@@ -159,6 +189,7 @@ function M.extract_entries(content)
   local logical = {}         -- accumulated tokens for the current logical line
   local logical_start = nil  -- first physical line index (1-based)
   local logical_end = nil    -- last physical line index
+  local open_bare = false    -- last chunk ended inside an open bare word
 
   local function flush()
     if #logical == 0 then
@@ -172,6 +203,7 @@ function M.extract_entries(content)
     entries[#entries + 1] = entry
     logical = {}
     logical_start, logical_end = nil, nil
+    open_bare = false
   end
 
   for idx, raw_line in ipairs(physical) do
@@ -186,16 +218,28 @@ function M.extract_entries(content)
 
     local has_cont = line:sub(-1, -1) == "\\"
     local body = has_cont and line:sub(1, -2) or line
-    local tokens = tokenize_line(body)
+    local tokens, chunk_open = tokenize_line(body)
     if #tokens > 0 then
       if not logical_start then
         logical_start = idx
         logical = tokens
       else
-        for _, t in ipairs(tokens) do logical[#logical + 1] = t end
+        -- A continuation that splits a WORD must re-join it: redis-cli lexes
+        -- the whole logical line, so `DEL a-\` + `b` is ONE key `a-b` —
+        -- concatenating token LISTS alone sent `DEL a- b`, deleting the two
+        -- unrelated keys `a-` and `b` (a silent wrong-target write). Only
+        -- bare+bare merges: a chunk ending in an open QUOTED token stays
+        -- split (the quote never closed; see the unquote contract).
+        if open_bare and tokens[1]:sub(1, 1) ~= '"' and tokens[1]:sub(1, 1) ~= "'" then
+          logical[#logical] = logical[#logical] .. tokens[1]
+          for j = 2, #tokens do logical[#logical + 1] = tokens[j] end
+        else
+          for _, t in ipairs(tokens) do logical[#logical + 1] = t end
+        end
       end
     end
     if #tokens > 0 then logical_end = idx end
+    open_bare = has_cont and chunk_open or false
     if not has_cont then flush() end
 
     ::continue::

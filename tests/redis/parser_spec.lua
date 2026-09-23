@@ -34,6 +34,26 @@ describe("poste-redis parser", function()
     assert.same({ "SET", "k", "v", "tail" }, entries[1].tokens)
   end)
 
+  it("re-joins a WORD split across a continuation (redis-cli semantics)", function()
+    -- redis-cli lexes the whole logical line, so `DEL a-\` + `b` is ONE key
+    -- `a-b`; joining token lists alone sent `DEL a- b` — deleting the two
+    -- unrelated keys `a-` and `b` (a silent wrong-target write)
+    local entries = parser.extract_entries("DEL a-\\\nmore\n")
+    assert.equals(1, #entries)
+    assert.same({ "DEL", "a-more" }, entries[1].tokens)
+    assert.same({ "DEL", "a-more" }, parser.entry_args(entries[1]))
+    -- a three-way split joins too
+    local e3 = parser.extract_entries("GET very\\\nlong\\\nkey\n")[1]
+    assert.same({ "GET", "verylongkey" }, e3.tokens)
+    -- between-token continuations still work untouched
+    local e2 = parser.extract_entries("SET k \\\nv\n")[1]
+    assert.same({ "SET", "k", "v" }, e2.tokens)
+    -- a quoted chunk does NOT merge (its quote never closed) — the split
+    -- stays visible in the tokens
+    local eq = parser.extract_entries('SET k "va\\\nlue"\n')[1]
+    assert.same({ "SET", "k", '"va', 'lue"' }, eq.tokens)
+  end)
+
   it("does not treat # inside double quotes as a comment", function()
     local entries = parser.extract_entries('SET note "a # b"\n')
     assert.equals(1, #entries)
@@ -153,6 +173,29 @@ describe("poste-redis parser", function()
     -- the plain escapes still decode
     local args2 = parser.entry_args(parser.extract_entries('SET k "x\\ty"\n')[1])
     assert.same({ "SET", "k", "x\ty" }, args2)
+  end)
+
+  it("decodes hex byte escapes in double quotes (redis-cli parity)", function()
+    -- redis-cli's sdssplitargs accepts \xHH; without it `SET k "\x41"`
+    -- wrote the FIVE literal characters backslash x 4 1 instead of "A"
+    local args = parser.entry_args(parser.extract_entries('SET k "\\x41"\n')[1])
+    assert.same({ "SET", "k", "A" }, args)
+    -- binary-safe names: non-UTF-8 bytes reach the server as themselves
+    local args2 = parser.entry_args(parser.extract_entries('GET "\\xff\\x00"\n')[1])
+    assert.same({ "GET", "\xff\x00" }, args2)
+    -- malformed hex keeps its characters verbatim
+    local args3 = parser.entry_args(parser.extract_entries('SET k "\\xzz"\n')[1])
+    assert.same({ "SET", "k", "\\xzz" }, args3)
+    -- truncated escape at the end of the token stays verbatim too
+    local args5 = parser.entry_args(parser.extract_entries('SET k "a\\x"\n')[1])
+    assert.same({ "SET", "k", "a\\x" }, args5)
+  end)
+
+  it("decodes an escaped backslash in ONE pass (\\\\x41 is not A)", function()
+    -- sequential gsub passes would decode the \x41 after the \\. The single
+    -- pass must turn `a\\x41b` into backslash + x + 4 + 1, not "aAb"
+    local args = parser.entry_args(parser.extract_entries('SET k "a\\\\x41b"\n')[1])
+    assert.same({ "SET", "k", "a\\x41b" }, args)
   end)
 
   it("unquotes single-quoted args literally", function()

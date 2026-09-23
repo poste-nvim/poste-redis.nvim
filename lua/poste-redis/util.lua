@@ -117,11 +117,14 @@ end
 --- The parens are the function: `gsub` returns the count as a second value,
 --- and a caller that splices this into a table constructor (`{ cell(v) }` in
 --- format.lua) would append that number as an extra "line" of the panel.
+--- NUL is mapped too: a `\x00` escape decodes to a real NUL byte (binary-safe
+--- keys), and a NUL reaching a buffer line is coerced to a newline by Neovim —
+--- the escape keeps it one visible character instead of splitting the row.
 --- @param s string
 --- @return string
 function M.escape_for_line(s)
   if type(s) ~= "string" then return tostring(s) end
-  return (s:gsub("\r\n", "⏎"):gsub("\n", "⏎"):gsub("\r", "⏎"):gsub("\t", "  "))
+  return (s:gsub("\r\n", "⏎"):gsub("\n", "⏎"):gsub("\r", "⏎"):gsub("\t", "  "):gsub("%z", "\\0"))
 end
 
 --- Escape redis glob metacharacters so a literal string (a key name or a

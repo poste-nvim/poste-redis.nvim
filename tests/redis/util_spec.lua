@@ -192,6 +192,12 @@ describe("poste-redis util", function()
       assert.equals("a  b", util.escape_for_line("a\tb"))
     end)
 
+    it("maps a NUL byte to a visible escape", function()
+      -- a \x00-escaped key decodes to a real NUL; Neovim coerces a NUL in a
+      -- buffer line to a newline, so the escape keeps the row in one piece
+      assert.equals("a\\0b", util.escape_for_line("a\0b"))
+    end)
+
     it("returns only the string, never gsub's count", function()
       -- format.lua builds text lines as `{ cell(v) }`; a second return value
       -- here would land in the list as a phantom line (and nvim_buf_set_lines
