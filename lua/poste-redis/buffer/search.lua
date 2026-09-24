@@ -56,14 +56,18 @@ end
 
 function M.next()
   local tab = state.tabs[state.active]
-  if not tab or tab.kind ~= "table" or #tab.search_matches == 0 then return end
-  M.jump(tab, (tab.search_idx % #tab.search_matches) + 1)
+  if not tab or tab.kind ~= "table" then return end
+  local matches = tab.search_matches or {}
+  if #matches == 0 then return end
+  M.jump(tab, (tab.search_idx % #matches) + 1)
 end
 
 function M.prev()
   local tab = state.tabs[state.active]
-  if not tab or tab.kind ~= "table" or #tab.search_matches == 0 then return end
-  local idx = ((tab.search_idx - 2 + #tab.search_matches) % #tab.search_matches) + 1
+  if not tab or tab.kind ~= "table" then return end
+  local matches = tab.search_matches or {}
+  if #matches == 0 then return end
+  local idx = ((tab.search_idx - 2 + #matches) % #matches) + 1
   M.jump(tab, idx)
 end
 

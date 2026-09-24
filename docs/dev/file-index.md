@@ -115,6 +115,8 @@ fallback — see `requirements.md`.
 | `redis/browser_actions_spec.lua` | P1-4 write actions (stubbed session+confirm+input): delete confirm/cancel, prefix estimate, TTL, rename conflict |
 | `redis/buffer_spec.lua` | panel tabs, preview, yank, close, grid tab render |
 | `redis/yank_spec.lua` | register targets (" and +), page arithmetic, text-tab fallback |
+| `redis/pager_spec.lua` | page flip/wrap on table tabs (first/last/next/prev), single-page and text-tab no-ops, re-render sequencing |
+| `redis/search_spec.lua` | in-grid search: case-insensitive match compute (real grid), jump page arithmetic, next/prev wrap, empty-result notice, nil-match hardening |
 | `redis/export_spec.lua` | csv quoting, tsv cleaning, json shape, export() guards |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/completion_spec.lua` | P2-4: ctx detection, command table, conn names, SCAN key-prefix fetch+cache (stubbed session), orchestrator dispatch |
