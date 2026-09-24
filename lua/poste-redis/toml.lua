@@ -1,5 +1,5 @@
 -- VENDORED from poste-db.nvim lua/poste-db/toml.lua
--- Source commit: 9516208 ("fix(toml): a fully-quoted key or header is one
+-- Source commit: c23dc44 ("fix(toml): a fully-quoted key or header is one
 -- name, dots and all"). The copy pinned to 89f0468 rejected the legal TOML
 -- shape `"my.key" = …` as a dotted key and stored quoted header names with
 -- their quote characters; the copy pinned to 94fccf2 before that was missing
@@ -7,8 +7,6 @@
 -- Syncing: poste-redis must not require("poste-db.*") (family red line), so
 -- this pure-function parser is copied verbatim — including doc comments and
 -- poste-db-only examples in them. When poste-db updates the file, re-copy it
--- whole and bump the commit above. Keep it dependency-free.
-
 --- Minimal pure-Lua TOML parser.
 --- Supports: [section] headers (quoted header names too), key = "string" /
 --- 'string' / 123 / true|false, inline arrays `[…]` and inline tables `{…}`
@@ -201,7 +199,7 @@ function M.parse(content)
       if trimmed:sub(1, 2) == "[[" then
         return nil, "Array-of-tables headers ([[name]]) are not supported"
       end
-      local close, name
+      local name
       local q = trimmed:sub(2, 2)
       if q == '"' or q == "'" then
         -- A quoted header name is ONE literal name: it may contain `]` or a
@@ -211,11 +209,10 @@ function M.parse(content)
         if not close_q or trim(trimmed:sub(close_q + 1, -2)) ~= "" then
           return nil, "Invalid table header: " .. line
         end
-        close = close_q + 1
         name = q == '"' and unescape_basic(trimmed:sub(3, close_q - 1))
           or trimmed:sub(3, close_q - 1)
       else
-        close = trimmed:find("]", 2)
+        local close = trimmed:find("]", 2)
         if not close then
           return nil, "Invalid table header: " .. line
         end
