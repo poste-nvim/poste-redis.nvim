@@ -169,4 +169,52 @@ password = "a\"b\\c"
     assert.is_nil(out)
     assert.falsy(err:find("s3cret%-value", 1, false))
   end)
+
+  -- Synced with poste-db 9516208: a fully-quoted key is ONE name, so its
+  -- dots are its own; the old raw-text dotted-key check rejected the legal
+  -- `"my.key" = …` shape.
+  it("accepts a fully-quoted key that contains a dot", function()
+    local res, err = toml.parse('"my.key" = "v"')
+    assert.is_nil(err)
+    assert.equals("v", res["my.key"])
+  end)
+
+  it("accepts a single-quoted key that contains a dot", function()
+    local res, err = toml.parse("'my.key' = 'v'")
+    assert.is_nil(err)
+    assert.equals("v", res["my.key"])
+  end)
+
+  it("unquotes escape sequences in a double-quoted key", function()
+    local res, err = toml.parse('"a\\"b" = 1')
+    assert.is_nil(err)
+    assert.equals(1, res['a"b'])
+  end)
+
+  it("still rejects a quoted dotted key like \"a\".\"b\" (that IS a dotted key)", function()
+    local _, err = toml.parse('"a"."b" = 1')
+    assert.matches("Dotted keys", err)
+  end)
+
+  it("reads a quoted header name as one section", function()
+    -- The old first-`]` scan stored `["my conn"]` as a section literally
+    -- named `"my conn"` (quotes included), and `["a]b"]` was cut at the `]`
+    -- inside the quotes.
+    local res, err = toml.parse('["my conn"]\nport = 6379')
+    assert.is_nil(err)
+    assert.equals(6379, res["my conn"].port)
+    local res2, err2 = toml.parse('["a]b"]\nport = 1')
+    assert.is_nil(err2)
+    assert.equals(1, res2["a]b"].port)
+  end)
+
+  it("rejects a quoted header with trailing text before the bracket", function()
+    local _, err = toml.parse('["a" x]')
+    assert.matches("Invalid table header", err)
+  end)
+
+  it("rejects an unterminated quoted header", function()
+    local _, err = toml.parse('["a]')
+    assert.matches("Invalid table header", err)
+  end)
 end)
