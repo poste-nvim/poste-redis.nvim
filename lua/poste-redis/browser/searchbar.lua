@@ -67,6 +67,7 @@ function M.enter()
   header_bar.hide()
   vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
   vim.keymap.set("i", "<CR>", search_commit, { buffer = buf, silent = true })
+  vim.keymap.set("i", "<NL>", search_commit, { buffer = buf, silent = true })
   vim.keymap.set("i", "<Esc>", search_cancel, { buffer = buf, silent = true })
   -- Land on the search line FIRST: :startinsert! works like "A" (append at the
   -- EOL of the line the caret is on), so without this it would put the tree
@@ -109,7 +110,11 @@ function search_commit()
   local line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or ""
   local query = M.parse_line(line)
   vim.cmd.stopinsert()
+  -- <NL> rides with <CR>: Ctrl-J in the bar would otherwise insert a real
+  -- newline, splitting the bar region and silently dropping everything
+  -- typed after it (commit only reads line 1)
   vim.keymap.del("i", "<CR>", { buffer = buf })
+  vim.keymap.del("i", "<NL>", { buffer = buf })
   vim.keymap.del("i", "<Esc>", { buffer = buf })
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   state.search_active = false
@@ -132,6 +137,7 @@ function search_cancel()
   if buf and vim.api.nvim_buf_is_valid(buf) then
     vim.cmd.stopinsert()
     vim.keymap.del("i", "<CR>", { buffer = buf })
+    vim.keymap.del("i", "<NL>", { buffer = buf })
     vim.keymap.del("i", "<Esc>", { buffer = buf })
     vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   end
