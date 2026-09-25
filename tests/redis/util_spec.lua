@@ -166,6 +166,25 @@ describe("poste-redis util", function()
     it("quotes empty tokens so they stay one arg", function()
       assert.equals('HSET k f ""', util.render_command({ "HSET", "k", "f", "" }))
     end)
+
+    it("escapes control characters inside quoted tokens (one buffer line)", function()
+      -- a binary-safe key decodes to a real newline; nvim_buf_set_lines
+      -- rejects lines with embedded newlines, so the quoted form escapes it
+      assert.equals('DEL "a\\nb"', util.render_command({ "DEL", "a\nb" }))
+      assert.equals('DEL "a\\rb"', util.render_command({ "DEL", "a\rb" }))
+      assert.equals('DEL "a\\tb"', util.render_command({ "DEL", "a\tb" }))
+      assert.equals('DEL "a\\x00b"', util.render_command({ "DEL", "a\0b" }))
+      -- the escaped form round-trips through the parser's unquote
+      local parser = require("poste-redis.parser")
+      local tokens = parser.command_tokens(util.render_command({ "DEL", "a\nb" }))
+      assert.equals("a\nb", tokens[2])
+    end)
+
+    it("a literal backslash-n is not re-escaped into a newline", function()
+      -- token chars: a, \, n, b — the backslash doubles FIRST, so the later
+      -- control pass cannot mistake the produced `\n` pair for input
+      assert.equals('DEL "a\\\\nb"', util.render_command({ "DEL", "a\\nb" }))
+    end)
   end)
 
   describe("append_new", function()

@@ -249,6 +249,18 @@ describe("poste-redis format", function()
     assert.truthy(lines[3]:find("boom"))
   end)
 
+  it("format_error keeps the command on one buffer line", function()
+    -- the decoded form of `GET "a\nb"` carries a real newline; the panel
+    -- sets these lines with nvim_buf_set_lines, which rejects embedded
+    -- newlines — the whole error block must survive as flat lines
+    local lines = format.format_error("WRONGTYPE", 'GET "a\nb"')
+    assert.equals(3, #lines)
+    for _, l in ipairs(lines) do
+      assert.falsy(l:find("\n"))
+    end
+    assert.truthy(lines[2]:find("a⏎b"))
+  end)
+
   it("preview_json pretty-encodes the raw value", function()
     local s = format.preview_json({ type = "string", value = "hi", len = 2 })
     assert.match('"type"', s)

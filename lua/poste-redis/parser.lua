@@ -398,9 +398,11 @@ local NOT_KEY_HEADS = {
   CONFIG = true, CLIENT = true, COMMAND = true, ACL = true, SCRIPT = true,
   FUNCTION = true, LATENCY = true, SLOWLOG = true, CLUSTER = true,
   MODULE = true, INFO = true, DEBUG = true, SHUTDOWN = true,
-  -- connection handshake / server-to-server: host, port, db index, password
-  AUTH = true, HELLO = true, MIGRATE = true, SWAPDB = true, WAIT = true,
-  WAITAOF = true,
+  -- connection handshake / server-to-server: host, port, db index, password;
+  -- PING/ECHO's argument is a message, not a key — key_arg sent it to the
+  -- server as a key name (the gd reveal and the winbar TTL probe both read it)
+  AUTH = true, HELLO = true, PING = true, ECHO = true,
+  MIGRATE = true, SWAPDB = true, WAIT = true, WAITAOF = true,
 }
 
 --- The key argument of a tokenized command (nil when the command does not

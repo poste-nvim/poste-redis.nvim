@@ -182,14 +182,25 @@ end
 --- empty or contain whitespace, a double quote or a backslash are double-
 --- quoted with escapes, so a key `a b` records as `DEL "a b"` instead of the
 --- ambiguous `DEL a b` (three args on read-back). Clean tokens stay verbatim.
+--- Control characters inside a quoted token are escaped too (`\n`, `\r`,
+--- `\t`, other controls as `\xHH`): the string lands in buffer lines via
+--- nvim_buf_set_lines, which REJECTS embedded newlines, and the sidebar line
+--- spans (byte ranges) would misalign on a split. The escapes mirror the
+--- Rust binary's display_command, so the panel's re-tokenize (unquote)
+--- recovers the original token.
 --- @param args table[]  token list (args[1] = command name)
 --- @return string
 function M.render_command(args)
   local out = {}
   for i, a in ipairs(args or {}) do
     a = tostring(a)
-    if a == "" or a:find("[%s\"\\]") then
-      a = '"' .. a:gsub("\\", "\\\\"):gsub("\"", "\\\"") .. '"'
+    if a == "" or a:find("[%s\"\\%c]") then
+      a = '"' .. a:gsub("\\", "\\\\"):gsub("\"", "\\\""):gsub("%c", function(c)
+        return c == "\n" and "\\n"
+          or c == "\r" and "\\r"
+          or c == "\t" and "\\t"
+          or string.format("\\x%02x", c:byte())
+      end) .. '"'
     end
     out[i] = a
   end

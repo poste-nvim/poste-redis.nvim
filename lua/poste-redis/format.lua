@@ -259,13 +259,17 @@ function M.format_result(event)
 end
 
 --- Format an error message into panel lines.
+--- The command line passes through escape_for_line: a binary-safe key
+--- (`GET "a\nb"` — the decoded form carries a real newline) must stay ONE
+--- buffer line — nvim_buf_set_lines rejects embedded newlines, and an
+--- unescaped command crashed the panel render instead of showing the error.
 --- @param err string
 --- @param command string|nil
 --- @return string[]
 function M.format_error(err, command)
   local lines = { "ERROR" }
   if command and command ~= "" then
-    lines[#lines + 1] = "  command: " .. command
+    lines[#lines + 1] = "  command: " .. util.escape_for_line(command)
   end
   local text = tostring(err or "(unknown error)")
   for _, part in ipairs(vim.split(text, "\n", { plain = true })) do

@@ -351,6 +351,11 @@ describe("poste-redis parser key_arg", function()
     -- AUTH's second token is a username and its third a password; echoing
     -- either into the tree or a TTL probe would leak it into a visible name
     assert.is_nil(key_of("AUTH admin s3cret"))
+    -- PING/ECHO's argument is a message: key_arg sent it to the server as a
+    -- key name (gd reveal + the winbar TTL probe both read it)
+    assert.is_nil(key_of("PING"))
+    assert.is_nil(key_of("PING 'hello world'"))
+    assert.is_nil(key_of("ECHO message"))
   end)
 
   it("has no key for one-word commands and cannot be escaped by quoting", function()
