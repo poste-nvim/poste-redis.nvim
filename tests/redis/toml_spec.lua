@@ -217,4 +217,31 @@ password = "a\"b\\c"
     local _, err = toml.parse('["a]')
     assert.matches("Invalid table header", err)
   end)
+
+  -- Synced with poste-db 7ba2df1: fail closed on the two silent-corruption
+  -- shapes instead of parsing them into something wrong.
+  it("rejects a second header on an unquoted header line", function()
+    -- `[a] [b]` used to register `a` and silently swallow `[b]`, so every
+    -- key after it landed in the wrong connection
+    local _, err = toml.parse('[a] [b]\nx = 1')
+    assert.matches("Invalid table header", err)
+  end)
+
+  it("still accepts a comment after an unquoted header", function()
+    local res, err = toml.parse('[srv] # the prod one\nhost = "h"')
+    assert.is_nil(err)
+    assert.equals("h", res.srv.host)
+  end)
+
+  it("rejects triple-quoted strings instead of unquoting them into garbage", function()
+    -- the single-line path used to strip the outer quotes of `"""x"""`
+    -- into the value `""x""` — a password or host written that way
+    -- silently misbehaved
+    local res, err = toml.parse('a = """x"""')
+    assert.is_nil(res)
+    assert.matches("Multi%-line strings are not supported", err)
+    local res2, err2 = toml.parse("a = '''x'''")
+    assert.is_nil(res2)
+    assert.matches("Multi%-line strings are not supported", err2)
+  end)
 end)

@@ -1,12 +1,17 @@
 -- VENDORED from poste-db.nvim lua/poste-db/toml.lua
--- Source commit: c23dc44 ("fix(toml): a fully-quoted key or header is one
--- name, dots and all"). The copy pinned to 89f0468 rejected the legal TOML
--- shape `"my.key" = …` as a dotted key and stored quoted header names with
--- their quote characters; the copy pinned to 94fccf2 before that was missing
--- the inline table/array parsing poste-db added in cc6652e.
+-- Source commit: 7ba2df1 ("fix(toml): fail closed on a stray second header
+-- and on triple-quoted strings"). The copy pinned to c23dc44 parsed
+-- `"""x"""` into the garbage value `""x""` and silently swallowed a second
+-- header on the same line (`[a] [b]` registered `a` and dropped `b`).
+-- Earlier pins: c23dc44 taught it that a fully-quoted key or header is one
+-- name, dots and all; 89f0468 rejected the legal `"my.key" = …` shape as a
+-- dotted key and stored quoted header names with their quote characters;
+-- 94fccf2 was missing the inline table/array parsing poste-db added in
+-- cc6652e.
 -- Syncing: poste-redis must not require("poste-db.*") (family red line), so
 -- this pure-function parser is copied verbatim — including doc comments and
 -- poste-db-only examples in them. When poste-db updates the file, re-copy it
+
 --- Minimal pure-Lua TOML parser.
 --- Supports: [section] headers (quoted header names too), key = "string" /
 --- 'string' / 123 / true|false, inline arrays `[…]` and inline tables `{…}`
@@ -162,6 +167,13 @@ parse_value = function(v)
   if v == "false" then return false end
   local n = tonumber(v)
   if n then return n end
+  -- Fail closed on multi-line strings: the single-line path below strips the
+  -- outer quotes of `"""x"""` into the garbage value `""x""`, and a password
+  -- or host written that way would silently misbehave. Erroring names the
+  -- real problem instead.
+  if v:sub(1, 3) == '"""' or v:sub(1, 3) == "'''" then
+    return nil, "Multi-line strings are not supported"
+  end
   -- NB: the error must not quote the value — connections.toml values are
   -- frequently secrets, and the message goes to the log file.
   if v:sub(1, 1) == '"' then
@@ -217,6 +229,15 @@ function M.parse(content)
           return nil, "Invalid table header: " .. line
         end
         name = trim(trimmed:sub(2, close - 1))
+        -- Anything after the closing bracket must be empty or a comment:
+        -- `[a] [b]` used to register section `a` and silently drop the `[b]`
+        -- the rest of the file keys into, so every following key landed in
+        -- the wrong connection. The quoted-name path below already errors
+        -- on a non-empty tail.
+        local rest = trim(trimmed:sub(close + 1))
+        if rest ~= "" and rest:sub(1, 1) ~= "#" then
+          return nil, "Invalid table header: " .. line
+        end
       end
       if name == "" then
         return nil, "Empty table header"
