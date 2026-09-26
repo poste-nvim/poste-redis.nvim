@@ -239,7 +239,18 @@ function M.extract_entries(content)
       end
     end
     if #tokens > 0 then logical_end = idx end
-    open_bare = has_cont and chunk_open or false
+    -- open_bare bookkeeping: a chunk WITH tokens recomputes it; a
+    -- continuation chunk with an empty body must PRESERVE it, or the open
+    -- word silently degrades into a second token at the next chunk —
+    -- `DEL a-\` + `\` + `b` produced `DEL a- b`, deleting the two
+    -- unrelated keys `a-` and `b` (the exact wrong-target write the
+    -- re-join exists to prevent). A non-continuation line flushes below,
+    -- which resets the flag.
+    if #tokens > 0 then
+      open_bare = has_cont and chunk_open or false
+    elseif has_cont then
+      open_bare = open_bare
+    end
     if not has_cont then flush() end
 
     ::continue::

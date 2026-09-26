@@ -54,6 +54,15 @@ describe("poste-redis parser", function()
     assert.same({ "SET", "k", '"va', 'lue"' }, eq.tokens)
   end)
 
+  it("keeps the open word across an empty continuation line", function()
+    -- `DEL a-\` + a bare `\` line + `b`: the empty chunk used to reset the
+    -- open-word flag, so `b` arrived as a second token — `DEL a- b`, the
+    -- two-key wrong-target write the re-join exists to prevent
+    local entries = parser.extract_entries("DEL a-\\\n\\\nb\n")
+    assert.equals(1, #entries)
+    assert.same({ "DEL", "a-b" }, entries[1].tokens)
+  end)
+
   it("does not treat # inside double quotes as a comment", function()
     local entries = parser.extract_entries('SET note "a # b"\n')
     assert.equals(1, #entries)
