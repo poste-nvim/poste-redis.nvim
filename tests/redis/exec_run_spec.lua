@@ -156,6 +156,28 @@ describe("poste-redis exec_run", function()
     exec_run.cancel()
   end)
 
+  it("delivers a missing-binary failure exactly once", function()
+    -- regression: cli.run_async synthesizes a synchronous on_exit(-1) when no
+    -- binary was found. The exit handler ran the whole no-summary path (an
+    -- on_error AND an on_done unwind) and the failed-start branch then added
+    -- a second on_error/on_done pair — two toasts and two history pushes for
+    -- one missing binary. The synthesized exit now stays swallowed.
+    cli.run_async = function(_cmd, opts)
+      opts.on_exit(-1)
+      return nil
+    end
+    local errs, done = {}, {}
+    exec_run.run_async({ entry("GET k") },
+      { connection = "redis://h:6379/0" }, {
+        on_error = function(msg, _) errs[#errs + 1] = msg end,
+        on_done = function() done[#done + 1] = true end,
+      })
+    assert.equals(1, #errs, "one failure, one delivery")
+    assert.match("Failed to start redis%-exec", errs[1])
+    assert.equals(1, #done, "the chain unwinds exactly once")
+    assert.equals(false, exec_run.is_busy())
+  end)
+
   it("rejects a non-redis connection URL", function()
     stub_emit({})
     local errs = {}

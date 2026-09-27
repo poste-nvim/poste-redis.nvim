@@ -203,6 +203,14 @@ function M.run_async(entries, opts, callbacks)
     end,
     on_exit = function(code)
       if run_seq ~= exec_seq then return end
+      -- cli.run_async synthesizes a synchronous on_exit(-1) when the binary is
+      -- missing, before any job existed: active[run_seq] is only set after a
+      -- successful start, and a real job's exit cannot fire before jobstart
+      -- returns. Swallow that one — the failed-start branch below is the
+      -- single delivery; the synthesized exit used to run the no-summary path
+      -- too, so a missing binary notified twice and unwound the dispatch
+      -- chain twice per group (duplicate history pushes / panel renders).
+      if active[run_seq] == nil then return end
       active[run_seq] = nil
       busy = false
       if saw_summary then
@@ -216,7 +224,7 @@ function M.run_async(entries, opts, callbacks)
     end,
   })
 
-  if job_id == nil or job_id < 0 then
+  if job_id == nil or job_id <= 0 then
     busy = false
     -- on_error BEFORE invalidating the seq: guarded() drops callbacks from a
     -- superseded seq, so bumping exec_seq first silenced this notification
