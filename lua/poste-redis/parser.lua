@@ -184,6 +184,12 @@ end
 --- @param content string
 --- @return table[] entries
 function M.extract_entries(content)
+  -- Strip a leading UTF-8 BOM: Windows editors and PowerShell's Out-File
+  -- write one by default, and with 'bomb' off Neovim keeps U+FEFF as the
+  -- first character of line 1 — it used to ride into the first token as
+  -- `<feff>SET`, and the server answered "unknown command" for a line the
+  -- user sees as a plain SET.
+  content = content:gsub("^\xEF\xBB\xBF", "")
   local physical = split_lines(content)
   local entries = {}
   local logical = {}         -- accumulated tokens for the current logical line

@@ -15,6 +15,18 @@ describe("poste-redis parser", function()
     assert.equals(1, e.end_line)
   end)
 
+  it("strips a leading UTF-8 BOM instead of folding it into the first token", function()
+    -- Windows editors / PowerShell Out-File write a BOM by default; with
+    -- 'bomb' off Neovim keeps U+FEFF as line 1's first character. It used to
+    -- become `<feff>SET` and the server rejected the command the user sees
+    -- as a plain SET.
+    local entries = parser.extract_entries("\xEF\xBB\xBFSET k v\nGET k\n")
+    assert.equals(2, #entries)
+    assert.same({ "SET", "k", "v" }, entries[1].tokens)
+    assert.equals("SET", entries[1].command)
+    assert.same({ "GET", "k" }, entries[2].tokens)
+  end)
+
   it("joins continuation lines ending in backslash", function()
     local entries = parser.extract_entries(
       "HSET user:42 name \"Alice\" \\\n"
