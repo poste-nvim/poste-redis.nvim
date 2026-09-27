@@ -421,6 +421,31 @@ url = "rediss://alice:pa1ss@[::1]:6379/1"
     assert.is_nil(list[1].host:find("pa1ss", 1, true))
   end)
 
+  it("list_connections returns connections in a stable, sorted order", function()
+    -- Regression: the list came out in pairs() order, which flips as
+    -- connections.toml is edited — the connection/context pickers reshuffled
+    -- between opens (the same churn poste-db's picker round-42 fix removed).
+    write("connections.toml", [[
+[zeta]
+dialect = "redis"
+url = "redis://z:6379/0"
+
+[alpha]
+dialect = "redis"
+url = "redis://a:6379/0"
+
+[mid]
+dialect = "redis"
+url = "redis://m:6379/0"
+]])
+    local list = {}
+    connections.list_connections(function(l) list = l end, { search_dir = tmpdir })
+    assert.equals(true, vim.wait(500, function() return #list > 0 end, 5))
+    local names = {}
+    for _, c in ipairs(list) do names[#names + 1] = c.name end
+    assert.same({ "alpha", "mid", "zeta" }, names)
+  end)
+
   it("get_connection_config returns env-expanded values", function()
     write("connections.toml", [[
 [srv]

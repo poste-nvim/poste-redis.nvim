@@ -405,6 +405,11 @@ function M.list_connections_sync(search_dir)
       })
       ::continue::
     end
+    -- Stable order at the source: pairs() flips as connections.toml is edited,
+    -- which reshuffled the connection/context pickers between opens (the same
+    -- churn poste-db fixed in its picker at round 42). redis_connection_names
+    -- re-sorts for completion; sorting here keeps the pickers steady too.
+    table.sort(list, function(a, b) return a.name < b.name end)
   end
   return list
 end
