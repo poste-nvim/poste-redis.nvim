@@ -149,7 +149,8 @@ end
 --- @param padded_header string  full padded header line (with left padding)
 --- @param index table[]|nil  cached per-char index (built when nil)
 --- @param type_hl string|nil  highlight for the type cell (first column)
---- @param icon_hl table|nil  { start, end_ } byte range of the sort icon
+--- @param icon_hl number[]|nil  positional pair of byte offsets {start, end}
+---   (0-based, end-exclusive) of the sort icon, as sort.icon_range returns
 function M.update(win, padded_header, index, type_hl, icon_hl)
   if not win or not vim.api.nvim_win_is_valid(win) then M.close(); return end
   if not padded_header then M.close(); return end

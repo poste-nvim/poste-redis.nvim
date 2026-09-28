@@ -115,7 +115,8 @@ end
 --- (counting back highlighted padding on any column wider than its header).
 --- @param header_line string  the rendered header line (tab.header_padded)
 --- @param sort table|nil { col, dir }
---- @return table|nil { start, end_ }
+--- @return number[]|nil  positional pair { start_byte, end_byte } (consumed
+---   as icon_hl[1]/icon_hl[2] by header.apply_sort_hl)
 function M.icon_range(header_line, sort)
   if not sort or not sort.dir then return nil end
   local icon = M.icon(sort.dir)
