@@ -1448,16 +1448,21 @@ describe("poste-redis browser actions e2e (live redis)", function()
     local actions = require("poste-redis.browser.actions")
     local session_conn = require("poste-redis.session_conn")
 
+    -- The node and every session call must agree on ONE db. The URL's own
+    -- default is not necessarily 0 (CI runs /0; a local /9 masked the rename
+    -- test's mismatch), so pin the db explicitly everywhere.
+    local db_num = tonumber(url:match("/(%d+)$")) or 0
+
     -- seed the key
     local seeded = false
     session_conn.execute(url, { "SET", "act:del", "v" }, {
       on_response = function() seeded = true end,
-    })
+    }, nil, { db = db_num })
     vim.wait(3000, function() return seeded end, 5)
 
     local orig_confirm = vim.fn.confirm
     vim.fn.confirm = function() return 1 end  -- Yes
-    local node = tree.make_key_node("act:del", "e2e", 0, { type = "string" })
+    local node = tree.make_key_node("act:del", "e2e", db_num, { type = "string" })
     node.meta.url = url
     local done = false
     actions.delete_key(node, { render = function() done = true end })
@@ -1468,7 +1473,7 @@ describe("poste-redis browser actions e2e (live redis)", function()
     local exists = nil
     session_conn.execute(url, { "EXISTS", "act:del" }, {
       on_response = function(ev) exists = ev.value and ev.value.value end,
-    })
+    }, nil, { db = db_num })
     vim.wait(3000, function() return exists ~= nil end, 5)
     assert.equals(0, exists, "key act:del should be gone")
   end)
@@ -1478,20 +1483,26 @@ describe("poste-redis browser actions e2e (live redis)", function()
     local actions = require("poste-redis.browser.actions")
     local session_conn = require("poste-redis.session_conn")
 
+    -- Node, seed and verify calls all pin ONE db. The node used to claim
+    -- db 0 while the bare seed calls ran on the URL's default — on a /9 URL
+    -- the RENAME ran in db 0 against keys living in db 9 ("no such key"),
+    -- and the assertion only held because CI's URL ends in /0.
+    local db_num = tonumber(url:match("/(%d+)$")) or 0
+
     -- idempotent seed: clear both names, then create act:ren
     local seeded = false
     session_conn.execute(url, { "DEL", "act:ren", "act:ren2" }, {
       on_response = function()
         session_conn.execute(url, { "SET", "act:ren", "v" }, {
           on_response = function() seeded = true end,
-        })
+        }, nil, { db = db_num })
       end,
-    })
+    }, nil, { db = db_num })
     vim.wait(3000, function() return seeded end, 5)
 
     local orig_input = vim.ui.input
     vim.ui.input = function(_, cb) cb("act:ren2") end
-    local node = tree.make_key_node("act:ren", "e2e", 0, { type = "string" })
+    local node = tree.make_key_node("act:ren", "e2e", db_num, { type = "string" })
     node.meta.url = url
     local done = false
     actions.rename_key(node, { render = function() done = true end })
@@ -1502,10 +1513,10 @@ describe("poste-redis browser actions e2e (live redis)", function()
     local old_v, new_v = nil, nil
     session_conn.execute(url, { "EXISTS", "act:ren" }, {
       on_response = function(ev) old_v = ev.value and ev.value.value end,
-    })
+    }, nil, { db = db_num })
     session_conn.execute(url, { "EXISTS", "act:ren2" }, {
       on_response = function(ev) new_v = ev.value and ev.value.value end,
-    })
+    }, nil, { db = db_num })
     vim.wait(3000, function() return old_v ~= nil and new_v ~= nil end, 5)
     assert.equals(0, old_v, "old key should be gone")
     assert.equals(1, new_v, "new key should exist")
@@ -1514,7 +1525,7 @@ describe("poste-redis browser actions e2e (live redis)", function()
     local cleaned = false
     session_conn.execute(url, { "DEL", "act:ren2" }, {
       on_response = function() cleaned = true end,
-    })
+    }, nil, { db = db_num })
     vim.wait(3000, function() return cleaned end, 5)
   end)
 end)
