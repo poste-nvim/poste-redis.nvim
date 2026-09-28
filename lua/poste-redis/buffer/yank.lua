@@ -2,6 +2,7 @@
 --- grid), the current cell, or the current column. Callers pass the active
 --- tab; `cell` falls back to `current` on text tabs.
 local constants = require("poste-redis.constants")
+local util = require("poste-redis.util")
 
 local M = {}
 
@@ -42,7 +43,9 @@ function M.cell(tab)
   vim.fn.setreg('"', text)
   vim.fn.setreg('+', text)
   local col_name = tab.grid.columns[col] or ""
-  vim.notify(string.format('Yanked %s: %s', col_name, text:sub(1, 40)),
+  -- Display-width cut, not a byte cut: a CJK value's byte 40 lands inside a
+  -- glyph and the notify printed U+FFFD replacement characters.
+  vim.notify(string.format('Yanked %s: %s', col_name, util.truncate_display(text, 40)),
     vim.log.levels.INFO, { title = constants.TITLE })
 end
 

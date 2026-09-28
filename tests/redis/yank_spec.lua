@@ -79,6 +79,29 @@ describe("poste-redis buffer yank", function()
       vim.fn.setreg = orig
       assert.equals("raw", reg['"'])
     end)
+
+    it("keeps the notify preview valid UTF-8 for a long CJK value", function()
+      -- The preview used to cut at raw byte 40, which lands inside a 3-byte
+      -- glyph and put U+FFFD replacement characters into :messages.
+      local notices = {}
+      local orig_setreg, orig_notify = vim.fn.setreg, vim.notify
+      ---@diagnostic disable-next-line: duplicate-set-field
+      vim.fn.setreg = function() end
+      vim.notify = function(msg) notices[#notices + 1] = msg end
+      local cjk = string.rep("数", 30) -- 90 bytes; byte 40 splits glyph 14
+      yank.cell(make_table_tab({ grid = {
+        columns = { "#", "value" },
+        to_copy = function(v) return v end,
+        rows = { { 1, cjk } },
+      } }))
+      vim.fn.setreg, vim.notify = orig_setreg, orig_notify
+      assert.equals(1, #notices)
+      local preview = notices[1]:match(": (.+)$")
+      assert.truthy(preview)
+      assert.equals(1, vim.fn.strchars(preview:sub(1, 3)), "each 3-byte glyph survives intact")
+      assert.equals(0, #preview % 3, "every byte belongs to a whole glyph (or the 3-byte ellipsis)")
+      assert.truthy(preview:find("…", 1, true), "a cut preview carries the ellipsis")
+    end)
   end)
 
   describe("column", function()
