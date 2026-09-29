@@ -69,9 +69,10 @@ M.defaults = {
   -- always-on chrome at the top of the edit window. False disables.
   source_winbar = true,
   -- Execute confirm gate: a run that contains a blacklisted command
-  -- (constants.DANGEROUS_COMMANDS — FLUSHALL/FLUSHDB/SHUTDOWN/CONFIG) asks for
-  -- an explicit yes before any job starts. Applies to the <CR> / run-file
-  -- paths in runner.lua; false disables the prompt.
+  -- (constants.DANGEROUS_COMMANDS — FLUSHALL/FLUSHDB/SHUTDOWN/CONFIG/
+  -- SLAVEOF/REPLICAOF) asks for an explicit yes before any job starts.
+  -- Applies to the <CR> / run-file paths in runner.lua; false disables
+  -- the prompt.
   confirm_commands = true,
   keymaps = {
     redis_source = {

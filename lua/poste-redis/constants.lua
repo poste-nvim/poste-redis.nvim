@@ -58,11 +58,20 @@ M.REDIS_DB_COUNT = 16
 --- Dangerous commands (P2 blacklist). Two consumers: the result panel's yellow
 --- warning (format.lua) and the run-time confirm gate (runner.lua, gated by
 --- `config.confirm_commands`).
+---
+--- SLAVEOF/REPLICAOF: retargeting a replica makes it wipe its dataset and
+--- re-sync from the new master — the data loss lands on the server, not in
+--- anything this panel shows, and a typo'd host in a session buffer is easy
+--- to send before noticing. Deliberately NOT listed: KEYS/DEBUG (blocking or
+--- invasive, but reads a dev workflow uses constantly — a confirm on each
+--- would train the reflex to dismiss it).
 M.DANGEROUS_COMMANDS = {
   FLUSHALL = true,
   FLUSHDB = true,
   SHUTDOWN = true,
   ["CONFIG"] = true, -- CONFIG SET/RESETSTAT
+  SLAVEOF = true,
+  REPLICAOF = true,
 }
 
 --- True when the command is blacklisted. Only the first token is inspected,

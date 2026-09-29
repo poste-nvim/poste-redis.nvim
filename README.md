@@ -57,9 +57,9 @@ GET session:abc
   command; `gd` jumps to the tab's key in the browser; `E` exports the whole
   grid to a file (CSV / TSV / JSON).
 - `<Esc>` cancels an in-flight execution. Dangerous commands (`FLUSHALL`,
-  `FLUSHDB`, `SHUTDOWN`, `CONFIG`) are flagged in the panel and, on `<CR>` or
-  a file run, ask for an explicit yes before anything is dispatched
-  (`confirm_commands = false` to opt out).
+  `FLUSHDB`, `SHUTDOWN`, `CONFIG`, `SLAVEOF`, `REPLICAOF`) are flagged in the
+  panel and, on `<CR>` or a file run, ask for an explicit yes before anything
+  is dispatched (`confirm_commands = false` to opt out).
 
 ## Key browser
 

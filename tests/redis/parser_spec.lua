@@ -234,6 +234,10 @@ describe("poste-redis parser", function()
   it("flags dangerous commands", function()
     assert.is_true(parser.is_dangerous(parser.extract_entries("FLUSHALL\n")[1]))
     assert.is_true(parser.is_dangerous(parser.extract_entries("CONFIG SET save ''\n")[1]))
+    -- replication retarget: a replica wipes its dataset to re-sync from the
+    -- new master, so a typo'd host destroys data nothing on screen warned about
+    assert.is_true(parser.is_dangerous(parser.extract_entries("SLAVEOF 10.0.0.1 6379\n")[1]))
+    assert.is_true(parser.is_dangerous(parser.extract_entries("replicaof no one\n")[1]))
     assert.is_false(parser.is_dangerous(parser.extract_entries("SET k v\n")[1]))
     assert.is_false(parser.is_dangerous(parser.extract_entries("USE my-redis\n")[1]))
   end)
