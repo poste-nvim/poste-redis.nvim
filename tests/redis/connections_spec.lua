@@ -532,6 +532,33 @@ port = 6379
     assert.equals(first, second)
     assert.equals(1, walks, "the second lookup must hit the path+mtime cache")
   end)
+
+  -- The TOML parser turns `host = [1]` into a real table; the resolvers used
+  -- to crash on `:sub`/method calls instead of naming the bad field, and
+  -- completion/statusline run those on every redraw.
+  it("build_url_from_fields reports a non-string host instead of crashing", function()
+    local url, err = connections._test.build_url_from_fields({ host = { "h" } }, "srv")
+    assert.is_nil(url)
+    assert.truthy(err:find("host", 1, true))
+    assert.truthy(err:find("srv", 1, true))
+  end)
+
+  it("resolve_redis_url reports a non-string url instead of crashing", function()
+    write("connections.toml", "[srv]\ndialect = \"redis\"\nurl = [1]\n")
+    connections._test.reset_caches()
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.truthy(err)
+  end)
+
+  it("list_connections_sync keeps a broken-url connection nameless-crash free", function()
+    write("connections.toml", "[srv]\ndialect = \"redis\"\nurl = [1]\nhost = [2]\n")
+    connections._test.reset_caches()
+    local list = connections.list_connections_sync(tmpdir)
+    assert.equals(1, #list)
+    assert.equals("srv", list[1].name)
+    assert.is_nil(list[1].url)
+  end)
 end)
 
 

@@ -280,8 +280,13 @@ end
 local function build_url_from_fields(conn, name)
   local scheme = conn.tls and "rediss" or "redis"
   local host = conn.host
-  if not host or host == "" then
-    return nil, "Missing host for redis connection"
+  -- Type-check before touching it: the TOML parser turns `host = [1]` into a
+  -- real table, and a `:sub` on it crashed the caller (completion, the picker
+  -- and the statusline all resolve) instead of naming the bad field.
+  if type(host) ~= "string" or host == "" then
+    return nil, "Missing or invalid host for redis connection"
+      .. (name and (" (connection '%s')"):format(name) or "")
+      .. (host ~= nil and " — host must be a string" or "")
   end
   -- Which connection, so a shared file with ten of them stays diagnosable.
   -- The bad value itself is NOT echoed: `port = "{{REDIS_PASS}}"` (a typo in
@@ -334,7 +339,9 @@ function M.resolve_redis_url(name, opts)
     return nil, ("Connection '%s' is not a redis connection (dialect=%s)"):format(
       name, conn.dialect or "(unset) — set dialect = \"redis\"")
   end
-  if conn.url and conn.url ~= "" then
+  -- Same type gate as build_url_from_fields' host: `url = [1]` in the toml is
+  -- a table, and `:sub` on it crashed instead of naming the bad field.
+  if type(conn.url) == "string" and conn.url ~= "" then
     if not (conn.url:sub(1, 8) == "redis://" or conn.url:sub(1, 9) == "rediss://") then
       return nil, "URL for '" .. name .. "' must start with redis:// or rediss://"
     end
@@ -374,7 +381,9 @@ function M.list_connections_sync(search_dir)
       local resolved = apply_env(conn, vars)
       if resolved.dialect ~= "redis" then goto continue end
       local url
-      if resolved.url and resolved.url ~= "" then
+      -- type gate mirrors resolve_redis_url: a non-string `url` from a toml
+      -- typo must drop this connection from the list, not crash the caller
+      if type(resolved.url) == "string" and resolved.url ~= "" then
         if resolved.url:sub(1, 8) == "redis://" or resolved.url:sub(1, 9) == "rediss://" then
           url = resolved.url
         end
