@@ -147,6 +147,43 @@ password = "a\"b\\c"
     assert.equals("Unclosed inline table", err)
   end)
 
+  -- Synced with this round's poste-db hardening: fail closed on the shapes
+  -- that used to drop entries silently — a vanished tunnel target or env
+  -- entry changes what the surviving entries mean, with no error anywhere.
+  it("rejects a missing value after '=' instead of storing nothing", function()
+    local out, err = toml.parse('password =')
+    assert.is_nil(out)
+    assert.matches("Missing value", err)
+    local out2, err2 = toml.parse('password = # oops')
+    assert.is_nil(out2)
+    assert.matches("Missing value", err2)
+  end)
+
+  it("rejects a double comma inside an inline container", function()
+    local out, err = toml.parse('ips = ["h1",, "h2"]')
+    assert.is_nil(out)
+    assert.matches("double comma", err)
+    local out2, err2 = toml.parse('t = { a = 1,, b = 2 }')
+    assert.is_nil(out2)
+    assert.matches("double comma", err2)
+  end)
+
+  it("still accepts a trailing comma in inline containers", function()
+    local out, err = toml.parse('[c]\nlist = [1, 2,]\ntbl = { a = 1, }')
+    assert.is_nil(err)
+    assert.same({ 1, 2 }, out.c.list)
+    assert.same({ a = 1 }, out.c.tbl)
+  end)
+
+  it("rejects an inline table entry with a missing key or value", function()
+    local out, err = toml.parse('t = { = 1 }')
+    assert.is_nil(out)
+    assert.matches("Invalid inline table entry", err)
+    local out2, err2 = toml.parse('t = { a = }')
+    assert.is_nil(out2)
+    assert.matches("Invalid inline table entry", err2)
+  end)
+
   it("rejects [[array-of-tables]] instead of making a \"[name\" section", function()
     local out, err = toml.parse('[[srv]]\ndialect = "redis"')
     assert.is_nil(out)
