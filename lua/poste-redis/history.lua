@@ -209,7 +209,9 @@ local function build(width)
     local mark = failed(e) and "✗"
       or (e.kind == "write" and "+")
       or (status ~= "" and "✓" or " ")
-    local time = os.date("%H:%M:%S", e.ts or os.time())
+    -- tonumber gate: os.date raises on a non-number ts, and a future push
+    -- caller passing a string ts must not be able to kill the sidebar render
+    local time = os.date("%H:%M:%S", tonumber(e.ts) or os.time())
     local cmd_max = width - 12  -- mark+space (2) + gap (1) + time (8) + margin (1)
     local cmd = util.truncate_display(e.command or "", cmd_max)
     local pad = math.max(1, width - 8 - 2 - util.display_width(cmd))

@@ -128,6 +128,15 @@ describe("poste-redis history", function()
     assert.equals("✓", with_status[1]:sub(1, #"✓"), "newest entry renders first")
   end)
 
+  it("build survives a non-numeric ts", function()
+    -- os.date raises on a string; a future push caller passing one must not
+    -- be able to kill the sidebar render
+    history.push(entry({ command = "GET k", ts = "not-a-number" }))
+    local lines = history._test.build(60)
+    assert.equals(1, #lines)
+    assert.truthy(lines[1]:find("GET k", 1, true))
+  end)
+
   it("build spans the error mark glyph in full (3 bytes for ✗)", function()
     -- Regression: the error highlight covered 1 byte of the 3-byte ✗, which
     -- clamps at the char boundary and colors nothing.
