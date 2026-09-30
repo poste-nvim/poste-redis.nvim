@@ -559,6 +559,17 @@ port = 6379
     assert.equals("srv", list[1].name)
     assert.is_nil(list[1].url)
   end)
+
+  it("list_connections_sync carries the reason a url could not be built", function()
+    -- the pickers surface this instead of listing a bare name that silently
+    -- applies a nil-URL context when selected
+    write("connections.toml", "[srv]\ndialect = \"redis\"\nport = 6379\n")
+    connections._test.reset_caches()
+    local list = connections.list_connections_sync(tmpdir)
+    assert.equals(1, #list)
+    assert.is_nil(list[1].url)
+    assert.truthy(list[1].url_err:find("host", 1, true))
+  end)
 end)
 
 

@@ -383,12 +383,15 @@ function M.list_connections_sync(search_dir)
       local url
       -- type gate mirrors resolve_redis_url: a non-string `url` from a toml
       -- typo must drop this connection from the list, not crash the caller
+      local url_err
       if type(resolved.url) == "string" and resolved.url ~= "" then
         if resolved.url:sub(1, 8) == "redis://" or resolved.url:sub(1, 9) == "rediss://" then
           url = resolved.url
+        else
+          url_err = "URL must start with redis:// or rediss://"
         end
       else
-        url = build_url_from_fields(resolved, name)
+        url, url_err = build_url_from_fields(resolved, name)
       end
       local host = resolved.host
       if not host and url then
@@ -408,6 +411,7 @@ function M.list_connections_sync(search_dir)
         name = name,
         dialect = resolved.dialect,
         url = url,
+        url_err = url_err,
         host = host,
         port = resolved.port,
         db = db,
@@ -462,10 +466,20 @@ function M.use_connection(name)
   return true, nil
 end
 
+--- Item text for a connection entry in the pickers: `name  <redacted url>`,
+--- or `name  (unresolved: …)` when the URL could not be built — a broken
+--- connection used to render as a bare name and selecting it silently set a
+--- nil-URL context that every later run then fell off of.
+local function picker_item(c)
+  if c.url then
+    return string.format("%s  %s", c.name, require("poste-redis.util").redact_url(c.url))
+  end
+  return string.format("%s  (unresolved: %s)", c.name, c.url_err or "no url")
+end
+
 --- Open the connection picker (poste.select); on selection, applies the
 --- connection as the current context and notifies.
 function M.select_connection()
-  local redis_util = require("poste-redis.util")
   M.invalidate()  -- re-probe: the file may exist by now even if cached "not found"
   M.list_connections(function(list)
     if #list == 0 then
@@ -475,7 +489,7 @@ function M.select_connection()
     end
     local items = {}
     for _, c in ipairs(list) do
-      items[#items + 1] = string.format("%s  %s", c.name, redis_util.redact_url(c.url or ""))
+      items[#items + 1] = picker_item(c)
     end
     -- vendored picker (family dissolution): the module is bundled, so the
     -- old "poste.select unavailable" pcall guard is gone
@@ -483,7 +497,12 @@ function M.select_connection()
     select_mod.select(items, "Select Redis Connection", function(selected)
       if not selected then return end
       for _, c in ipairs(list) do
-        if string.format("%s  %s", c.name, redis_util.redact_url(c.url or "")) == selected then
+        if picker_item(c) == selected then
+          if not c.url then
+            vim.notify(("Cannot use '%s': %s"):format(c.name, c.url_err or "no url"),
+              vim.log.levels.ERROR, { title = redis_state.TITLE })
+            return
+          end
           M.apply_connection(c.name, c.url)
           vim.notify("Redis connection: " .. c.name, vim.log.levels.INFO, { title = redis_state.TITLE })
           -- the open browser follows the new context immediately (no picker)
@@ -503,8 +522,6 @@ end
 --- Open the context picker: pick a connection, make it the current context
 --- (all later queries run against it) and notify with its configured color.
 function M.select_context()
-  local redis_util = require("poste-redis.util")
-  local statusline = require("poste-redis.statusline")
   M.invalidate()  -- re-probe: the file may exist by now even if cached "not found"
   M.list_connections(function(list)
     if #list == 0 then
@@ -514,7 +531,7 @@ function M.select_context()
     end
     local items = {}
     for _, c in ipairs(list) do
-      items[#items + 1] = string.format("%s  %s", c.name, redis_util.redact_url(c.url or ""))
+      items[#items + 1] = picker_item(c)
     end
     -- vendored picker (family dissolution): the module is bundled, so the
     -- old "poste.select unavailable" pcall guard is gone
@@ -522,13 +539,19 @@ function M.select_context()
     select_mod.select(items, "Select Redis Context", function(selected)
       if not selected then return end
       for _, c in ipairs(list) do
-        if string.format("%s  %s", c.name, redis_util.redact_url(c.url or "")) == selected then
+        if picker_item(c) == selected then
+          if not c.url then
+            vim.notify(("Cannot switch context to '%s': %s"):format(c.name, c.url_err or "no url"),
+              vim.log.levels.ERROR, { title = redis_state.TITLE })
+            return
+          end
           local use_ok, use_err = M.use_connection(c.name)
           if not use_ok then
             vim.notify("Context switch failed: " .. tostring(use_err),
               vim.log.levels.ERROR, { title = redis_state.TITLE })
             return
           end
+          local statusline = require("poste-redis.statusline")
           local hl = statusline.get_ctx_color(c.name)
           vim.notify(("Context: %s%s"):format(c.name,
             hl and (" (%s)"):format(hl) or ""),
