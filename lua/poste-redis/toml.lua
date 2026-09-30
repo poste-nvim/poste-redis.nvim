@@ -1,7 +1,8 @@
 -- VENDORED from poste-db.nvim lua/poste-db/toml.lua
--- Source commit: 7ba2df1 ("fix(toml): fail closed on a stray second header
--- and on triple-quoted strings") + this round's inline-container hardening:
--- a double comma ([1,,2]) and a missing key or value ({ = 1 } / { a = })
+-- Source commit: 63029de ("fix(toml): fail closed on double commas and
+-- missing container halves"; carries 7ba2df1's "fail closed on a stray
+-- second header and on triple-quoted strings"): a double comma ([1,,2]) and
+-- a missing key or value ({ = 1 } / { a = })
 -- error instead of silently dropping the entry, and `key =` errors instead
 -- of storing nothing. The copy pinned to c23dc44 parsed
 -- `"""x"""` into the garbage value `""x""` and silently swallowed a second
@@ -12,6 +13,9 @@
 -- 94fccf2 was missing the inline table/array parsing poste-db added in
 -- cc6652e.
 -- Syncing: poste-redis must not require("poste-db.*") (family red line), so
+-- this pure-function parser is copied verbatim — including doc comments and
+-- poste-db-only examples in them. When poste-db updates the file, re-copy it
+
 --- Minimal pure-Lua TOML parser.
 --- Supports: [section] headers (quoted header names too), key = "string" /
 --- 'string' / 123 / true|false, inline arrays `[…]` and inline tables `{…}`
