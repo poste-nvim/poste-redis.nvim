@@ -115,6 +115,21 @@ describe("poste-redis statusline ctx color", function()
     assert.equals("#112233", last.opts.fg)
     assert.is_nil(last.opts.bg)
   end)
+
+  it("degrades a table-typed color/link/bg instead of erroring the redraw", function()
+    -- The TOML parser turns `color = [1]` into a real table; `..` and `:sub`
+    -- used to raise on it — inside a function every statusline redraw runs.
+    -- A non-string field now counts as absent, like round 24's host/url gate.
+    stub_config({
+      ["tblcolor"] = { color = { "#ff0000" }, link = {}, bg = {} },
+      ["tblbg"] = { color = "#112233", bg = { "#222222" } },
+    })
+    assert.is_nil(statusline.get_ctx_color("tblcolor"))
+    assert.equals("PosteRedisCtxtblbg", statusline.get_ctx_color("tblbg"))
+    local last = _G._set_hl_calls[#_G._set_hl_calls]
+    assert.equals("#112233", last.opts.fg)
+    assert.is_nil(last.opts.bg)
+  end)
 end)
 
 ---------------------------------------------------------------------------

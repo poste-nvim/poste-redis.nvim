@@ -60,6 +60,9 @@ end
 
 --- Build (once per fingerprint) + return the highlight group for a connection
 --- name, based on its connections.toml entry (color / link / bg).
+--- Type-gated like every other connections.toml field the display paths
+--- touch: the TOML parser turns `color = [1]` into a real table, and the
+--- `..` / `:sub` below used to error on it — on every statusline redraw.
 --- @param conn_name string
 --- @return string|nil highlight group name
 function M.get_ctx_color(conn_name)
@@ -69,9 +72,9 @@ function M.get_ctx_color(conn_name)
   local config = connections.get_connection_config(conn_name)
   if not config then return nil end
 
-  local color = config.color
-  local link = config.link
-  local bg = config.bg
+  local color = type(config.color) == "string" and config.color or nil
+  local link = type(config.link) == "string" and config.link or nil
+  local bg = type(config.bg) == "string" and config.bg or nil
   if not color and not link then return nil end
 
   local fp = (color or "") .. "\0" .. (link or "") .. "\0" .. (bg or "")
