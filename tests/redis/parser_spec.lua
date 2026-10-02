@@ -224,6 +224,17 @@ describe("poste-redis parser", function()
     assert.same({ "LPUSH", "q", "hello world" }, args)
   end)
 
+  it("decodes the single-quote escape redis-cli processes (\\')", function()
+    -- redis-cli's literal single-quote reading keeps every character except
+    -- `\'`: the verbatim backslash used to target the key `a\'b` where the
+    -- same command names `a'b` in redis-cli
+    local args = parser.entry_args(parser.extract_entries("SET 'a\\'b' v\n")[1])
+    assert.same({ "SET", "a'b", "v" }, args)
+    -- and everything else in a single-quoted token stays verbatim
+    local args2 = parser.entry_args(parser.extract_entries("SET 'a\\nb' v\n")[1])
+    assert.same({ "SET", "a\\nb", "v" }, args2)
+  end)
+
   it("entry_args uppercases the command name and leaves USE empty", function()
     local e = parser.extract_entries("use my-redis\n")[1]
     assert.equals(0, #parser.entry_args(e))
@@ -361,6 +372,15 @@ describe("poste-redis parser key_arg", function()
     assert.is_nil(key_of("LMPOP 1 mylist LEFT"))
     assert.is_nil(key_of("ZMPOP 1 myzset LEFT"))
     assert.is_nil(key_of("SINTERCARD 2 a b"))
+    -- the rest of the numkeys-first set-algebra family: the second token is
+    -- a COUNT, not a key (SINTERCARD was listed; its siblings were not, and
+    -- `ZUNION 2 a b` revealed the key "2" to the tree and the TTL probe)
+    assert.is_nil(key_of("ZUNION 2 a b WEIGHTS 1 1"))
+    assert.is_nil(key_of("ZINTER 2 a b"))
+    assert.is_nil(key_of("ZDIFF 2 a b"))
+    assert.is_nil(key_of("ZINTERCARD 2 a b LIMIT 10"))
+    -- BITOP's second token is the set operation name, not a key
+    assert.is_nil(key_of("BITOP AND dest src1 src2"))
   end)
 
   it("does not treat server-scope, connection or admin arguments as a key", function()

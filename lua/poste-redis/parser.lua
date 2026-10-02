@@ -87,9 +87,11 @@ end
 --- the only way a binary-safe key/value gets into a command line, since the
 --- parser has no `\<byte>` form. An unknown or malformed escape (\x with
 --- non-hex following) keeps its characters verbatim. Single quotes: literal
---- (redis-cli style). Decoding is ONE pass over `\x` pairs: sequential gsub
---- passes would let `\\n` (backslash + n per JSON) re-match as `\n` after
---- `\\` → `\` and decode to a newline instead of the literal two characters.
+--- (redis-cli style) with the one escape redis-cli itself processes — `\'`
+--- decodes to `'`; everything else keeps its characters. Decoding is ONE pass
+--- over `\x` pairs: sequential gsub passes would let `\\n` (backslash + n per
+--- JSON) re-match as `\n` after `\\` → `\` and decode to a newline instead of
+--- the literal two characters.
 --- @param tok string
 --- @return string
 local function unquote(tok)
@@ -125,7 +127,12 @@ local function unquote(tok)
       end
       return table.concat(out)
     end
-    return inner
+    -- redis-cli's literal reading keeps every character except the one escape
+    -- it processes: `\'` is a quote. `SET 'a\'b' v` with a verbatim backslash
+    -- targeted the key `a\'b`, not the `a'b` the same command names in
+    -- redis-cli — the wrong-target class the decoding exists to prevent.
+    -- parens truncate gsub's second return (the match count)
+    return (inner:gsub("\\'", "'"))
   end
   return tok
 end
@@ -407,8 +414,11 @@ local NOT_KEY_HEADS = {
   SSUBSCRIBE = true, SUNSUBSCRIBE = true, PUBLISH = true, PUBSUB = true,
   -- streams read: the keys come after the STREAMS keyword
   XREAD = true, XREADGROUP = true,
-  -- key-count-first: `LMPOP numkeys key …`
+  -- key-count-first: `LMPOP numkeys key …`; the set algebra family reads the
+  -- same shape (`ZUNION numkeys key …`, `BITOP`'s operation below is its own)
   LMPOP = true, ZMPOP = true, SINTERCARD = true,
+  ZUNION = true, ZINTER = true, ZDIFF = true, ZINTERCARD = true,
+  BITOP = true,
   -- key at a LATER position: `<CMD> <subcommand> key …`
   OBJECT = true, MEMORY = true, XGROUP = true, XINFO = true,
   -- server administration: subcommand, section, number or path
