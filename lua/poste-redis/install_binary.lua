@@ -116,8 +116,13 @@ local function verify_checksum(archive_path, platform, version)
   local url = M.checksum_url(platform, version)
   local tmp = BIN_DIR .. "/checksum.tmp"
 
-  vim.fn.system(M.curl_argv("-sfL", url, tmp, 20))
-  if vim.v.shell_error ~= 0 then
+  -- vim.fn.system RAISES E475 when argv[0] is missing, and both system calls
+  -- below sit on the setup() path via ensure(): a box without curl must end
+  -- in the graceful "download failed" notify, not a plugin-load exception
+  -- (health.lua's own warning promises "auto-download will fail", not "load
+  -- will crash").
+  local sys_ok = pcall(vim.fn.system, M.curl_argv("-sfL", url, tmp, 20))
+  if not sys_ok or vim.v.shell_error ~= 0 then
     -- checksum file unavailable — skip verification
     pcall(os.remove, tmp)
     return true
@@ -179,9 +184,14 @@ function M.download(version)
 
   vim.notify("[Poste] Downloading " .. url, vim.log.levels.INFO)
 
-  vim.fn.system(M.curl_argv("-fL", url, tmp_archive, 180))
-  if vim.v.shell_error ~= 0 then
-    vim.notify("[Poste] Download failed (exit " .. vim.v.shell_error .. ")", vim.log.levels.ERROR)
+  local dl_ok = pcall(vim.fn.system, M.curl_argv("-fL", url, tmp_archive, 180))
+  if not dl_ok or vim.v.shell_error ~= 0 then
+    -- dl_ok=false is curl itself missing (E475 raise), not a curl exit code
+    vim.notify(
+      dl_ok and "[Poste] Download failed (exit " .. vim.v.shell_error .. ")"
+        or "[Poste] Download failed — curl is not available on PATH",
+      vim.log.levels.ERROR
+    )
     pcall(os.remove, tmp_archive)
     return false
   end

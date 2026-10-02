@@ -185,3 +185,40 @@ describe("poste-redis install checksum_matches", function()
     assert.is_false(install.checksum_matches(upper:sub(1, 63), lower))
   end)
 end)
+
+describe("poste-redis install download without curl", function()
+  -- vim.fn.system RAISES E475 when argv[0] is missing, and download() sits on
+  -- the setup() path via ensure(): a box without curl must end in the
+  -- graceful "download failed" notify, not a plugin-load exception.
+  local created = {}
+  after_each(function()
+    for _, p in ipairs(created) do vim.fn.delete(p) end
+    created = {}
+  end)
+
+  it("reports failure instead of raising when curl is missing", function()
+    local saved_notify = vim.notify
+    local saved_system = vim.fn.system
+    local notices = {}
+    vim.notify = function(msg, level) notices[#notices + 1] = { msg = msg, level = level } end
+    -- raise the exact error a missing curl produces (Vim:E475); a PATH
+    -- rewrite does not reliably hide the real curl from the spawn
+    vim.fn.system = function(argv)
+      error(("Vim:E475: Invalid value for argument cmd: '%s' is not executable"):format(argv[1]))
+    end
+
+    local ok, err = pcall(function()
+      assert.is_false(install.download("latest"))
+    end)
+    vim.fn.system = saved_system
+    vim.notify = saved_notify
+    if not ok then error(err) end
+    -- notices[1] is the INFO "Downloading …"; the failure rides after it
+    local failure
+    for _, n in ipairs(notices) do
+      if n.level == vim.log.levels.ERROR then failure = n end
+    end
+    assert.truthy(failure, "the failure must be reported, not raised")
+    assert.is_truthy(failure.msg:find("curl is not available", 1, true))
+  end)
+end)

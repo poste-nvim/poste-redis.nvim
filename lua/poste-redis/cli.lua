@@ -104,7 +104,16 @@ function M.run_async(cmd, opts)
     end
   end
 
-  local job_id = vim.fn.jobstart(args, job_opts)
+  -- jobstart does not return an error code for a bad argv[0] — it RAISES
+  -- E475 ("is not executable"). The lookup ran a moment ago, but the binary
+  -- can vanish in between (a reinstall mid-session, a stale g:poste_binary),
+  -- and an uncaught throw would skip every on_error/on_exit below and leave
+  -- the caller's spinner running (synced from poste-db c66a9ed).
+  local ok, job_id = pcall(vim.fn.jobstart, args, job_opts)
+  if not ok then
+    if opts.on_exit then opts.on_exit(-1) end
+    return nil
+  end
 
   if opts.stdin and job_id > 0 then
     vim.fn.chansend(job_id, opts.stdin)
