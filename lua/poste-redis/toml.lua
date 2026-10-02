@@ -1,6 +1,11 @@
 -- VENDORED from poste-db.nvim lua/poste-db/toml.lua
--- Source commit: 63029de ("fix(toml): fail closed on double commas and
--- missing container halves"; carries 7ba2df1's "fail closed on a stray
+-- Source commit: 2216036 ("fix(toml): the '=' splitter reads quotes;
+-- quoted headers keep comments"): a quoted key carrying its own `=`
+-- ("a=b" = 1) used to be cut at the quote-inner '=' and stored mangled
+-- halves, an inline-table key's swallowed parse error stored the entry
+-- under tostring(nil), and ["x"] # comment died as an invalid header.
+-- Earlier pin: 63029de ("fail closed on double commas and missing
+-- container halves"; carries 7ba2df1's "fail closed on a stray
 -- second header and on triple-quoted strings"): a double comma ([1,,2]) and
 -- a missing key or value ({ = 1 } / { a = })
 -- error instead of silently dropping the entry, and `key =` errors instead
@@ -12,10 +17,6 @@
 -- dotted key and stored quoted header names with their quote characters;
 -- 94fccf2 was missing the inline table/array parsing poste-db added in
 -- cc6652e.
--- Syncing: poste-redis must not require("poste-db.*") (family red line), so
--- this pure-function parser is copied verbatim — including doc comments and
--- poste-db-only examples in them. When poste-db updates the file, re-copy it
-
 --- Minimal pure-Lua TOML parser.
 --- Supports: [section] headers (quoted header names too), key = "string" /
 --- 'string' / 123 / true|false, inline arrays `[…]` and inline tables `{…}`
@@ -81,6 +82,36 @@ local function unescape_basic(s)
   return (s:gsub("\\(.)", function(c)
     return BASIC_ESCAPES[c] or ("\\" .. c)
   end))
+end
+
+--- First `=` outside any quote, or nil. The split must ignore a quoted key's
+--- own `=`: `"a=b" = 1` is legal TOML, and the plain find used to cut at the
+--- quote-inner `=`, storing the mangled halves (`"a` / `b" = 1`) with no
+--- error anywhere. A `"…" ` skip consumes the escaped char (so the closing
+--- quote of `"a\"b"` is found); a `'…'` skip is verbatim.
+local function find_top_level_eq(s)
+  local i, quote = 1, nil
+  while i <= #s do
+    local ch = s:sub(i, i)
+    if quote then
+      if quote == '"' and ch == "\\" then
+        i = i + 2
+      elseif ch == quote then
+        quote = nil
+        i = i + 1
+      else
+        i = i + 1
+      end
+    elseif ch == '"' or ch == "'" then
+      quote = ch
+      i = i + 1
+    elseif ch == "=" then
+      return i
+    else
+      i = i + 1
+    end
+  end
+  return nil
 end
 
 local parse_value  -- forward: inline containers recurse into it
@@ -172,7 +203,11 @@ local function parse_container(v)
   for _, part in ipairs(parts) do
     local pair = trim(part)
     if pair ~= "" then
-      local eq = pair:find("=", 1, true)
+      -- find_top_level_eq, not a plain find: an inline-table key may carry its
+      -- own `=` (`{ "a=b" = 1 }`), and the plain find cut the pair at the
+      -- quote-inner `=`. The swallowed key-parse error below it also used to
+      -- store the entry under tostring(nil) — both halves now fail closed.
+      local eq = find_top_level_eq(pair)
       if not eq then return nil, "Invalid inline table entry" end
       -- `{ = 1}` / `{a = }` used to store out["nil"] = nil / out.a = nil —
       -- the entry silently vanished, and a config that named it failed in a
@@ -182,8 +217,9 @@ local function parse_container(v)
       if key_part == "" or trim(val_part) == "" then
         return nil, "Invalid inline table entry (missing key or value)"
       end
-      local key = parse_value(key_part)
+      local key, kerr = parse_value(key_part)
       local val, ierr = parse_value(val_part)
+      if kerr then return nil, kerr end
       if ierr then return nil, ierr end
       -- `{a = # c}` survives the non-empty gate above and still yields a nil
       -- value (a comment-only value), which stored out.a = nil — the entry
@@ -248,18 +284,30 @@ function M.parse(content)
       if trimmed:sub(1, 2) == "[[" then
         return nil, "Array-of-tables headers ([[name]]) are not supported"
       end
-      local name
-      local q = trimmed:sub(2, 2)
-      if q == '"' or q == "'" then
-        -- A quoted header name is ONE literal name: it may contain `]` or a
-        -- dot, which the first-`]` scan used to cut in half (and left the
-        -- quote characters in the stored section name).
-        local close_q = trimmed:find(q, 3, true)
-        if not close_q or trim(trimmed:sub(close_q + 1, -2)) ~= "" then
-          return nil, "Invalid table header: " .. line
-        end
-        name = q == '"' and unescape_basic(trimmed:sub(3, close_q - 1))
-          or trimmed:sub(3, close_q - 1)
+        local name
+        local q = trimmed:sub(2, 2)
+        if q == '"' or q == "'" then
+          -- A quoted header name is ONE literal name: it may contain `]` or a
+          -- dot, which the first-`]` scan used to cut in half (and left the
+          -- quote characters in the stored section name).
+          local close_q = trimmed:find(q, 3, true)
+          -- After the name's closing quote the header must close with `]` and
+          -- keep only a comment: `["x"] # hi` is legal TOML (the sub that
+          -- ended two chars short of EOL swallowed the `]` into the tail check
+          -- and rejected every trailing comment on a quoted header, while the
+          -- unquoted path right below accepted one).
+          local rest = close_q and trimmed:sub(close_q + 1) or ""
+          local close_bracket = rest:find("]", 1, true)
+          if not close_q or not close_bracket
+            or trim(rest:sub(1, close_bracket - 1)) ~= "" then
+            return nil, "Invalid table header: " .. line
+          end
+          local tail = trim(rest:sub(close_bracket + 1))
+          if tail ~= "" and tail:sub(1, 1) ~= "#" then
+            return nil, "Invalid table header: " .. line
+          end
+          name = q == '"' and unescape_basic(trimmed:sub(3, close_q - 1))
+            or trimmed:sub(3, close_q - 1)
       else
         local close = trimmed:find("]", 2)
         if not close then
@@ -284,7 +332,7 @@ function M.parse(content)
       end
       section = result[name]
     else
-      local eq = trimmed:find("=", 1, true)
+      local eq = find_top_level_eq(trimmed)
       if not eq then
         -- the raw line can be a mistyped `password "x"`, so it is not echoed
         return nil, "Invalid key=value line (expected `key = value`)"
