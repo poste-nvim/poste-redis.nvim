@@ -32,8 +32,15 @@ local KNOWLEDGE = [[You are running inside poste-redis.nvim, a Redis execution p
 --- @param chat_scope table|nil chat scope map (connection)
 --- @return string
 function M.build(chat_scope)
-  local conn = (chat_scope and chat_scope.connection)
-    or redis_state.context.connection
+  -- the scope map comes from poste-ai and is hand-buildable; a non-string
+  -- connection reached the concat below and killed the whole prompt build
+  -- inside the chat request. Non-string counts as absent (the poste-db
+  -- sibling type-gates the same field); strings keep the original reading,
+  -- "" included — an explicitly empty scope name suppresses the line.
+  local conn = chat_scope and chat_scope.connection or nil
+  if type(conn) ~= "string" then
+    conn = redis_state.context.connection
+  end
   local head = KNOWLEDGE
   if conn and conn ~= "" then
     head = head .. "\n\nCurrent connection: " .. conn

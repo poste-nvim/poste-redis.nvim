@@ -91,3 +91,43 @@ describe("poste-redis ai actions", function()
     end)
   end)
 end)
+
+describe("poste-redis ai system_prompt", function()
+  local system_prompt = require("poste-redis.ai.system_prompt")
+  local state = require("poste-redis.state")
+
+  after_each(function()
+    state.context.connection = nil
+  end)
+
+  it("names the scope connection when it is a non-empty string", function()
+    local prompt = system_prompt.build({ connection = "prod" })
+    assert.matches("Current connection: prod", prompt)
+  end)
+
+  it("falls back to the context connection when the scope omits it", function()
+    state.context.connection = "ctx-conn"
+    assert.matches("Current connection: ctx%-conn", system_prompt.build(nil))
+    assert.matches("Current connection: ctx%-conn", system_prompt.build({}))
+  end)
+
+  it("type-gates the scope connection instead of crashing on it", function()
+    -- the scope map comes from poste-ai and is hand-buildable; a non-string
+    -- reached the concat and killed the whole prompt build inside the chat
+    -- request (the poste-db sibling fixed the same field in round 49)
+    state.context.connection = "ctx-conn"
+    for _, bad in ipairs({ 5, true, {}, vim.NIL }) do
+      local prompt = system_prompt.build({ connection = bad })
+      assert.matches("Current connection: ctx%-conn", prompt)
+    end
+  end)
+
+  it("suppresses the line for an explicitly empty scope connection", function()
+    local prompt = system_prompt.build({ connection = "" })
+    assert.is_nil(prompt:find("Current connection:"))
+    state.context.connection = "ctx-conn"
+    -- the empty scope name still wins over the context (string reading unchanged)
+    local prompt2 = system_prompt.build({ connection = "" })
+    assert.is_nil(prompt2:find("Current connection:"))
+  end)
+end)
