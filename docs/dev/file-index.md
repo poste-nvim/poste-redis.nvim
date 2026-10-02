@@ -102,7 +102,8 @@ fallback — see `requirements.md`.
 
 | File | Covers |
 |------|--------|
-| `redis/parser_spec.lua` | §4.2 matrix: continuations, quote-aware `#`, USE, CRLF, unquote, dangerous (incl. a quoted command head) |
+| `redis/cli_spec.lua` | `run_async` failed starts: no binary and a jobstart E475 raise both synthesize `on_exit(-1)` + nil |
+| `redis/parser_spec.lua` | §4.2 matrix: continuations, quote-aware `#`, USE, CRLF, unquote (incl. the `\'` single-quote escape), dangerous (incl. a quoted command head), key_arg denylist (numkeys family, BITOP) |
 | `redis/connections_spec.lua` | §5: url/field forms, `{{var}}` + `.env`/OS, errors (port/db validation incl. the 16-bit port bound, cached parse failure), list, use_connection |
 | `redis/config_spec.lua` | defaults, merge, keymap resolution |
 | `redis/toml_spec.lua` | vendored parser (sections, escapes, errors) |
