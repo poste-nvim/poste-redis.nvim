@@ -727,7 +727,13 @@ describe("poste-redis grid editing", function()
     local t = buffer.active_tab()
     t.cursor = { row = 1, col = 2 }
     vim.ui.input = function(_, cb) cb("world") end
+    -- the refusal raises an ERROR-level notify; in headless nvim a deferred
+    -- print of it can land inside the runner's qa window and exit 1 with
+    -- every test green — capture it like the assertions-side tests do
+    local orig_notify = vim.notify
+    vim.notify = function() end
     grid_edit.edit_cell(t)
+    vim.notify = orig_notify
     local items = history.list()
     assert.equals(1, #items, "one entry, and it is the failure")
     assert.equals("SET user:1 world KEEPTTL", items[1].command)
@@ -748,7 +754,10 @@ describe("poste-redis grid editing", function()
     local t = buffer.active_tab()
     t.cursor = { row = 1, col = 2 }
     vim.ui.input = function(_, cb) cb("edited") end
+    local orig_notify = vim.notify
+    vim.notify = function() end
     grid_edit.edit_cell(t)
+    vim.notify = orig_notify
     assert.same({}, sent_cmds, "the probe failed, so no LSET may run")
     assert.equals(0, history.count())
     history.clear()
