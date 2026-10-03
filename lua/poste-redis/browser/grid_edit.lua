@@ -54,6 +54,11 @@ local function key_context(tab)
   local value = meta and meta.value
   local type_name = value and value.type
   if not key or not type_name then return nil, nil end
+  -- RESP3 spells a hash "map"; the renderer's grid builders already accept
+  -- both, and the editors must too — the edit commands (HSET/HDEL/HEXISTS)
+  -- are identical. Without this an unknown spelling fell through add_row's
+  -- verb fallback to `SET`, replacing the whole collection with a string.
+  if type_name == "map" then type_name = "hash" end
   return key, type_name
 end
 

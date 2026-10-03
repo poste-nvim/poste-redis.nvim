@@ -139,4 +139,33 @@ describe("poste-redis grid_edit truncation guards", function()
     assert.equals("LSET", writes[2][1])
     assert.equals("LREM", writes[3][1])
   end)
+
+  it("a RESP3 map tab edits as the hash it is (add_row must not SET over it)", function()
+    -- value.type "map" is the RESP3 spelling of a hash. Left unrecognized it
+    -- fell through add_row's verb fallback to `SET key <v> KEEPTTL`, replacing
+    -- the whole collection with a string; the edit branches refused it as an
+    -- unsupported type. Normalized to hash, HSET runs.
+    local tab = make_tab("map",
+      { type = "map", entries = { { "f", "v" } }, len = 1 }, 1)
+    tab.grid.rows[1] = { 1, "f", "old" }
+    vim.ui.input = function(_opts, cb) cb("new-name") end
+    grid_edit.edit_cell(tab)
+    -- the cursor sits on the field column, so this is the rename: the hash
+    -- guard probe + HSET new + HDEL old — the hash path, not a refusal and
+    -- not a SET
+    assert.equals(3, #writes)
+    assert.equals("HEXISTS", writes[1][1])
+    assert.equals("HSET", writes[2][1])
+    assert.equals("HDEL", writes[3][1])
+
+    local add_tab = make_tab("map",
+      { type = "map", entries = { { "f", "v" } }, len = 1 }, 1)
+    add_tab.grid.rows[1] = { 1, "f", "old" }
+    vim.ui.input = function(opts, cb)
+      if opts.prompt:find("New field") then cb("g") else cb("1") end
+    end
+    grid_edit.add_row(add_tab)
+    assert.truthy(#writes >= 1)
+    assert.equals("HEXISTS", writes[1][1], "the add probes the guard, never SET")
+  end)
 end)
