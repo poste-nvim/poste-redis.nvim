@@ -103,7 +103,7 @@ fallback — see `requirements.md`.
 | File | Covers |
 |------|--------|
 | `redis/cli_spec.lua` | `run_async` failed starts: no binary and a jobstart E475 raise both synthesize `on_exit(-1)` + nil |
-| `redis/parser_spec.lua` | §4.2 matrix: continuations, quote-aware `#`, USE, CRLF, unquote (incl. the `\'` single-quote escape), dangerous (incl. a quoted command head), key_arg denylist (numkeys family, BITOP) |
+| `redis/parser_spec.lua` | §4.2 matrix: continuations, quote-aware `#`, USE, CRLF, unquote (incl. the `\'` single-quote escape), dangerous (incl. a quoted command head), key_arg denylist (numkeys family, BITOP), the whole `%s` class as separators |
 | `redis/connections_spec.lua` | §5: url/field forms, `{{var}}` + `.env`/OS, errors (port/db validation incl. the 16-bit port bound, cached parse failure), list, use_connection |
 | `redis/config_spec.lua` | defaults, merge, keymap resolution |
 | `redis/toml_spec.lua` | vendored parser (sections, escapes, errors) |
@@ -121,7 +121,8 @@ fallback — see `requirements.md`.
 | `redis/export_spec.lua` | csv quoting, tsv cleaning, json shape, export() guards |
 | `redis/history_spec.lua` | push/list/cap, float, activate→panel |
 | `redis/completion_spec.lua` | P2-4: ctx detection, command table, conn names, SCAN key-prefix fetch+cache (stubbed session), orchestrator dispatch |
-| `redis/value_spec.lua` | value viewer: per-type page commands, progressive pagination (done from the updated cursor, `<Tab>` fetches the next page, exhausted cursor stops) |
+| `redis/value_spec.lua` | value viewer: per-type page commands, progressive pagination (done from the updated cursor, `<Tab>` fetches the next page, exhausted cursor stops), list page 2 shifts the per-item truncation flags with the row index |
+| `redis/grid_edit_truncation_spec.lua` | grid write guards: a display-capped list/hash/set cell refuses edits (and a capped set member its delete), uncapped rows still write, list dd stays index-addressed, a RESP3 map tab edits as the hash it is (add_row must not SET over it) |
 | `redis/ai_spec.lua` | AI context: confirm gate (dangerous ask + refusal), execute_redis error reporting + idempotent cleanup |
 | `redis/context_spec.lua` | window-scoped context: `entries_context` USE/SELECT walk, `display` formatting (host redaction), `resolve` priority chain (panel/browser/.redis/global) |
 | `redis/docs_spec.lua` | docs data parity with COMMANDS + entry shape, `build_lines` markdown, `resolve_command`, float track_key re-focus, show_doc keymap |
