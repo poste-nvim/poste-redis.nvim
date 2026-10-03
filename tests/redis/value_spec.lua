@@ -124,6 +124,37 @@ describe("poste-redis value viewer", function()
     assert.equals("item-501", page2.grid.rows[1][2])
   end)
 
+  it("list page 2 shifts the per-item truncation flags with the index", function()
+    -- grid_edit looks the flag up by the ROW's true list position; the flags
+    -- arrive page-local (1:1 with the fetched cells), so an unshifted array
+    -- made the guard miss every capped cell from page 2 on and an LSET built
+    -- from it stored the prefix as the whole value.
+    local pages_served = 0
+    local function items(n, start)
+      local out = {}
+      for i = start, start + n - 1 do out[#out + 1] = "item-" .. i end
+      return out
+    end
+    session_conn.execute = function(_url, _cmd, cbs)
+      pages_served = pages_served + 1
+      if pages_served == 1 then
+        cbs.on_response({ value = { type = "list", value = items(500, 1),
+          item_truncated = { false } } })
+      else
+        -- page 2: first cell capped, second clean (page-local flags)
+        cbs.on_response({ value = { type = "list", value = items(2, 501),
+          item_truncated = { true, false } } })
+      end
+      return "dispatched"
+    end
+
+    value.view(make_node("l2", "list"), nil, nil)
+    buffer.next_tab()
+    local page2 = buffer._tabs()[2]
+    assert.same({ [501] = true, [502] = false }, page2.meta.value.item_truncated,
+      "the flags must be looked-up-able by true list position")
+  end)
+
   it("a text page's loaded/total footer stays out of the yanked value", function()
     -- The footer used to be appended straight into tab.lines, so `yank
     -- current` on a string key copied "  (loaded 1 …)" along with the value.

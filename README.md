@@ -53,9 +53,11 @@ GET session:abc
   (list/set/hash/zset) as a sortable grid with a frozen header, cell
   navigation, search, paging and yank. `i`/`o`/`dd` edit cells/rows back to
   Redis (with stale-cell guards, and a rename onto a field/member the key
-  already has is refused instead of overwriting it); `r` re-runs the tab's
-  command; `gd` jumps to the tab's key in the browser; `E` exports the whole
-  grid to a file (CSV / TSV / JSON).
+  already has is refused instead of overwriting it); a cell the transport
+  capped at `--max-bytes` refuses writes too — the panel holds a prefix, and
+  storing it as the whole value would silently cut the tail; `r` re-runs the
+  tab's command; `gd` jumps to the tab's key in the browser; `E` exports the
+  whole grid to a file (CSV / TSV / JSON).
 - `<Esc>` cancels an in-flight execution. Dangerous commands (`FLUSHALL`,
   `FLUSHDB`, `SHUTDOWN`, `CONFIG`, `SLAVEOF`, `REPLICAOF`) are flagged in the
   panel and, on `<CR>` or a file run, ask for an explicit yes before anything

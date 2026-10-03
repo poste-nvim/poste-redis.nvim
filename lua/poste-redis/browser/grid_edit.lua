@@ -184,6 +184,34 @@ local function display_only_name(type_name, row_data)
     .. "Send the command yourself, with the bytes escaped"):format(tostring(name))
 end
 
+--- Why this row's VALUE cell is a display-capped prefix of the stored string
+--- rather than the whole of it, or nil. The binary caps every string reply at
+--- `--max-bytes` (65536 by default), so a list element or hash value past the
+--- cap arrives as its first N bytes — and a write built from the cell cannot
+--- see the cut: an LSET/HSET stores the prefix as the WHOLE value, and (the
+--- verification being capped by the same limit on both sides) the list's
+--- LINDEX check compares two identical prefixes and passes. A truncated SET
+--- member's SREM addresses text that matches nothing. The executor flags such
+--- rows per item (`item_truncated` for list/set cells, `value_truncated` for
+--- hash values, 1:1 with the rows and absent when nothing was cut); writes
+--- that would put a cell's text back are refused here — the same trade the
+--- string type's own `truncated` guard makes.
+--- @param value table|nil  the tab's raw result value (meta.value)
+--- @param row_data table|nil  the row's raw cells (index column at [1])
+--- @param consequence string  the refusal's second half, naming the action
+--- @return string|nil reason
+local function truncated_value_reason(value, row_data, consequence)
+  if type(value) ~= "table" or type(row_data) ~= "table" then return nil end
+  local idx = row_data[1]
+  if type(idx) ~= "number" then return nil end
+  local flags = value.item_truncated or value.value_truncated
+  if type(flags) == "table" and flags[idx] == true then
+    return "This cell is longer than the display cap, so the panel only holds "
+      .. "its prefix — " .. consequence
+  end
+  return nil
+end
+
 --- Edit the cell under the cursor (i). Index column is not editable.
 --- @param tab table
 function M.edit_cell(tab)
@@ -202,8 +230,13 @@ function M.edit_cell(tab)
     notify("Move to a value cell to edit it", vim.log.levels.WARN)
     return
   end
+  local meta_value = tab.meta and tab.meta.value
   local reason = display_only_name(type_name, row_data)
-  if type_name == "string" and tab.meta.value.truncated then
+    or truncated_value_reason(meta_value, row_data,
+      -- a hash rename also stores the value cell in the NEW field, so the
+      -- whole row is refused, not just the value column
+      "editing would store that prefix as the whole value")
+  if type_name == "string" and meta_value and meta_value.truncated then
     -- the transport capped the value, so the cell holds a PREFIX of it — and
     -- `SET key <prefix>` would cut the key down to what fit on screen
     reason = "This value is longer than the display cap, so the panel only holds its "
@@ -301,6 +334,14 @@ function M.delete_row(tab)
     return
   end
   local reason = display_only_name(type_name, row_data)
+  if not reason and type_name == "set" then
+    -- Only the set's delete consumes the CELL TEXT (SREM <raw>): list dd is
+    -- index-addressed, hash/zset delete by the field/member name, which is
+    -- never capped — so the truncation guard is a set-row affair here.
+    reason = truncated_value_reason(tab.meta and tab.meta.value, row_data,
+      "this prefix is not the member on the server, so this row cannot be "
+      .. "deleted from the grid")
+  end
   if reason then
     notify(reason, vim.log.levels.WARN)
     return

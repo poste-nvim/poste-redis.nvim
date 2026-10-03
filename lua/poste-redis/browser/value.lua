@@ -110,6 +110,16 @@ local function add_page(v, ev, label, index_base)
   out.meta.db = v.db
   if index_base and out.kind == "table" and out.grid then
     for i, row in ipairs(out.grid.rows) do row[1] = index_base + i end
+    -- the per-item truncation flags are page-local (1:1 with the fetched
+    -- page's cells); shift them with the index, or grid_edit's row lookup
+    -- (row[1] = true list position) would miss them from page 2 on and a
+    -- write built from a capped cell would store the prefix as the whole value
+    local mv = out.meta.value
+    if type(mv) == "table" and type(mv.item_truncated) == "table" then
+      local shifted = {}
+      for i, cut in ipairs(mv.item_truncated) do shifted[index_base + i] = cut end
+      mv.item_truncated = shifted
+    end
   end
   -- the loaded/total footer: carried in meta for BOTH kinds; the text render
   -- appends it at display time, so tab.lines stays the pure value (yank / K
