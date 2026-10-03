@@ -46,6 +46,24 @@ describe("poste-redis parser", function()
     assert.same({ "SET", "k", "v", "tail" }, entries[1].tokens)
   end)
 
+  it("treats the whole %s class as separators, not just space and tab", function()
+    -- The bare-word branch finds its end with `find("%s")`; a separator set
+    -- narrower than that pattern made a \v or \f inside a bare word land
+    -- word_end ON the cursor — an empty token, a cursor that never advanced,
+    -- and "table overflow" instead of a command. redis-cli's sdssplitargs
+    -- splits on isspace(), so these ARE separators: a key carrying one is
+    -- written quoted, like a key with a space.
+    assert.same({ "SET", "a", "b", "v" }, parser._test.tokenize_line("SET a\vb v"))
+    assert.same({ "SET", "a", "b", "v" }, parser._test.tokenize_line("SET a\fb v"))
+    -- a key carrying one survives inside quotes (binary-safe, like a space)
+    assert.same({ "GET", '"a\vb"' }, parser._test.tokenize_line('GET "a\vb"'))
+    -- a comment starter after a \v is still at a word boundary
+    assert.same({ "GET" }, parser._test.tokenize_line("GET \v# trailing"))
+    -- a # glued to a word across a separator-less span does not start a comment
+    assert.same({ "GET", "key#1" }, parser._test.tokenize_line("GET key#1"))
+  end)
+
+
   it("re-joins a WORD split across a continuation (redis-cli semantics)", function()
     -- redis-cli lexes the whole logical line, so `DEL a-\` + `b` is ONE key
     -- `a-b`; joining token lists alone sent `DEL a- b` — deleting the two

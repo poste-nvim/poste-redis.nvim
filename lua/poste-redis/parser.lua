@@ -39,8 +39,13 @@ local function tokenize_line(line)
   while i <= n do
     local c = line:sub(i, i)
     local prev = i > 1 and line:sub(i - 1, i - 1) or " "
-    local at_boundary = prev == " " or prev == "\t"
-    if c == " " or c == "\t" then
+    -- Whitespace is the full `%s` class (redis-cli's sdssplitargs splits on
+    -- isspace()), not just space/tab: the bare-word branch below finds its end
+    -- with `find("%s")`, and a separator class narrower than that pattern let
+    -- a \v or \f in a binary-safe key name make word_end land ON the cursor —
+    -- an empty token plus a cursor that never advances — until "table overflow".
+    local at_boundary = prev:match("%s") ~= nil
+    if c:match("%s") then
       open_bare = false
       i = i + 1
     elseif c == "#" and at_boundary then
