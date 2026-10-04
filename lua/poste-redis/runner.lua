@@ -301,19 +301,6 @@ function M.run_file()
   })
 end
 
---- Run a single info-type command synchronously and notify the result.
---- @param entry table parser entry
---- @param opts table { connection = string }
-function M.run_info(entry, opts)
-  local ev, err = exec_run.run_sync(entry, opts)
-  if not ev then
-    vim.notify("Error: " .. tostring(err), vim.log.levels.ERROR, { title = constants.TITLE })
-    return
-  end
-  local out = require("poste-redis.format").format_result(ev)
-  vim.notify(table.concat(out.lines, "\n"), vim.log.levels.INFO, { title = constants.TITLE })
-end
-
 M._test = {
   --- Replace the confirm dialog for a test; nil restores vim.fn.confirm.
   set_confirm = function(fn) confirm_impl = fn or confirm_default end,
