@@ -2,6 +2,26 @@
 local toml = require("poste-redis.toml")
 
 describe("poste-redis toml (vendored)", function()
+  it("reads TOML numeric underscores as numbers", function()
+    -- `port = 64_000` is a legal integer; plain tonumber rejected the `_`
+    -- and the value silently degraded to a STRING, which connections.lua
+    -- then rejected with "expected an integer"
+    local res, err = toml.parse('k1 = 1_000\nk2 = -1_0\nk3 = 0x1_f\nk4 = 1.5_5')
+    assert.is_nil(err)
+    assert.equals(1000, res.k1)
+    assert.equals(-10, res.k2)
+    assert.equals(31, res.k3)
+    assert.equals(1.55, res.k4)
+  end)
+
+  it("keeps bare words that merely contain an underscore as strings", function()
+    -- the underscore retry is guarded: a name like `_dev` or `foo_bar` is
+    -- not a number and must not be coerced
+    local res = toml.parse('k1 = _10\nk2 = foo_bar')
+    assert.equals("_10", res.k1)
+    assert.equals("foo_bar", res.k2)
+  end)
+
   it("parses sections with string, number, and bool values", function()
     local out = toml.parse([[
 [my-redis]
@@ -285,6 +305,27 @@ password = "a\"b\\c"
   it("rejects an unterminated quoted header", function()
     local _, err = toml.parse('["a]')
     assert.matches("Invalid table header", err)
+  end)
+
+  it("unquotes a quoted header that sits behind whitespace inside the brackets", function()
+    -- `[ 'local' ]` is legal TOML: the fast quote check only inspects the
+    -- character right after `[`, so the unquoted path used to store the name
+    -- WITH its quote characters and the connection never resolved
+    local res, err = toml.parse("[ 'local' ]\nport = 1")
+    assert.is_nil(err)
+    assert.equals(1, res["local"].port)
+    assert.is_nil(res["'local'"])
+    local res2, err2 = toml.parse('[ "my conn" ]\nport = 2')
+    assert.is_nil(err2)
+    assert.equals(2, res2["my conn"].port)
+  end)
+
+  it("keeps a bare name whose ends merely look like quotes", function()
+    -- only a MATCHING quote pair strips: a name that merely ends with a
+    -- quote char stays verbatim
+    local res, err = toml.parse('[a"]\nport = 1')
+    assert.is_nil(err)
+    assert.equals(1, res['a"'].port)
   end)
 
   -- Synced with poste-db 7ba2df1: fail closed on the two silent-corruption

@@ -239,6 +239,16 @@ parse_value = function(v)
   if v == "true" then return true end
   if v == "false" then return false end
   local n = tonumber(v)
+  -- TOML allows `_` between an integer's digits (1_000, 0x1_f); plain
+  -- tonumber rejects them, and the value silently degraded to a STRING —
+  -- `port = 64_000` failed far from the typo with "expected an integer".
+  -- The stripped retry only fires when the whole token is alphanumeric
+  -- (optionally signed), so a bare word that merely contains an underscore
+  -- (`_10`, `foo_bar`) keeps being a string.
+  if not n and v:find("_", 1, true) and not v:find("__", 1, true)
+    and v:match("^[%+%-]?%w[%w_%.]*$") then
+    n = tonumber((v:gsub("_", "")))
+  end
   if n then return n end
   -- Fail closed on multi-line strings: the single-line path below strips the
   -- outer quotes of `"""x"""` into the garbage value `""x""`, and a password
@@ -314,6 +324,17 @@ function M.parse(content)
           return nil, "Invalid table header: " .. line
         end
         name = trim(trimmed:sub(2, close - 1))
+        -- Whitespace between the brackets is legal TOML (`[ "x" ]`): a name
+        -- that still carries a matching pair of quotes is a quoted name the
+        -- `q` check above missed (it only sees position 2), and the quote
+        -- characters used to stay IN the section name — `[ 'local' ]` stored
+        -- `'local'`, which `resolve` never finds under `local`.
+        if #name >= 2 then
+          local nq = name:sub(1, 1)
+          if (nq == '"' or nq == "'") and name:sub(-1, -1) == nq then
+            name = nq == '"' and unescape_basic(name:sub(2, -2)) or name:sub(2, -2)
+          end
+        end
         -- Anything after the closing bracket must be empty or a comment:
         -- `[a] [b]` used to register section `a` and silently drop the `[b]`
         -- the rest of the file keys into, so every following key landed in

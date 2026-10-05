@@ -20,6 +20,23 @@ describe("poste-redis util", function()
       -- a URL without userinfo passes through byte-for-byte (gsub no-op)
       assert.equals("redis://host:6379/db", util.redact_url("redis://host:6379/db"))
     end)
+
+    it("redacts a password that itself carries an @", function()
+      -- the userinfo runs to the LAST @ of the authority: the first-@ scan
+      -- printed `p@w` verbatim as if it were a plain username
+      assert.equals("redis://***@host", util.redact_url("redis://u:p@w@host"))
+    end)
+
+    it("keeps an @ in the path from eating the host", function()
+      -- the authority ends at the first /: an @ in the path used to make the
+      -- redaction swallow the host along with the userinfo
+      assert.equals("redis://***@host:6379/0", util.redact_url("redis://u:p@host:6379/0"))
+      assert.equals("redis://host:6379/a@b", util.redact_url("redis://host:6379/a@b"))
+    end)
+
+    it("still keeps a colon-less userinfo visible (it is an ACL username)", function()
+      assert.equals("redis://user@host", util.redact_url("redis://user@host"))
+    end)
   end)
 
   describe("host_label", function()

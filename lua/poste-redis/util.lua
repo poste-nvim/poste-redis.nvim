@@ -12,19 +12,22 @@ local M = {}
 M.INT_EXACT = 2^53
 
 --- Strip credentials from a redis URL for logs: redis://user:pass@host →
---- redis://***@host. The password never lands in any log or message. The
---- pattern must only eat the userinfo — a greedy `.*` here used to swallow
---- the host too (redis://***@0).
+--- redis://***@host. The password never lands in any log or message.
+--- The userinfo is everything before the LAST `@` of the authority (RFC
+--- 3986 §3.2.1) and the authority ends at the first `/` — the first-`@`
+--- scan used to leak a password that itself carried an `@`
+--- (redis://u:p@w@host printed `p@w` as a plain username), while an `@`
+--- in the PATH made that same scan redact the host away.
 --- @param url string
 --- @return string
 function M.redact_url(url)
   if type(url) ~= "string" then return url end
-  return (url:gsub("://([^/@]+)@", function(u)
-    if u:find(":") then
-      return "://***@"
-    end
-    return "://" .. u .. "@"
-  end))
+  local scheme, rest = url:match("^([^:/]+)://(.+)$")
+  if not rest then return url end
+  local authority, path = rest:match("^([^/]*)(.*)$")
+  local userinfo, hostport = authority:match("^(.*)@(.*)$")
+  if not userinfo or not userinfo:find(":", 1, true) then return url end
+  return scheme .. "://***@" .. hostport .. path
 end
 
 --- Redact a command arg list (args 1 = command name; URL-typed args redacted).
