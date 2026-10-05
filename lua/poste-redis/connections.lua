@@ -288,6 +288,20 @@ local function build_url_from_fields(conn, name)
       .. (name and (" (connection '%s')"):format(name) or "")
       .. (host ~= nil and " — host must be a string" or "")
   end
+  -- A `host:port` paste (the connection-string habit) built
+  -- `redis://localhost:6379:6379/0`, which only failed at the binary with a
+  -- URL parse error naming nothing; whitespace is equally un-buildable. Both
+  -- name the fix here instead. (Pure hex+colon still passes — that is an
+  -- IPv6 literal for url_host to bracket; the host itself is never a secret.)
+  local host_port = host:match("^([^%s:]+):(%d+)$")
+  if host_port then
+    return nil, ("Invalid host for redis connection%s: '%s' — move the port to the `port` field")
+      :format(name and (" (connection '%s')"):format(name) or "", host)
+  end
+  if host:match("%s") then
+    return nil, ("Invalid host for redis connection%s: whitespace is not allowed")
+      :format(name and (" (connection '%s')"):format(name) or "")
+  end
   -- Which connection, so a shared file with ten of them stays diagnosable.
   -- The bad value itself is NOT echoed: `port = "{{REDIS_PASS}}"` (a typo in
   -- the var name) would otherwise print a secret that resolved.

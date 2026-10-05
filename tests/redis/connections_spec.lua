@@ -233,6 +233,32 @@ port = "{{REDISn_PORT}}"
     assert.falsy(err:find("REDISn_PORT", 1, false))
   end)
 
+  it("names the port field when the host carries one", function()
+    -- the connection-string habit `host = "localhost:6379"` built
+    -- `redis://localhost:6379:6379/0`, which only failed at the binary with
+    -- a URL parse error naming nothing
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "localhost:6379"
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.match("port", err)
+    assert.match("localhost:6379", err)
+  end)
+
+  it("rejects a host with whitespace", function()
+    write("connections.toml", [[
+[srv]
+dialect = "redis"
+host = "my host"
+]])
+    local url, err = connections.resolve_redis_url("srv", { search_dir = tmpdir })
+    assert.is_nil(url)
+    assert.match("whitespace", err)
+  end)
+
   it("caches a parse failure until the file changes", function()
     -- the statusline and completion read the config on every redraw and
     -- keystroke; a broken file must not be re-read and re-parsed each time
