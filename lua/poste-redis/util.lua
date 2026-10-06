@@ -234,12 +234,15 @@ function M.to_clipboard(v)
   return tostring(v)
 end
 
---- Format latency for display (ms → ms/s).
+--- Format latency for display (ms → ms/s). A positive sub-millisecond
+--- round trip renders "<1 ms" — `%.0f` rounded it to "0 ms", which reads
+--- as "instant/free" for a command that did real work.
 --- @param ms number
 --- @return string
 function M.format_latency(ms)
   if not ms then return "" end
   if ms >= 1000 then return string.format("%.2f s", ms / 1000) end
+  if ms > 0 and ms < 1 then return "<1 ms" end
   return string.format("%.0f ms", ms)
 end
 

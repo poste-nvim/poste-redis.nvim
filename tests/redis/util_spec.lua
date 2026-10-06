@@ -126,6 +126,13 @@ describe("poste-redis util", function()
       assert.equals("1.50 s", util.format_latency(1500))
       assert.equals("", util.format_latency(nil))
     end)
+
+    it("renders a positive sub-millisecond round trip as <1 ms", function()
+      -- %.0f rounded 0.4 to "0 ms", which reads as instant for work that
+      -- did happen
+      assert.equals("<1 ms", util.format_latency(0.4))
+      assert.equals("0 ms", util.format_latency(0))
+    end)
   end)
 
   describe("glob_escape", function()
