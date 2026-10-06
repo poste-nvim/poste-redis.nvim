@@ -83,6 +83,14 @@ describe("poste-redis util", function()
       assert.equals("ab  ", util.pad_right("ab", 4))
       assert.equals("abc", util.pad_right("abc", 2))
     end)
+
+    it("never returns more cells than max_width, even below the ellipsis", function()
+      -- the ellipsis alone is one cell: at max_width 0 (or negative) there is
+      -- no room for it, and returning it anyway made the result WIDER than
+      -- the width the caller asked to fit
+      assert.equals("", util.truncate_display("abcdef", 0))
+      assert.equals("", util.truncate_display("abcdef", -3))
+    end)
   end)
 
   describe("to_clipboard", function()

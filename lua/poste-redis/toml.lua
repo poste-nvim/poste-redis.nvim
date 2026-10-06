@@ -160,6 +160,15 @@ local function split_top(s, sep)
       i = i + 1
     end
   end
+  -- Fail closed on UNBALANCED brackets (`[1]2]`, `{a = 1]`): every closer is
+  -- consumed into `buf` while `depth` drains below (or never returns to) 0,
+  -- and the whole tail then survives as one garbage string ("1]2") that
+  -- stored silently — the exact no-error-anywhere typo class this parser
+  -- otherwise refuses. parse_container names the unclosed-START case (the
+  -- last char must be the closer); this names a closer without its opener.
+  if depth ~= 0 then
+    return nil, "Unbalanced brackets in inline container"
+  end
   table.insert(parts, table.concat(buf))
   -- A legal trailing comma leaves one empty final part — drop it. Any empty
   -- part BEFORE that is a double comma: error, don't drop (see the doc above).

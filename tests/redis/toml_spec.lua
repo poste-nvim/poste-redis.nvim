@@ -195,6 +195,23 @@ password = "a\"b\\c"
     assert.same({ a = 1 }, out.c.tbl)
   end)
 
+  it("rejects unbalanced brackets in an inline container", function()
+    -- `[1]2]` ends in `]` so the unclosed-array check passes; the old split
+    -- kept consuming closers and stored the garbage string "1]2" with no
+    -- error anywhere — a typo'd config that silently misparsed.
+    local out, err = toml.parse('ips = [1]2]')
+    assert.is_nil(out)
+    assert.matches("Unbalanced brackets", err)
+    local out2, err2 = toml.parse('t = { a = [1 }')
+    assert.is_nil(out2)
+    assert.matches("Unbalanced brackets", err2)
+    -- a nested opener left unclosed is the same class (its container-close
+    -- check never fires because the outer body ends in the closer)
+    local out3, err3 = toml.parse('t = [[1, 2]')
+    assert.is_nil(out3)
+    assert.matches("Unbalanced brackets", err3)
+  end)
+
   it("rejects an inline table entry with a missing key or value", function()
     local out, err = toml.parse('t = { = 1 }')
     assert.is_nil(out)

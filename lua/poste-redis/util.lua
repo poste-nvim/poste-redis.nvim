@@ -78,7 +78,10 @@ function M.display_width(s)
 end
 
 --- Truncate to a display width, reserving one cell for the ellipsis.
---- Never splits a UTF-8 char.
+--- Never splits a UTF-8 char. A `max_width` below the ellipsis's own cell
+--- cannot honor the reservation: the result must stay within `max_width`,
+--- so anything under one cell truncates to the empty string (the ellipsis
+--- alone used to slip through at width 0, one cell wider than asked).
 --- @param s string
 --- @param max_width number
 --- @return string
@@ -86,6 +89,7 @@ function M.truncate_display(s, max_width)
   if not s then return "" end
   if type(s) ~= "string" then s = tostring(s) end
   if M.display_width(s) <= max_width then return s end
+  if max_width < 1 then return "" end
   local out, w = {}, 0
   for _, ch in ipairs(vim.fn.split(s, "\\zs")) do
     local cw = M.display_width(ch)
