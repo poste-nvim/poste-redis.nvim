@@ -124,6 +124,44 @@ describe("poste-redis session_conn", function()
     assert.match("NOPERM", errs[1])
   end)
 
+  it("survives a chansend THROW on a dead channel (command path)", function()
+    -- chansend does not return -1 on a dead channel, it RAISES ("Can't send
+    -- data to closed stream" / E900): the process can die between execute()'s
+    -- alive check and the write. The command path used to call chansend
+    -- unguarded, so the throw skipped the pending cleanup and the caller's
+    -- on_error — a scan loop left its nodes loading forever.
+    session_conn.get(URL)
+    vim.fn.chansend = function() error("Can't send data to closed stream") end
+    local errs = {}
+    local status = session_conn.execute(URL, { "GET", "k" }, {
+      on_response = function() error("on_response must not fire") end,
+      on_error = function(msg) errs[#errs + 1] = msg end,
+    })
+    assert.equals("not_running", status)
+    assert.equals(1, #errs)
+    assert.match("chansend failed", errs[1])
+    -- the request's pending entry must be gone, or the stall watchdog would
+    -- later restart a session for a request that was already failed
+    local session = session_conn._test.pool[URL]
+    assert.equals(0, vim.tbl_count(session.pending))
+  end)
+
+  it("survives a chansend THROW on a dead channel (SELECT path)", function()
+    session_conn.get(URL)
+    vim.fn.chansend = function() error("Can't send data to closed stream") end
+    local errs = {}
+    local status = session_conn.execute(URL, { "GET", "k" }, {
+      on_error = function(msg) errs[#errs + 1] = msg end,
+    }, nil, { db = 2 })
+    assert.equals("not_running", status)
+    assert.equals(1, #errs)
+    assert.match("SELECT", errs[1])
+    -- the db write is undone so the next execute re-issues the SELECT
+    local session = session_conn._test.pool[URL]
+    assert.is_nil(session.db)
+    assert.equals(0, vim.tbl_count(session.pending))
+  end)
+
   it("increments seq per request and pairs responses to their request", function()
     local session = session_conn.get(URL)
     local responses = {}

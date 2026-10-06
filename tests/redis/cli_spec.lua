@@ -40,4 +40,27 @@ describe("poste-redis cli.run_async failed starts", function()
     assert.is_nil(job)
     assert.same({ -1 }, exits)
   end)
+
+  it("survives a chansend THROW when the stdin stream is already closed", function()
+    -- chansend on a dead stream RAISES ("Can't send data to closed stream"),
+    -- it does not return -1: the process can die between jobstart and the
+    -- stdin write. The unguarded write propagated the throw out of
+    -- cli.run_async — past every on_error/on_exit — and left exec_run's
+    -- busy flag stuck (red line #4).
+    local cli = fresh_cli(function() return "/tmp/poste-fake", "test" end)
+    local orig_jobstart = vim.fn.jobstart
+    local orig_chansend = vim.fn.chansend
+    vim.fn.jobstart = function() return 4242 end
+    vim.fn.chansend = function() error("Can't send data to closed stream") end
+    local exits = {}
+    local ok, job = pcall(cli.run_async, { "redis-exec" }, {
+      stdin = '{"connection":"redis://x"}',
+      on_exit = function(code) exits[#exits + 1] = code end,
+    })
+    vim.fn.jobstart = orig_jobstart
+    vim.fn.chansend = orig_chansend
+    assert.truthy(ok, "run_async must not throw when the stdin write fails")
+    assert.equals(4242, job)
+    assert.same({}, exits, "the real job still owns the exit path")
+  end)
 end)

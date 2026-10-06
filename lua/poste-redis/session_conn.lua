@@ -295,8 +295,13 @@ function M.execute(conn_url, command, callbacks, bufnr, opts)
     at = os.time(),
   }
   local payload = vim.json.encode({ seq = cmd_seq, command = command }) .. "\n"
-  local sent = vim.fn.chansend(session.job_id, payload)
-  if sent <= 0 then
+  -- pcall, not just the `sent <= 0` check: chansend THROWS on a dead channel
+  -- ("Can't send data to closed stream" / E900) — the process can die after
+  -- the alive check above and before this write, and an uncaught throw would
+  -- skip the pending cleanup and the caller's on_error (the SELECT path right
+  -- above is hardened the same way).
+  local ok_send, sent = pcall(vim.fn.chansend, session.job_id, payload)
+  if not ok_send or type(sent) ~= "number" or sent <= 0 then
     session.pending[cmd_seq] = nil
     if callbacks.on_error then callbacks.on_error("redis session chansend failed", nil) end
     return "not_running"
