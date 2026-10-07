@@ -483,10 +483,18 @@ end
 --- Item text for a connection entry in the pickers: `name  <redacted url>`,
 --- or `name  (unresolved: …)` when the URL could not be built — a broken
 --- connection used to render as a bare name and selecting it silently set a
---- nil-URL context that every later run then fell off of.
+--- nil-URL context that every later run then fell off of. The entry the
+--- current context points at (name AND resolved url — names can repeat
+--- across files) carries an `[active]` mark so the picker answers "which
+--- one am I on?" before the user re-picks blindly.
+--- @param c table { name, url, url_err }
+--- @return string
 local function picker_item(c)
+  local active = redis_state.context.connection == c.name
+    and c.url ~= nil and redis_state.current_url == c.url
   if c.url then
-    return string.format("%s  %s", c.name, require("poste-redis.util").redact_url(c.url))
+    local mark = active and "  [active]" or ""
+    return string.format("%s  %s%s", c.name, require("poste-redis.util").redact_url(c.url), mark)
   end
   return string.format("%s  (unresolved: %s)", c.name, c.url_err or "no url")
 end
@@ -590,6 +598,7 @@ M._test = {
   parse_dotenv = parse_dotenv,
   apply_env = apply_env,
   percent_encode = percent_encode,
+  picker_item = picker_item,
   --- Drop every file/mtimes cache (specs use temp dirs).
   reset_caches = function()
     _config_search_cache = {}

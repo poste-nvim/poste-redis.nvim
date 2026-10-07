@@ -703,3 +703,43 @@ describe("poste-redis context statusline", function()
     connections.resolve_redis_url = orig_resolve
   end)
 end)
+
+describe("connections picker_item active mark", function()
+  local state = require("poste-redis.state")
+  local saved_conn, saved_url
+
+  local function with_context(name, url, fn)
+    saved_conn, saved_url = state.context.connection, state.current_url
+    state.context.connection = name
+    state.current_url = url
+    fn()
+    state.context.connection = saved_conn
+    state.current_url = saved_url
+  end
+
+  it("marks the entry the context points at (name AND url)", function()
+    with_context("local", "redis://127.0.0.1:6379/0", function()
+      local item = connections._test.picker_item({ name = "local", url = "redis://127.0.0.1:6379/0" })
+      assert.match("%[active%]", item)
+      -- same name, different resolved url (another file's section): no mark
+      local other_url = connections._test.picker_item({ name = "local", url = "redis://remote:6379/0" })
+      assert.is_nil(other_url:find("%[active%]", 1, true))
+      -- different name: no mark
+      local other_name = connections._test.picker_item({ name = "staging", url = "redis://127.0.0.1:6379/0" })
+      assert.is_nil(other_name:find("%[active%]", 1, true))
+      -- no context at all: no mark
+      with_context(nil, nil, function()
+        local none = connections._test.picker_item({ name = "local", url = "redis://127.0.0.1:6379/0" })
+        assert.is_nil(none:find("%[active%]", 1, true))
+      end)
+    end)
+  end)
+
+  it("an unresolved entry never carries the mark", function()
+    with_context("broken", nil, function()
+      local item = connections._test.picker_item({ name = "broken", url = nil, url_err = "no host" })
+      assert.match("unresolved", item)
+      assert.is_nil(item:find("%[active%]", 1, true))
+    end)
+  end)
+end)
