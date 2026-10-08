@@ -569,6 +569,21 @@ port = 6379
     assert.truthy(err:find("srv", 1, true))
   end)
 
+  it("build_url_from_fields refuses a hex-spelled port string", function()
+    -- LuaJIT's plain tonumber takes "0x10" as 16, so the typo built
+    -- redis://h:16/0 — the wrong server, with no error anywhere
+    local url, err = connections._test.build_url_from_fields(
+      { host = "h", port = "0x10" }, "srv")
+    assert.is_nil(url)
+    assert.truthy(err:find("port", 1, true))
+  end)
+
+  it("build_url_from_fields still takes a quoted decimal port string", function()
+    local url = connections._test.build_url_from_fields(
+      { host = "h", port = "6380", db = "2" }, "srv")
+    assert.equals("redis://h:6380/2", url)
+  end)
+
   it("resolve_redis_url reports a non-string url instead of crashing", function()
     write("connections.toml", "[srv]\ndialect = \"redis\"\nurl = [1]\n")
     connections._test.reset_caches()

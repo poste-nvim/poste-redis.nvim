@@ -308,7 +308,16 @@ local function build_url_from_fields(conn, name)
   local at = name and (" (connection '%s')"):format(name) or ""
   local function field(label, value, default, min, max)
     if value == nil or value == "" then return default, nil end
-    local n = tonumber(value)
+    -- Decimal grammar only: LuaJIT's plain tonumber — even with base 10 —
+    -- also takes "0x10", and a hex typo would sail into the URL as port 16,
+    -- the wrong server, with no error anywhere.
+    local n
+    if type(value) == "number" then
+      n = value
+    elseif type(value) == "string" and (value:match("^%s*[%+%-]?%d+%.?%d*%s*$")
+      or value:match("^%s*[%+%-]?%d+%.?%d*[eE][%+%-]?%d+%s*$")) then
+      n = tonumber(value)
+    end
     if not n or n % 1 ~= 0 or n < min or (max and n > max) then
       return nil, ("Invalid %s for redis connection%s: expected an integer %s"):format(
         label, at, max and ("from " .. min .. " to " .. max) or ("of " .. min .. " or more"))
