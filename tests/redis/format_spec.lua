@@ -45,6 +45,19 @@ describe("poste-redis format", function()
     assert.equals("1750000000000000", out.grid.to_display(out.grid.rows[1][3]))
   end)
 
+  it("renders a fractional score the way the yank path spells it", function()
+    -- display and copy must agree: %g's six significant digits showed
+    -- "1.23457e+06" in the cell while to_clipboard yanked "1234567.5"
+    local out = lines_for({
+      type = "zset",
+      len = 1,
+      value = { { member = "m", score = 1234567.5 } },
+    })
+    local shown = out.grid.to_display(out.grid.rows[1][3])
+    assert.equals("1234567.5", shown)
+    assert.equals(out.grid.to_copy(out.grid.rows[1][3]), shown)
+  end)
+
   it("renders a non-finite score the binary sends as text", function()
     -- serde_json has no spelling for infinity, so poste.nvim sends the reading
     -- Redis itself uses for such a score: `inf`. It has to reach the score

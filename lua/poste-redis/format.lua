@@ -28,7 +28,11 @@ local function cell(v)
     if v == math.floor(v) and math.abs(v) < util.INT_EXACT then
       return string.format("%.0f", v)
     end
-    return string.format("%g", v)
+    -- tostring, not %g: the yank path (util.to_clipboard) renders the same
+    -- number with %.14g precision, so a fractional zset score of 1234567.5
+    -- was yanked as "1234567.5" while the cell displayed "1.23457e+06" —
+    -- six significant digits the user could not see anywhere else.
+    return tostring(v)
   end
   if type(v) == "table" then
     local ok, s = pcall(vim.json.encode, v)
