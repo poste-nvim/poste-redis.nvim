@@ -1,6 +1,6 @@
 # poste-redis.nvim
 
-Redis for Neovim in the [Poste](https://github.com/beyondlex/poste.nvim) plugin family —
+Redis for Neovim in the [Poste](https://github.com/poste-nvim/poste.nvim) plugin family —
 write Redis commands in a `.redis` buffer, hit `<CR>`, and read the results in a result
 panel. A key browser, value viewer and executable history are included.
 
@@ -10,7 +10,7 @@ With lazy.nvim:
 
 ```lua
 {
-  "beyondlex/poste-redis.nvim",
+  "poste-nvim/poste-redis.nvim",
   opts = {},
 }
 ```

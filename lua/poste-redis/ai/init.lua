@@ -43,7 +43,7 @@ end
 --- Notify and report absence of poste-ai. Returns true when available.
 local function ensure_available()
   if M.available() then return true end
-  vim.notify("PosteRedis AI chat needs poste-ai.nvim (beyondlex/poste-ai.nvim) installed.",
+  vim.notify("PosteRedis AI chat needs poste-ai.nvim (poste-nvim/poste-ai.nvim) installed.",
     vim.log.levels.WARN, { title = redis_state.TITLE })
   return false
 end

@@ -6,10 +6,10 @@
 --- matched the binary against the *plugin checkout's* tag, which is
 --- meaningless in a sibling repo. Lives under install_binary.lua because
 --- this repo's install.lua (tree-sitter parser compiler) predates it.
---- REPO stays beyondlex/poste.nvim: one binary for the whole family.
+--- REPO stays poste-nvim/poste.nvim: one binary for the whole family.
 local M = {}
 
-local REPO = "beyondlex/poste.nvim"
+local REPO = "poste-nvim/poste.nvim"
 local BASE = vim.fn.stdpath("data") .. "/poste"
 local BIN_DIR = BASE .. "/bin"
 local VERSION_FILE = BASE .. "/.version"
