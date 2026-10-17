@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest a new feature or behaviour
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: "What problem does this solve?"
+      description: "The use case, not the solution. What are you trying to do that the plugin currently makes hard or impossible?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "Proposed solution"
+      description: "What you'd like the plugin to do instead. A key sequence, a command, a browser behaviour — be specific."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: "Area affected (if any)"
+      options:
+        - Command execution
+        - Key browser
+        - Value viewer / editing
+        - History
+        - Completion
+        - connections.toml / setup
+        - Other / not sure
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: "Pre-flight checks"
+      options:
+        - label: "I have checked existing issues (open and closed) for duplicates"
+          required: true
+        - label: "I have read the relevant section of `:h poste-redis`"
+          required: true

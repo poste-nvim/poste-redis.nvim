@@ -30,6 +30,11 @@ jobs:
     steps:
       - name: Checkout poste-redis.nvim
         uses: actions/checkout@v4
+        with:
+          # Run tests' working-directory is ./poste-redis.nvim; without this
+          # path the directory does not exist and the job failed in seconds
+          # with no test output at all.
+          path: poste-redis.nvim
 
       - name: Install Neovim ${{ matrix.nvim_version }}
         uses: rhysd/action-setup-vim@v1

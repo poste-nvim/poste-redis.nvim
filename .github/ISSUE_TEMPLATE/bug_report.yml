@@ -1,0 +1,128 @@
+name: Bug report
+description: Something is not working as expected
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report. Before submitting:
+
+        1. Run `:checkhealth poste-redis` in Neovim — it catches the most
+           common breakages (missing binary, old binary without
+           `redis-exec`, missing `connections.toml`, missing grammar).
+        2. Run `:PosteRedisInfo` — it names the binary that won, where it
+           came from, and its version. **If the issue is "my build is not
+           being used", the answer is almost always in this output.**
+        3. Skim [SUPPORT.md](../SUPPORT.md) — it covers the diagnosis path
+           for binary, connection, and completion problems.
+
+        Paste the full output of both commands below. Reports without them
+        will be asked to provide them before triage.
+
+  - type: textarea
+    id: checkhealth
+    attributes:
+      label: ":checkhealth poste-redis output"
+      description: "Run `:checkhealth poste-redis` and paste the full output. Run `:redir @+ | checkhealth poste-redis | redir END` to copy it to the clipboard."
+      render: plain
+    validations:
+      required: true
+
+  - type: textarea
+    id: posteredisinfo
+    attributes:
+      label: ":PosteRedisInfo output"
+      description: "Run `:PosteRedisInfo` and paste the full output. This names the binary, its source, and version."
+      render: plain
+    validations:
+      required: true
+
+  - type: input
+    id: nvim-version
+    attributes:
+      label: "Neovim version"
+      description: "Output of `nvim --version | head -1`"
+      placeholder: "NVIM v0.10.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: "Operating system"
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux (x86_64)
+        - Linux (aarch64)
+        - Windows (x86_64)
+        - Other / WSL
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: "Area involved"
+      options:
+        - Executing commands in a .redis buffer
+        - Key browser / value viewer
+        - History
+        - Completion
+        - connections.toml / setup
+        - Not area-specific
+    validations:
+      required: true
+
+  - type: input
+    id: poste-binary-source
+    attributes:
+      label: "How is the `poste` binary provided?"
+      description: "vim.g.poste_binary / $POSTE_BINARY / auto-installed / local build / PATH — whatever `:PosteRedisInfo` reports under `from:`."
+      placeholder: "auto-installed (from installed release)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: "What happened?"
+      description: "A clear description of the unexpected behaviour. Include the exact key sequence or `:` command that triggered it."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "What did you expect?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: "Minimal reproduction"
+      description: |
+        The smallest `.redis` buffer content plus the relevant
+        `connections.toml` section (redact credentials) that reproduces the
+        issue. A reproduction against a stock `redis-server` or the
+        `playground/` docker compose is ideal — it lets us verify without
+        guessing your Redis flavour (Valkey/Dragonfly/Kvrocks behaviours
+        differ).
+      render: redis
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: "Pre-flight checks"
+      options:
+        - label: "I have run `:checkhealth poste-redis` and pasted the output above"
+          required: true
+        - label: "I have run `:PosteRedisInfo` and pasted the output above"
+          required: true
+        - label: "I have checked existing issues for duplicates"
+          required: true
+        - label: "I am on the latest `main` (or have noted my commit below)"
+          required: true

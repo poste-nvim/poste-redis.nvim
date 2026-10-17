@@ -1,0 +1,13 @@
+# Issue template config — routes reporters to self-diagnosis first.
+# Blank issues are disabled: every report goes through a template so the
+# triage-critical info (checkhealth + PosteRedisInfo) arrives with the issue,
+# not after a round-trip asking for it.
+
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/poste-nvim/poste-redis.nvim/blob/main/SUPPORT.md
+    about: "Binary not found? Old binary without redis-exec? Browser empty? Read this before opening an issue — it covers the diagnosis path."
+  - name: Discussions
+    url: https://github.com/poste-nvim/poste-redis.nvim/discussions
+    about: "Questions, usage tips, and config sharing go in Discussions, not Issues."
