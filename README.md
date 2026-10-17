@@ -1,5 +1,7 @@
 # poste-redis.nvim
 
+[![CI](https://github.com/poste-nvim/poste-redis.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/poste-nvim/poste-redis.nvim/actions/workflows/ci.yml)
+
 Redis for Neovim in the [Poste](https://github.com/poste-nvim/poste.nvim) plugin family —
 write Redis commands in a `.redis` buffer, hit `<CR>`, and read the results in a result
 panel. A key browser, value viewer and executable history are included.
