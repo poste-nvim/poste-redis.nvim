@@ -88,7 +88,7 @@ describe("poste-redis buffer yank", function()
       ---@diagnostic disable-next-line: duplicate-set-field
       vim.fn.setreg = function() end
       vim.notify = function(msg) notices[#notices + 1] = msg end
-      local cjk = string.rep("数", 30) -- 90 bytes; byte 40 splits glyph 14
+      local cjk = string.rep("語", 30) -- 90 bytes; byte 40 splits glyph 14
       yank.cell(make_table_tab({ grid = {
         columns = { "#", "value" },
         to_copy = function(v) return v end,

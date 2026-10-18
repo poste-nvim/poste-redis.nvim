@@ -1,9 +1,11 @@
-# ── parser_edges.redis ── 解析器边界用例（EXECUTION-PLAN §4.2 测试矩阵）──
-# 手动测试点：光标跨续行任意物理行 <CR>，应提取同一条命令
+# ── parser_edges.redis ── parser edge cases (EXECUTION-PLAN §4.2 test matrix) ──
+# Manual test points: <CR> on any physical line inside a continuation should
+# extract the same single command
 
 USE local
 
-# ── 续行：行尾 \ 后接下一物理行（末尾留空白也要生效） ──
+# ── continuation: a trailing \ joins the next physical line (works with
+#    trailing whitespace too) ──
 SET multi-line "value is " \
     .. "concatenated across lines"
 
@@ -11,37 +13,37 @@ LPUSH queue:big item1 item2 \
       item3 item4 \
       item5
 
-# ── 引号内 # 不算注释 ──
+# ── # inside quotes is not a comment ──
 SET quoted "# start-of-token-not-comment"
 GET quoted
 
 LPUSH queue:hash '{"k":"v#1"}'
 
-# ── 行内注释（裸 # 后为注释） ──
-SET with-inline-ok yes # 后面全是注释，不解析
+# ── inline comment (everything after a bare # is a comment) ──
+SET with-inline-ok yes # rest is comment, not parsed
 GET with-inline-ok
 
-# ── 整行注释（# 与 -- 都支持） ──
+# ── whole-line comments (both # and -- are supported) ──
 # hash style comment
 -- dash style comment
 GET with-inline-ok
 
-# ── 命令大小写不敏感 ──
+# ── command names are case-insensitive ──
 set case-test "lowercase cmd works"
 Get case-test
 gEt case-test
 
-# ── 空行 / 纯注释行不产生命令 ──
+# ── empty lines / comment-only lines produce no command ──
 
-# ── CRLF 行尾（vim 保存时一般自动处理；此处文档化） ──
+# ── CRLF line endings (vim usually normalises on save; documented here) ──
 SET crlf-test "line"
 GET crlf-test
 
-# ── 危险命令（M1 应黄色警告提示，不拦截） ──
+# ── dangerous commands (M1 warns in yellow, does not block) ──
 # FLUSHALL
 # FLUSHDB
 # SHUTDOWN NOSAVE
 CONFIG GET maxmemory
 
-# ── 清理 ──
+# ── cleanup ──
 DEL multi-line queue:big quoted queue:hash with-inline-ok case-test crlf-test

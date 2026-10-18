@@ -1,29 +1,33 @@
-# ── multi_use.redis ── 连接切换专项 ─────────────────────────────────────
-# 手动测试点：
-#   - USE 切连接：SET 写入当前连接，GET 应能读回（跨 USE 段分别验证）
-#   - 裸 USE（单独成行）：应弹出连接选择器
-#   - 无 USE 段：:PosteRedisRunFile 应报错并提示 :PosteRedisConnection
-# 提示：M1 每段各起一次 redis-exec 进程，SELECT 状态不跨段保持
+# ── multi_use.redis ── connection-switching focus ───────────────────────
+# Manual test points:
+#   - USE switches connections: SET writes to the current connection and GET
+#     reads it back (verify per USE segment)
+#   - bare USE (alone on a line): should open the connection picker
+#   - no USE segment: :PosteRedisRunFile should error and suggest
+#     :PosteRedisConnection
+# Note: in M1 each segment spawns its own redis-exec process, so SELECT state
+# does not persist across segments
 
-# ── 段 1：local（db0） ──
+# ── segment 1: local (db0) ──
 USE local
 SET whoami "db0-user"
 GET whoami
 
-# ── 段 2：local-db2（db1）—— SET 与 GET 在同一 USE 段内，状态一致 ──
+# ── segment 2: local-db2 (db1) — SET and GET share a USE segment, state consistent ──
 USE local-db2
 SET whoami "db1-user"
-GET whoami          # 应读到 db1 的值
-GET db0-copy        # 不存在（db1 空）
+GET whoami          # should read the db1 value
+GET db0-copy        # missing (db1 is empty)
 
-# ── 再切回 local，验证 db0 的值未被污染 ──
+# ── switch back to local, verify the db0 value was not polluted ──
 USE local
-GET whoami          # 应仍为 "db0-user"
+GET whoami          # should still be "db0-user"
 
-# ── 裸 USE：取消注释下面这行，光标放它上面 <CR>，应弹连接选择器 ──
+# ── bare USE: uncomment the line below, put the cursor on it and press <CR>;
+#    the connection picker should open ──
 # USE
 
-# ── 清理 ──
+# ── cleanup ──
 USE local
 DEL whoami
 USE local-db2

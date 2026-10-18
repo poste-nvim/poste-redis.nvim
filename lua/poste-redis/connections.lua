@@ -1,4 +1,4 @@
---- Redis connection management: parse `connections.toml` (redis 段), resolve
+--- Redis connection management: parse `connections.toml` (redis sections), resolve
 --- to a redis:// URL. The binary never reads config files — Lua resolves and
 --- passes the URL (poste-redis EXECUTION-PLAN §5).
 local redis_state = require("poste-redis.state")

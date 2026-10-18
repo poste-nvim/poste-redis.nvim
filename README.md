@@ -6,12 +6,7 @@
 write Redis commands in a `.redis` buffer, hit `<CR>`, and read the results in a result
 panel. A key browser, value viewer and executable history are included.
 
-<!--
-Hero screenshot: a .redis buffer with the cursor on a SET line, the result
-panel below, and the key browser split on the side showing the db tree.
-Drop the image at .github/assets/browser.png and uncomment.
 ![poste-redis.nvim — command buffer + result panel + key browser](.github/assets/browser.png)
--->
 
 ## Install
 

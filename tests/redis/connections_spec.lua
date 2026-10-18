@@ -1,4 +1,4 @@
---- connections spec — connections.toml redis 段解析 + {{var}} 展开 + 错误路径。
+--- connections spec — connections.toml redis-section parsing + {{var}} expansion + error paths.
 --- Covers EXECUTION-PLAN §5: url form, field form, tls, env expansion,
 --- validation errors, and the USE-driven context apply.
 local connections = require("poste-redis.connections")

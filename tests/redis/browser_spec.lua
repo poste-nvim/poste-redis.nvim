@@ -160,7 +160,7 @@ describe("poste-redis browser async grouping", function()
     assert.equals("nocolon", db.children[1].name)
   end)
 
-  it("builds nested folders per : segment (方案B)", function()
+  it("builds nested folders per : segment (Scheme B)", function()
     async.set_view_mode("nested")
     local db = tree.make_db_node({ db = 0 }, "c")
     scan._test.build_children(db, { "a:b:c", "a:b", "a:d", "b:c" }, "c", 0)

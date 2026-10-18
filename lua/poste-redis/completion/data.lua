@@ -5,7 +5,7 @@
 ---     same vocabulary the regex syntax highlights (requirements §3.4)
 ---   - connection names: from connections.toml redis sections
 ---   - key prefix candidates: SCAN MATCH `<prefix>*` via the persistent
----     session transport (P2-4 "光标 key 前缀候选"), cached per (url, prefix)
+---     session transport (P2-4 "key-prefix candidates at the cursor"), cached per (url, prefix)
 ---
 --- All transport goes through session_conn so SELECT db state is respected
 --- and the connection is reused (P1-5).

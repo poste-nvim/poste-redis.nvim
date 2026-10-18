@@ -1,14 +1,16 @@
-# ── dangerous.redis ── 危险命令专项（M1：黄色警告提示，不拦截；M3 完整拦截）──
-# 手动测试点：光标放任意一行 <CR>，结果面板 winbar 应为黄色警告；
-# 这些命令在只读/测试库上跑，注意当前 USE 指向的库别搞错
+# ── dangerous.redis ── dangerous commands (M1: yellow warning, no blocking;
+#    M3: full blocking) ──
+# Manual test points: <CR> on any line, the result panel winbar should show a
+# yellow warning; run these against a read-only/test db and double-check which
+# db the current USE points to
 
 USE local
 
-# ── 建议先看当前库有什么（别真清库） ──
+# ── look at the current db first (don't actually flush it) ──
 DBSIZE
 KEYS *
 
-# ── 危险命令（逐个 <CR> 试；不要同时整文件跑！） ──
+# ── dangerous commands (try one at a time with <CR>; never run the whole file!) ──
 # FLUSHDB
 # FLUSHALL
 # SHUTDOWN NOSAVE
@@ -17,5 +19,5 @@ CONFIG GET save
 CONFIG RESETSTAT
 DEBUG OBJECT some-key
 
-# ── 非危险但易误伤：DEL 整个前缀（确认框逻辑在 M3） ──
+# ── not dangerous but easy to hurt yourself: DEL a whole prefix (confirm dialog lands in M3) ──
 # DEL demo:* user:* queue:*

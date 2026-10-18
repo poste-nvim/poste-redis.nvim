@@ -14,7 +14,7 @@
 #   db1 — service/tenant infrastructure: long `svc:` / `tenant:` trees,
 #         per-node metrics, deploy history, alerts, streams.
 #
-# Both dbs have 100+ keys and values in English / 中文 / 日本語 / Latin / русский
+# Both dbs have 100+ keys and values in English / Chinese / Japanese / Latin / Russian
 # so wide glyph rendering and the `a:b:c:...` tree view can be demonstrated.
 set -e
 
@@ -262,7 +262,7 @@ echo "  redis://$TARGET_HOST:$TARGET_PORT/0 -> $($R -n 0 DBSIZE) keys"
 echo "  redis://$TARGET_HOST:$TARGET_PORT/1 -> $($R -n 1 DBSIZE) keys"
 echo ""
 echo "Try in poste-redis (connections 'local' -> /0, 'local-db2' -> /1):"
-echo "  GET site:announcement          # en/中文/日本語/русский in one value"
+echo "  GET site:announcement          # en/zh/ja/ru in one value"
 echo "  HGETALL user:u_004:profile     # Latin bio (Marcus Lūcius)"
 echo "  ZRANGE search:trending 0 -1 WITHSCORES   # multilingual terms"
 echo "  SMEMBERS catalog:tags:new      # paginated table"

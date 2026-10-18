@@ -145,7 +145,7 @@ end
 --- level (SCAN returns keyspace order, which is not guaranteed alphabetical).
 --- Flat/flatten view: flat keys first (alphabetical), then group nodes sorted
 --- by name — the stable layout for a db node. Nested view: subfolders first
---- (sorted), then direct keys (sorted), the filesystem reading order of 方案B.
+--- (sorted), then direct keys (sorted), the filesystem reading order of Scheme B.
 local function sort_children(node)
   local flat, groups = {}, {}
   for _, ch in ipairs(node.children or {}) do
@@ -253,7 +253,7 @@ local function key_entry_meta(e)
   return nil
 end
 
---- Recursively build a nested folder tree (方案B) from a flat key list: each
+--- Recursively build a nested folder tree (Scheme B) from a flat key list: each
 --- `:`-segment nest is one folder level, keys hang as leaves in the folder of
 --- their longest proper prefix. A key equal to a folder prefix (e.g. `a:b`
 --- when `a:b:c` also exists) stays a leaf alongside the subfolder. Folders

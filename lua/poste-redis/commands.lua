@@ -44,7 +44,7 @@ function M.setup()
   end, {
     nargs = "?",
     complete = function() return { "flat", "flatten", "nested" } end,
-    desc = "Toggle browser view; or set one: flat (no folders), flatten (方案A), nested (方案B)",
+    desc = "Toggle browser view; or set one: flat (no folders), flatten (Scheme A), nested (Scheme B)",
   })
 
   vim.api.nvim_create_user_command("PosteRedisReveal", function(args)

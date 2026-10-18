@@ -1,9 +1,10 @@
-# ── demo.redis ── 需求文档 §3.1 的完整示例 ──────────────────────────────
-# 手动测试：光标任一行 <CR> 执行；:PosteRedisRunFile 整文件跑（逐命令一个 tab）
+# ── demo.redis ── full example from requirements §3.1 ───────────────────
+# Manual test: <CR> on any line executes it; :PosteRedisRunFile runs the whole
+# file (one tab per command)
 
-# ── 连接与库 ──────────────────────────────
-USE local              # 切换到 connections.toml 里的 local 连接
-SELECT 0               # 真·Redis 命令：切 db（M1 exec 模式，每次独立进程）
+# ── connection & db ──────────────────────
+USE local              # switch to the `local` connection in connections.toml
+SELECT 0               # a real Redis command: switch db (M1 exec mode, fresh process per run)
 
 set a:b:c:d "abcd"
 set a:d "ad"
@@ -23,22 +24,21 @@ set a:a_very_long_key:very_very_long "long long key"
 # ── String ──
 SET session:abc "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0" EX 3600
 GET session:abc
-GET missing:key          # 应为 (nil)
+GET missing:key          # should be (nil)
 
 TYPE user:42
 
-# ── Hash：长命令用 \ 续行 ──
+# ── Hash: long commands use \ continuations ──
 HSET user:42 name "Alice" \
       email "alice@example.com" \
       age 30
-HGETALL user:42          # 渲染为 field/value 表
+HGETALL user:42          # renders as a field/value table
 # DEL user:42
 # DEL session:abc
 
-
 # ── List ──
 RPUSH queue:jobs "job-1" "job-2" "job-3"
-LRANGE queue:jobs 0 -1   # 编号列表
+LRANGE queue:jobs 0 -1   # numbered list
 
 # ── Set ──
 SADD tags:dev vim lua redis
@@ -47,24 +47,25 @@ SADD tags:dev rust java c++ vue react
 
 # ── ZSet ──
 ZADD board 99 alice 87 bob
-ZREVRANGE board 0 -1 WITHSCORES   # member/score 表
-ZRANGE board 0 -1 WITHSCORES   # member/score 表
+ZREVRANGE board 0 -1 WITHSCORES   # member/score table
+ZRANGE board 0 -1 WITHSCORES   # member/score table
 
 # redis-cli --scan --pattern 'a:a_very_long_key:*' | xargs redis-cli del
 
-# ── 整数 / 状态 ──
+# ── Integer / status ──
 INCR counter:hits
 EXISTS session:abc       # 1 / 0
 
-# ── 引号规则：双引号（JSON 兼容转义）、单引号、裸词；引号内 # 不算注释 ──
-LPUSH queue:email '{"to":"a@b.c","tpl":"welcome"}'   # 单引号字面量
+# ── quoting rules: double quotes (JSON-compatible escapes), single quotes,
+#    bare words; # inside quotes is not a comment ──
+LPUSH queue:email '{"to":"a@b.c","tpl":"welcome"}'   # single-quoted literal
 LRANGE queue:email 0 -1
 SET note "this # is inside quotes"
 SET plain bareword
 GET note
 GET plain
 
-# ── 清理：危险命令（M1 提示黄色警告，不拦截） ──
+# ── cleanup: dangerous commands (M1 shows a yellow warning, does not block) ──
 DEL user:42 queue:jobs tags:dev board counter:hits note plain queue:email
 
 -- @connection local

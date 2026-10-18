@@ -123,8 +123,8 @@ end
 
 --- Tree view mode of the key browser:
 ---   "flat"    → every key hangs directly under the db node (no folders)
----   "flatten" → 方案A: one folder per first `:`-segment, keys flat inside
----   "nested"  → 方案B: folders nest per `:`-segment (`a:b:c` → `a`/`b`/key)
+---   "flatten" → Scheme A: one folder per first `:`-segment, keys flat inside
+---   "nested"  → Scheme B: folders nest per `:`-segment (`a:b:c` → `a`/`b`/key)
 --- tree_view/nested_view are the two booleans powering these:
 ---   tree_view=false            → "flat"
 ---   tree_view=true,!nested     → "flatten"
@@ -161,7 +161,7 @@ function M.view_mode()
   return M.nested_view and "nested" or "flatten"
 end
 
---- Toggle between flatten (方案A) and nested (方案B), the two folder modes.
+--- Toggle between flatten (Scheme A) and nested (Scheme B), the two folder modes.
 --- From "flat" it goes to nested (the richer layout).
 --- @return string the applied mode
 function M.toggle_view_mode()

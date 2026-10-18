@@ -685,8 +685,8 @@ function M.pick_connection()
   picker.show()
 end
 
---- Toggle between flatten (方案A: one folder per first `:`-segment, keys flat
---- underneath) and nested (方案B: folders nest per segment). Any active search
+--- Toggle between flatten (Scheme A: one folder per first `:`-segment, keys flat
+--- underneath) and nested (Scheme B: folders nest per segment). Any active search
 --- is cleared first. Use :PosteRedisBrowserView with an argument
 --- (flat|flatten|nested) for a specific mode.
 ---

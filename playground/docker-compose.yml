@@ -5,7 +5,7 @@
 # On startup the container seeds multi-db demo data — 100+ keys in both db0
 # (a multilingual shop) and db1 (service/tenant infra), covering every value
 # type (string / list / set / hash / zset / stream), deep `a:b:c:...`
-# namespaces for the key-browser tree, values in en / 中文 / 日本語 / Latin /
+# namespaces for the key-browser tree, values in en / zh / ja / Latin /
 # русский, and big collections sized to trigger grid pagination (150 / 120
 # items → 3 pages at page_size 50). See init/seed.sh for the keys.
 #

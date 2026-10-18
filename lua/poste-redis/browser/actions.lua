@@ -3,7 +3,7 @@
 --- All mutations go through the persistent redis-session transport
 --- (session_conn) so SELECT db state is held server-side; every destructive
 --- action hits a unified confirm gate before touching the server
---- (requirements §5 P1-4: 统一确认框; requirements §6 安全).
+--- (requirements §5 P1-4: unified confirm dialog; requirements §6 safety).
 
 local session_conn = require("poste-redis.session_conn")
 local redis_state = require("poste-redis.state")
@@ -323,7 +323,8 @@ local function delete_prefix_keys(node, ctx, opts)
 end
 
 --- Delete all keys under a prefix (a group node) with count estimation and
---- a second confirmation (P1-4: 按前缀删除前显示匹配数量预估并二次确认).
+--- a second confirmation (P1-4: show a match-count estimate before a prefix
+--- delete and require a second confirmation).
 --- @param node table group node
 --- @param ctx table { db_node, render }
 function M.delete_prefix(node, ctx)

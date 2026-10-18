@@ -39,11 +39,11 @@ M.defaults = {
   render_max_per_node = 500,
   -- Key browser tree view:
   --   "flat"    → every key hangs directly under the db node (default).
-  --   "flatten" → one folder per first `:`-segment, keys flat inside — 方案A.
+  --   "flatten" → one folder per first `:`-segment, keys flat inside — Scheme A.
   --   "nested"  → folders nest per `:`-segment; single-spine chains fold into
   --               one row (`a:b:c` when `a` and `b` each have one child) and
   --               keys render relative to their folder (`d:x` under `a:b:c`
-  --               for key `a:b:c:d:x`, full key untouched) — 方案B.
+  --               for key `a:b:c:d:x`, full key untouched) — Scheme B.
   -- No-arg `:PosteRedisBrowserView` toggles flatten <-> nested.
   browser_view_mode = "flatten",
   -- Max folder nesting depth in nested view (was hard-coded SPLIT_NEST). Keys
