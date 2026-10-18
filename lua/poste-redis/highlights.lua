@@ -96,6 +96,13 @@ function M.setup()
   -- rows — the bar's content is colored by its own extmark groups.
   link_if_empty("PosteRedisBrowserHeaderBar", "Normal")
 
+  -- Help floats (g?): keys in the same green as the winbar key and the
+  -- browser's string icons, section titles reuse Title, prose notes stay
+  -- gray (Comment).
+  define_if_empty("PosteRedisHelpKey", "#98C379")
+  link_if_empty("PosteRedisHelpHeader", "Title")
+  link_if_empty("PosteRedisHelpNote", "Comment")
+
   -- Key browser tree icons: gray expand/collapse markers, blue folder,
   -- green string, orange collections (zset/hash/list/set), purple everything
   -- else. Explicit fg so the palette is stable across colorschemes; users
@@ -126,6 +133,7 @@ function M.setup()
     "PosteRedisResultCell", "PosteRedisResultSearchMatch", "PosteRedisResultSearchCurrent",
     "PosteRedisHistorySuccess", "PosteRedisHistoryError",
     "PosteRedisHistoryCmd", "PosteRedisHistoryTime", "PosteRedisHistoryCurrent",
+    "PosteRedisHelpKey", "PosteRedisHelpHeader", "PosteRedisHelpNote",
     "PosteRedisBrowserSearchHint", "PosteRedisBrowserSearchText",
     "PosteRedisBrowserWinbarDb", "PosteRedisBrowserSep", "PosteRedisBrowserCount",
     "PosteRedisBrowserHeaderBar",

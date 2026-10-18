@@ -4,6 +4,74 @@
 --- this helper takes as options.
 local M = {}
 
+--- Lay out keymap-help rows for the g? floats: every description starts at
+--- the same column (the widest key decides it), keys get their own highlight
+--- span, section headers and prose notes are highlighted whole-line.
+--- Row shapes:
+---   { header = s }              section title (PosteRedisHelpHeader)
+---   { blank = true }            spacer line
+---   { note = s }                dimmed prose (PosteRedisHelpNote)
+---   { key = s, desc = s }       one keymap row (key → PosteRedisHelpKey)
+--- Spans carry byte columns and 0-based rows — straight into
+--- nvim_buf_set_extmark. Display widths come from nvim_strwidth so a custom
+--- multibyte keymap still aligns; span columns stay in bytes.
+--- @param rows table[]
+--- @return string[] lines, table[] spans
+function M.help_layout(rows)
+  local key_width = 0
+  for _, r in ipairs(rows) do
+    if r.key then
+      key_width = math.max(key_width, vim.api.nvim_strwidth(r.key))
+    end
+  end
+  local lines, spans = {}, {}
+  for i, r in ipairs(rows) do
+    local row = i - 1
+    if r.key then
+      local pad = string.rep(" ", key_width - vim.api.nvim_strwidth(r.key))
+      lines[#lines + 1] = "  " .. r.key .. pad .. "  " .. (r.desc or "")
+      spans[#spans + 1] =
+        { row = row, col = 2, end_col = 2 + #r.key, group = "PosteRedisHelpKey" }
+    elseif r.header then
+      lines[#lines + 1] = r.header
+      spans[#spans + 1] =
+        { row = row, col = 0, end_col = #r.header, group = "PosteRedisHelpHeader" }
+    elseif r.note then
+      lines[#lines + 1] = r.note
+      spans[#spans + 1] =
+        { row = row, col = 0, end_col = #r.note, group = "PosteRedisHelpNote" }
+    else
+      lines[#lines + 1] = ""
+    end
+  end
+  return lines, spans
+end
+
+--- Open the g? help float for `rows` (shapes above): laid out, sized from the
+--- content (not a fixed 72), rendered, and highlighted in one step.
+--- @param rows table[]
+--- @param opts table|nil { title = string }
+--- @return number win, number buf
+function M.help_float(rows, opts)
+  opts = opts or {}
+  local lines, spans = M.help_layout(rows)
+  local content = 0
+  for _, l in ipairs(lines) do
+    content = math.max(content, vim.api.nvim_strwidth(l))
+  end
+  local w, b = M.centered_float(lines, {
+    title = opts.title,
+    width = math.min(content + 2, vim.o.columns - 4),
+    height = math.min(#lines + 2, vim.o.lines - 4),
+  })
+  local ns = vim.api.nvim_create_namespace("PosteRedisHelp")
+  for _, s in ipairs(spans) do
+    vim.api.nvim_buf_set_extmark(b, ns, s.row, s.col,
+      { end_col = s.end_col, hl_group = s.group })
+  end
+  return w, b
+end
+
 --- Open a centered float showing `lines`.
 --- @param lines string[]
 --- @param opts table|nil {

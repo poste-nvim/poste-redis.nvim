@@ -542,44 +542,42 @@ local function setup_browser_buffer()
   k = config.get_keymap("redis_browser", "help", "g?")
   if k then
     vim.keymap.set("n", k, function()
-      local lines = {
-        "poste-redis key browser",
-        "",
-        "  (first open: pick a connection from the list, <CR> connects; db 0)",
-        "  <CR>  open/close node, view key value",
-        "  h     collapse / parent",
-        "  l     expand / first child",
-        "  r     reload db keys (clears search)",
-        "  <leader>/>  filter keys by substring ('cache' matches cache:a,",
-        "        user:cache, … — glob metacharacters match literally)",
-        "  <Esc>  clear search",
-        "  (the filter bar is pinned above the tree; <leader>/ is the only",
-        "   way into it — the cursor never rests on the bar rows)",
-        "  <Space>  select database",
-        "  o     switch connection (back to the connections list)",
-        "  d     delete key (confirm)",
-        "  D     delete all keys under prefix (count + confirm)",
-        "  <Tab> multi-select nodes (same db); D deletes, t sets TTL on all selected",
-        "  i     node info (count / memory / ttl)",
-        "  t     show/edit TTL (secs, -1 = PERSIST)",
-        "  R     rename key (conflict-checked)",
-        "  y     yank key name to clipboard",
-        "  q     close browser",
-        "  :PosteRedisBrowserView [flat|flatten|nested]  switch view mode",
-        "          flatten = one folder per first : segment (方案A)",
-        "          nested  = folders nest per : segment (方案B)",
-        "  (/ stays nvim's own buffer search)",
-      }
-      -- ui.centered_float — the same help surface as the source buffer's g?
-      -- (buffer_setup.show_help). nvim_echo was wrong twice over: its chunks
-      -- must be [text, hl] arrays (a plain string list raised E5108 "Invalid
+      -- ui.help_float — the same keyed help surface as the source buffer's
+      -- g? (buffer_setup.show_help): keys in their own column and color,
+      -- prose notes dimmed. nvim_echo was wrong twice over: its chunks must
+      -- be [text, hl] arrays (a plain string list raised E5108 "Invalid
       -- 'chunk': expected Array, got String"), and a help screen wants a
       -- dismissible float, not a message-area dump.
-      require("poste-redis.ui").centered_float(lines, {
-        title = "poste-redis browser help",
-        width = math.min(72, vim.o.columns - 4),
-        height = math.min(#lines + 2, vim.o.lines - 4),
-      })
+      local rows = {
+        { header = "poste-redis key browser" },
+        { blank = true },
+        { note = "(first open: pick a connection from the list, <CR> connects; db 0)" },
+        { key = "<CR>", desc = "open/close node, view key value" },
+        { key = "h", desc = "collapse / parent" },
+        { key = "l", desc = "expand / first child" },
+        { key = "r", desc = "reload db keys (clears search)" },
+        { key = "<leader>/", desc = "filter keys by substring ('cache' matches cache:a, user:cache, …)" },
+        { note = "     (glob metacharacters match literally)" },
+        { key = "<Esc>", desc = "clear search" },
+        { note = "     (the filter bar is pinned above the tree; <leader>/ is the only" },
+        { note = "      way into it — the cursor never rests on the bar rows)" },
+        { key = "<Space>", desc = "select database" },
+        { key = "o", desc = "switch connection (back to the connections list)" },
+        { key = "d", desc = "delete key (confirm)" },
+        { key = "D", desc = "delete all keys under prefix (count + confirm)" },
+        { key = "<Tab>", desc = "multi-select nodes (same db); D deletes, t sets TTL on all selected" },
+        { key = "i", desc = "node info (count / memory / ttl)" },
+        { key = "t", desc = "show/edit TTL (secs, -1 = PERSIST)" },
+        { key = "R", desc = "rename key (conflict-checked)" },
+        { key = "y", desc = "yank key name to clipboard" },
+        { key = "q", desc = "close browser" },
+        { blank = true },
+        { note = ":PosteRedisBrowserView [flat|flatten|nested]  switch view mode" },
+        { note = "   flatten = one folder per first : segment (Scheme A)" },
+        { note = "   nested  = folders nest per : segment (Scheme B)" },
+        { note = "(/ stays nvim's own buffer search)" },
+      }
+      require("poste-redis.ui").help_float(rows, { title = "poste-redis browser help" })
       vim.cmd.redraw()
     end, opts)
   end

@@ -5,35 +5,40 @@ local constants = require("poste-redis.constants")
 
 local M = {}
 
---- Show the keymap help for a source buffer in a float.
-local function show_help(buf)
-  local ui = require("poste-redis.ui")
-  local items = {
-    "poste-redis source keymaps:",
-    "  " .. config.format_keymap("redis_source", "run") .. "   run command under cursor / selection",
-    "  " .. config.format_keymap("redis_source", "reveal_key") .. "   reveal the command's key in the browser tree",
-    "  " .. config.format_keymap("redis_source", "history") .. "   open request history",
-    "  " .. config.format_keymap("redis_source", "show_doc") .. "   show command documentation (K again focuses)",
-    "  " .. config.format_keymap("redis_source", "trigger_completion") .. "   trigger completion",
-    "  " .. config.format_keymap("redis_source", "cancel") .. "   cancel a running execution",
-    "  " .. config.format_keymap("redis_source", "help") .. "   this help",
-    "",
-    "poste-redis result panel keymaps:",
-    "  " .. config.format_keymap("redis_result", "close") .. "   close panel",
-    "  " .. config.format_keymap("redis_result", "next_tab") .. " / " .. config.format_keymap("redis_result", "prev_tab") .. "   switch result tabs",
-    "  " .. config.format_keymap("redis_result", "preview_cell") .. "   preview cell / raw value",
-    "  " .. config.format_keymap("redis_result", "yank_cell") .. " / " .. config.format_keymap("redis_result", "yank_column") .. "   yank cell / column",
-    "  " .. config.format_keymap("redis_result", "export_grid") .. "   export the grid to a file (csv/tsv/json)",
-    "  " .. config.format_keymap("redis_result", "prev_page") .. " / " .. config.format_keymap("redis_result", "next_page") .. "   previous / next page",
-    "  " .. config.format_keymap("redis_result", "sort_column") .. "   sort by the cursor column (none → desc → asc → none)",
-    "  " .. config.format_keymap("redis_result", "show_search") .. "   search in results",
-    "  " .. config.format_keymap("redis_result", "history") .. "   history sidebar (j/k previews entries here)",
+--- The source-buffer + result-panel help rows (shapes in ui.help_layout).
+--- Pure: takes the keymap formatter so specs can pin structure without the
+--- user's configured keys.
+local function help_rows(format)
+  return {
+    { header = "poste-redis source keymaps" },
+    { key = format("redis_source", "run"), desc = "run command under cursor / selection" },
+    { key = format("redis_source", "reveal_key"), desc = "reveal the command's key in the browser tree" },
+    { key = format("redis_source", "history"), desc = "open request history" },
+    { key = format("redis_source", "show_doc"), desc = "show command documentation (K again focuses)" },
+    { key = format("redis_source", "trigger_completion"), desc = "trigger completion" },
+    { key = format("redis_source", "cancel"), desc = "cancel a running execution" },
+    { key = format("redis_source", "help"), desc = "this help" },
+    { blank = true },
+    { header = "poste-redis result panel keymaps" },
+    { key = format("redis_result", "close"), desc = "close panel" },
+    { key = format("redis_result", "next_tab") .. " / " .. format("redis_result", "prev_tab"),
+      desc = "switch result tabs" },
+    { key = format("redis_result", "preview_cell"), desc = "preview cell / raw value" },
+    { key = format("redis_result", "yank_cell") .. " / " .. format("redis_result", "yank_column"),
+      desc = "yank cell / column" },
+    { key = format("redis_result", "export_grid"), desc = "export the grid to a file (csv/tsv/json)" },
+    { key = format("redis_result", "prev_page") .. " / " .. format("redis_result", "next_page"),
+      desc = "previous / next page" },
+    { key = format("redis_result", "sort_column"), desc = "sort by the cursor column (none → desc → asc → none)" },
+    { key = format("redis_result", "show_search"), desc = "search in results" },
+    { key = format("redis_result", "history"), desc = "history sidebar (j/k previews entries here)" },
   }
-  ui.centered_float(items, {
-    title = "poste-redis help",
-    width = math.min(72, vim.o.columns - 4),
-    height = math.min(#items + 2, vim.o.lines - 4),
-  })
+end
+
+--- Show the keymap help for a source buffer in a float.
+local function show_help(_buf)
+  local ui = require("poste-redis.ui")
+  ui.help_float(help_rows(config.format_keymap), { title = "poste-redis help" })
   vim.cmd.redraw()
 end
 
@@ -114,5 +119,9 @@ function M.setup_buffer_keymaps(buf)
     end, km)
   end
 end
+
+M._test = {
+  help_rows = help_rows,
+}
 
 return M

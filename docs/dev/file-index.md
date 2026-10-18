@@ -37,7 +37,7 @@ fallback — see `requirements.md`.
 | `buffer/sort.lua` | Column sort on `s` (none → desc → asc → none): numeric-aware stable re-order of grid rows, cursor follows the focused record, sort icon byte-range in the rendered header (link @number) |
 | `result/grid.lua` | **Pure table-grid renderer**: `build_layout` (display widths + right-align), `render_page` (borderless `│` rows + col byte maps + pagination), `compute_matches` / `cell_match_range` (search). No vim ops — reusable in poste.nvim later |
 | `result/header.lua` | Floating fixed header for grid tabs (1-line float over the panel following horizontal scroll, per-char viewport slicing) |
-| `ui.lua` | Shared centered modal float (scratch buffer + rounded border + q/Esc close) — used by the result preview and source help |
+| `ui.lua` | Shared centered modal float (scratch buffer + rounded border + q/Esc close) + the g? help surface (key/desc column layout, per-row highlight spans) — used by the result preview and both help floats |
 | `history.lua` | In-memory command history: .redis runs + dataset/grid_edit writes + browser mutations (batch deletes aggregate to one `DEL prefix:*`, `yank` carries an executable redis-cli pipeline). Sidebar float beside the result panel (the panel narrows while the sidebar is open so the float never covers data; width restored on close): j/k previews the entry live — entries with a raw value re-render as a real grid tab (floating header, cell nav, `K`); entries without one fall back to the text snapshot, `<Tab>` jumps focus into the panel (live cursor/K/yank there), `<CR>` commits + closes, `y` yanks, `q`/`<Esc>` close (an open toggle re-focuses instead of closing); command left + highlighted, exec time right-aligned gray |
 
 ### Key browser (`browser/`)
@@ -126,6 +126,7 @@ fallback — see `requirements.md`.
 | `redis/ai_spec.lua` | AI context: confirm gate (dangerous ask + refusal), execute_redis error reporting + idempotent cleanup |
 | `redis/context_spec.lua` | window-scoped context: `entries_context` USE/SELECT walk, `display` formatting (host redaction), `resolve` priority chain (panel/browser/.redis/global) |
 | `redis/docs_spec.lua` | docs data parity with COMMANDS + entry shape, `build_lines` markdown, `resolve_command`, float track_key re-focus, show_doc keymap |
+| `redis/ui_spec.lua` | g? help floats: `help_layout` aligned key/desc columns + highlight spans, source help row content, real-float extmark render |
 | `redis/e2e_spec.lua` | live redis (gated on `REDIS_TEST_URL`) |
 | `scaffold_spec.lua` | harness smoke |
 
