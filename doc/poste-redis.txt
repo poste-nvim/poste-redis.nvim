@@ -43,7 +43,8 @@ runtime dependency on poste.nvim itself.
   `stdpath("data")/poste/bin/poste` > a local dev build > `PATH`; each
   candidate must be readable and executable, and on Windows is also tried as
   `<candidate>.exe`. Auto-installed from poste.nvim releases (SHA256-checked,
-  bounded download) when none is usable — no poste.nvim installation needed
+  in a background job that never blocks startup) when none is usable — no
+  poste.nvim installation needed
 - A Redis server you can reach: any Redis-compatible flavor works
   (Valkey, Dragonfly, Kvrocks)
 - blink.cmp (optional, recommended) for completion

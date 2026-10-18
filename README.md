@@ -34,13 +34,16 @@ CI matrix verifies current stable and nightly.
 The plugin shells out to the `poste` binary: a usable one (readable **and**
 executable, and on Windows also matched as `<candidate>.exe`) is resolved from
 `vim.g.poste_binary`, `$POSTE_BINARY`, the install
-path, a local dev build or `PATH`, and only downloaded from poste.nvim releases
-on first setup when none of those exists — point `vim.g.poste_binary` at your
-own build to skip the download. `:checkhealth poste-redis` and `:PosteRedisInfo`
+path, a local dev build or `PATH`, and downloaded from poste.nvim releases
+when none of those exists — as a background job that never blocks startup;
+a notification announces when it lands, and until then commands that need the
+binary report it missing (retry after the notification). Point
+`vim.g.poste_binary` at your own build to skip the download.
+`:checkhealth poste-redis` and `:PosteRedisInfo`
 print which of those candidates won, since the install path outranks `PATH` and
 a stray download would otherwise mask your own build silently. The download is
-bounded (10s to connect, 180s for the archive), so a network that black-holes
-it reports a failed install instead of freezing startup.
+bounded (10s to connect, 180s for the archive), so a network that can't reach
+GitHub fails with one notification per session instead of freezing anything.
 
 Connections live in the project `connections.toml`:
 

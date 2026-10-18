@@ -1,8 +1,9 @@
 --- install_binary spec — the startup guarantee: `ensure()` returns a binary the
 --- transport can spawn, and only goes to the network when nothing usable
---- exists. The candidate walk itself is state.find_poste_binary's (see
---- state_spec.lua); these cases pin that ensure() delegates to it instead of
---- carrying a second, drifted copy of the rule.
+--- exists — as a background job that never blocks the caller. The candidate
+--- walk itself is state.find_poste_binary's (see state_spec.lua); these cases
+--- pin that ensure() delegates to it instead of carrying a second, drifted
+--- copy of the rule.
 local install = require("poste-redis.install_binary")
 local state = require("poste-redis.state")
 local uv = vim.uv or vim.loop
@@ -109,10 +110,11 @@ describe("poste-redis install ps_literal", function()
 end)
 
 describe("poste-redis install curl_argv", function()
-  -- Both downloads happen inside ensure(), which setup() calls, so they block
-  -- Neovim's startup: a run without a ceiling can freeze the editor for as long
-  -- as the OS socket timeout, which reads as a hung plugin rather than a failed
-  -- download.
+  -- The downloads run as background jobs now, but the ceilings still matter:
+  -- they bound how long a stuck curl lingers (a captive portal or firewall
+  -- that answers the SYN and drops the rest would otherwise keep the process
+  -- alive until the OS socket timeout) and how late the failure notification
+  -- can arrive.
   local function has(argv, flag, value)
     for i, v in ipairs(argv) do
       if v == flag and argv[i + 1] == value then return true end
@@ -187,30 +189,25 @@ describe("poste-redis install checksum_matches", function()
 end)
 
 describe("poste-redis install download without curl", function()
-  -- vim.fn.system RAISES E475 when argv[0] is missing, and download() sits on
-  -- the setup() path via ensure(): a box without curl must end in the
-  -- graceful "download failed" notify, not a plugin-load exception.
-  local created = {}
-  after_each(function()
-    for _, p in ipairs(created) do vim.fn.delete(p) end
-    created = {}
-  end)
-
+  -- jobstart RAISES E475 when argv[0] is missing, exactly like the old
+  -- vim.fn.system copy, and download() sits on the setup() path via ensure():
+  -- a box without curl must end in the graceful "download failed" notify, not
+  -- a plugin-load exception.
   it("reports failure instead of raising when curl is missing", function()
     local saved_notify = vim.notify
-    local saved_system = vim.fn.system
+    local saved_jobstart = vim.fn.jobstart
     local notices = {}
     vim.notify = function(msg, level) notices[#notices + 1] = { msg = msg, level = level } end
     -- raise the exact error a missing curl produces (Vim:E475); a PATH
     -- rewrite does not reliably hide the real curl from the spawn
-    vim.fn.system = function(argv)
+    vim.fn.jobstart = function(argv)
       error(("Vim:E475: Invalid value for argument cmd: '%s' is not executable"):format(argv[1]))
     end
 
     local ok, err = pcall(function()
       assert.is_false(install.download("latest"))
     end)
-    vim.fn.system = saved_system
+    vim.fn.jobstart = saved_jobstart
     vim.notify = saved_notify
     if not ok then error(err) end
     -- notices[1] is the INFO "Downloading …"; the failure rides after it
@@ -220,5 +217,157 @@ describe("poste-redis install download without curl", function()
     end
     assert.truthy(failure, "the failure must be reported, not raised")
     assert.is_truthy(failure.msg:find("curl is not available", 1, true))
+  end)
+end)
+
+describe("poste-redis install download chain", function()
+  -- Full-chain cases against a fake curl on PATH: the archive download job,
+  -- the checksum download job, and the local verify + extract leg all run for
+  -- real; only the network is faked. No case here touches github.com.
+  local base_dir = vim.fn.stdpath("data") .. "/poste"
+  local bin_dir = base_dir .. "/bin"
+  local version_file = base_dir .. "/.version"
+  local saved = {}
+
+  local function sha256(path)
+    local out
+    if vim.fn.executable("sha256sum") == 1 then
+      out = vim.fn.system({ "sha256sum", path })
+    else
+      out = vim.fn.system({ "shasum", "-a", "256", path })
+    end
+    return tostring(out):match("^(%S+)")
+  end
+
+  -- Modes: ok (valid archive + matching digest), fail (archive curl exits 7),
+  -- slow (archive curl sleeps 1s first), mismatch (digest does not match).
+  local function write_fake_curl(root, mode)
+    local fixture = root .. "/fixture"
+    assert.truthy(vim.fn.mkdir(fixture, "p"))
+    vim.fn.writefile({ "#!/bin/sh", "echo poste 1.0.0" }, fixture .. "/poste")
+    assert.truthy(uv.fs_chmod(fixture .. "/poste", tonumber("755", 8)))
+    local archive = fixture .. "/archive.tar.gz"
+    vim.fn.system({ "tar", "czf", archive, "-C", fixture, "poste" })
+    assert.equals(0, vim.v.shell_error, "fixture tar must build")
+
+    local archive_branch
+    if mode == "fail" then
+      archive_branch = "  *.tar.gz) exit 7 ;;"
+    elseif mode == "slow" then
+      archive_branch = '  *.tar.gz) sleep 1; cp "' .. archive .. '" "$out" ;;'
+    else
+      archive_branch = '  *.tar.gz) cp "' .. archive .. '" "$out" ;;'
+    end
+    local digest_line = (mode == "mismatch") and string.rep("0", 64) or sha256(archive)
+
+    local bin = root .. "/bin"
+    assert.truthy(vim.fn.mkdir(bin, "p"))
+    local fake = bin .. "/curl"
+    vim.fn.writefile({
+      "#!/bin/sh",
+      "# install_binary_spec fake curl — parse the argv like real curl would:",
+      "# the module passes `flags --connect-timeout 10 --max-time N url -o out`,",
+      "# so the url and the -o value are NOT fixed positions",
+      'out="" url=""',
+      'while [ $# -gt 0 ]; do',
+      '  case "$1" in',
+      '    -o) out="$2"; shift 2 ;;',
+      '    http*) url="$1"; shift ;;',
+      '    *) shift ;;',
+      '  esac',
+      'done',
+      'case "$url" in',
+      archive_branch,
+      -- the checksum hop: the release's .sha256 asset
+      "*) printf '%s\\n' '" .. digest_line .. "' > \"$out\" ;;",
+      "esac",
+    }, fake)
+    assert.truthy(uv.fs_chmod(fake, tonumber("755", 8)))
+    return bin
+  end
+
+  local function capture_notices()
+    local notices = {}
+    vim.notify = function(msg, level) notices[#notices + 1] = { msg = msg, level = level } end
+    return notices
+  end
+
+  local function has_notice(notices, level, needle)
+    for _, n in ipairs(notices) do
+      if n.level == level and n.msg:find(needle, 1, true) then return true end
+    end
+    return false
+  end
+
+  before_each(function()
+    saved = { notify = vim.notify, path = vim.env.PATH }
+    pcall(vim.fn.delete, base_dir, "rf")
+  end)
+  after_each(function()
+    vim.notify = saved.notify
+    vim.env.PATH = saved.path
+    pcall(vim.fn.delete, base_dir, "rf")
+  end)
+
+  it("installs the binary and stamps the version file without blocking", function()
+    vim.env.PATH = write_fake_curl(vim.fn.tempname(), "ok") .. ":" .. saved.path
+    local notices = capture_notices()
+    local fired, result = false, nil
+    local started = install.download("latest", function(ok)
+      fired, result = true, ok
+    end)
+
+    -- the whole point of the async rewrite: download() returns before the
+    -- network answers (the fake curl takes >0s), startup keeps running
+    assert.is_true(started)
+    assert.is_false(fired)
+
+    assert.truthy(vim.wait(15000, function() return fired end), "chain must finish")
+    assert.is_true(result)
+    assert.equals(1, vim.fn.executable(bin_dir .. "/poste"))
+    local f = io.open(version_file, "r")
+    local stamped = f and f:read("*a") or nil
+    if f then f:close() end
+    assert.equals("latest\n", stamped)
+    assert.is_true(has_notice(notices, vim.log.levels.INFO, "Installed latest"))
+  end)
+
+  it("reports a failed download through the notification path", function()
+    vim.env.PATH = write_fake_curl(vim.fn.tempname(), "fail") .. ":" .. saved.path
+    local notices = capture_notices()
+    local fired, result = false, nil
+    assert.is_true(install.download("latest", function(ok)
+      fired, result = true, ok
+    end))
+    assert.truthy(vim.wait(15000, function() return fired end), "chain must finish")
+    assert.is_false(result)
+    assert.is_true(has_notice(notices, vim.log.levels.ERROR, "Download failed (exit 7)"))
+  end)
+
+  it("rejects an archive whose digest does not match the release checksum", function()
+    vim.env.PATH = write_fake_curl(vim.fn.tempname(), "mismatch") .. ":" .. saved.path
+    local notices = capture_notices()
+    local fired, result = false, nil
+    assert.is_true(install.download("latest", function(ok)
+      fired, result = true, ok
+    end))
+    assert.truthy(vim.wait(15000, function() return fired end), "chain must finish")
+    assert.is_false(result)
+    assert.is_true(has_notice(notices, vim.log.levels.ERROR, "Checksum mismatch"))
+    -- the corrupted download must not leave a binary behind
+    assert.equals(0, vim.fn.executable(bin_dir .. "/poste"))
+  end)
+
+  it("returns before a slow download finishes", function()
+    vim.env.PATH = write_fake_curl(vim.fn.tempname(), "slow") .. ":" .. saved.path
+    capture_notices()
+    local fired = false
+    local t0 = vim.loop.now()
+    assert.is_true(install.download("latest", function() fired = true end))
+    -- the fake curl sleeps a full second; returning within a fraction of that
+    -- is what keeps setup() off the network
+    assert.truthy(vim.loop.now() - t0 < 500, "download() must not wait on the job")
+    assert.is_false(fired)
+    assert.truthy(vim.wait(15000, function() return fired end), "chain must finish")
   end)
 end)
