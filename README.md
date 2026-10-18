@@ -107,7 +107,8 @@ GET session:abc
   key browser position, and value viewer content as real context.
 
 `requirements.md` and `EXECUTION-PLAN.md` are the historical M1/M2 specs
-(both milestones shipped); developer docs live in `docs/dev/`.
+(both milestones shipped); developer docs live in `docs/dev/`. Full
+documentation lives in `doc/poste-redis.txt` (`:h poste-redis`).
 
 ## License
 

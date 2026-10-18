@@ -1,0 +1,301 @@
+*poste-redis.txt*   Redis command execution, key browser, and value viewer for Neovim
+
+Author:  Lex <https://github.com/poste-nvim/poste-redis.nvim>
+License: MIT
+
+==============================================================================
+CONTENTS                                                   *poste-redis-contents*
+
+  1.  Introduction ........................... |poste-redis-intro|
+  2.  Requirements ........................... |poste-redis-requirements|
+  3.  Setup .................................. |poste-redis-setup|
+  4.  Connections ............................ |poste-redis-connections|
+  5.  Source buffer .......................... |poste-redis-source|
+  6.  Result panel ........................... |poste-redis-result|
+  7.  Grid editing ........................... |poste-redis-editing|
+  8.  Key browser ............................ |poste-redis-browser|
+  9.  History ................................ |poste-redis-history|
+  10. Completion and inline docs ............. |poste-redis-completion|
+  11. AI chat ................................ |poste-redis-ai|
+  12. Commands ............................... |poste-redis-commands|
+  13. Configuration .......................... |poste-redis-config|
+  14. Keymaps ................................ |poste-redis-keymaps|
+
+==============================================================================
+1. INTRODUCTION                                               *poste-redis-intro*
+
+poste-redis.nvim turns Neovim into a Redis workstation: write commands in a
+`.redis` buffer, execute them with <CR>, and read the results in a tabbed
+panel — scalars as text, collections as a sortable grid. A lazy-SCAN key
+browser with a paginated value viewer and an executable history come along.
+
+Every round trip goes through the `poste` Rust binary from poste.nvim (see
+|poste-redis-requirements|): the Lua never opens a socket itself, and the
+binary multiplexes a persistent `redis-session` process so consecutive
+commands avoid reconnect costs. All Lua lives in this repo — there is no
+runtime dependency on poste.nvim itself.
+
+==============================================================================
+2. REQUIREMENTS                                          *poste-redis-requirements*
+
+- Neovim >= 0.10 (uses `vim.system`, `vim.treesitter.language`)
+- The `poste` Rust binary: resolved from `g:poste_binary` > `$POSTE_BINARY` >
+  `stdpath("data")/poste/bin/poste` > a local dev build > `PATH`; each
+  candidate must be readable and executable, and on Windows is also tried as
+  `<candidate>.exe`. Auto-installed from poste.nvim releases (SHA256-checked,
+  bounded download) when none is usable — no poste.nvim installation needed
+- A Redis server you can reach: any Redis-compatible flavor works
+  (Valkey, Dragonfly, Kvrocks)
+- blink.cmp (optional, recommended) for completion
+- Optional: poste-ai.nvim for |poste-redis-ai|
+
+Run `:checkhealth poste-redis` to verify the installation — it names the
+binary candidate that won, flags binaries too old for the `redis-exec`
+subcommand, and reports whether `connections.toml` has redis sections.
+
+==============================================================================
+3. SETUP                                                      *poste-redis-setup*
+
+>lua
+    -- lazy.nvim
+    {
+      "poste-nvim/poste-redis.nvim",
+      dependencies = {
+        "saghen/blink.cmp",         -- optional: completion
+        "poste-nvim/poste-ai.nvim", -- optional: AI chat
+      },
+      opts = {},
+    }
+<
+All options are listed under |poste-redis-config|; `opts` is deep-merged over
+the defaults, so passing one option keeps the rest.
+
+==============================================================================
+4. CONNECTIONS                                          *poste-redis-connections*
+
+Connections live in a `connections.toml` discovered from the current buffer
+upward (same file the other Poste plugins read):
+
+>toml
+    [my-redis]
+    dialect = "redis"
+    url = "redis://:{{REDIS_PASS}}@127.0.0.1:6379/0"
+<
+
+`{{var}}` placeholders resolve from the OS environment, `.env`, and
+`env.json` (OS env wins) — never commit real credentials.
+
+A `.redis` file can address several connections: a `USE my-redis` line starts
+a new batch, and every command below it runs against that connection until
+the next `USE`. `:PosteRedisConnection` picks a connection interactively;
+`:PosteRedisContext` changes the connection used as the current context
+(outside any `USE` batch).
+
+==============================================================================
+5. SOURCE BUFFER                                            *poste-redis-source*
+
+`.redis` files get filetype `poste_redis`. Commands run one per line; blank
+lines and `#` comments are ignored:
+
+>redis
+    USE my-redis
+    SELECT 3
+    SET session:abc "token" EX 3600
+    GET session:abc
+<
+
+- <CR> executes the command under the cursor, or a visual selection. The
+  nearest `SELECT` above a selection is re-applied first, so a single run
+  lands on the right db even when the file switched databases earlier.
+- :PosteRedisRunFile runs the whole file, honoring `USE` batches in order.
+- <Esc> cancels an in-flight execution.
+- Dangerous commands (`FLUSHALL`, `FLUSHDB`, `SHUTDOWN`, `CONFIG`, `SLAVEOF`,
+  `REPLICAOF`) are flagged in the panel and ask for an explicit yes before
+  anything is dispatched. `confirm_commands = false` disables the gate —
+  see |poste-redis-config|.
+- A context winbar (on by default, `source_winbar`) repaints the effective
+  connection + db at the cursor as you move.
+
+==============================================================================
+6. RESULT PANEL                                              *poste-redis-result*
+
+Results render in a bottom split, one tab per executed command:
+
+- Scalars render as text; list/set/hash/zset results render as a sortable
+  grid with a frozen floating header, cell navigation, search, paging, and
+  yank.
+- `q` closes the panel; <Tab>/<S-Tab> cycle tabs; `r` re-runs the active
+  tab's command against its recorded connection; `gd` reveals the tab's key
+  in the browser; `H`/`L` page, `gg`/`G` jump to the first/last row,
+  <leader>hh/<leader>ll jump to the first/last page.
+- `K` previews the cell under the cursor (full value); `yy` yanks the cell,
+  `yc` yanks the column; <leader>/ searches the grid, `n`/`N` jump between
+  matches.
+- `E` exports the whole grid (all pages) to CSV, TSV, or JSON.
+- Values the transport capped at `preview_max_bytes` show a truncation
+  notice; `F` loads the full value.
+- `q` on the sidebar closes it; the history sidebar (see
+  |poste-redis-history|) floats over the panel's left edge.
+
+==============================================================================
+7. GRID EDITING                                             *poste-redis-editing*
+
+Grid cells and rows write back to Redis through the same session transport:
+
+- `i` edits the cell under the cursor; `o` adds a row; `dd` deletes a row.
+- Stale-cell guards: a cell that changed on the server since the grid was
+  rendered refuses the write instead of silently overwriting it. A rename
+  onto a field/member the key already has is refused the same way, and so is
+  writing a cell the transport only holds a truncated prefix of — storing it
+  would silently cut the tail.
+
+The interaction mirrors poste-db.nvim's dataset editing on purpose.
+
+==============================================================================
+8. KEY BROWSER                                              *poste-redis-browser*
+
+:PosteRedisBrowser opens a side split over the keyspace:
+
+- Lazy SCAN loading: opening a db costs one page; groups load on demand.
+  `scan_count` paces key pages, `header_scan_count` paces db-level group
+  discovery, and `type_fetch_limit` caps per-key TYPE lookups so a huge
+  keyspace cannot flood the session (see |poste-redis-config|).
+- Three layouts, via :PosteRedisBrowserView (no argument toggles
+  flatten <-> nested): `flat` — every key under the db node; `flatten` — one
+  folder per first `:`-segment; `nested` — folders nest per `:`-segment with
+  single-spine chains folded into one row.
+- <leader>/ filters by substring; <Space> switches db; `o` switches
+  connection (or :PosteRedisBrowserConnection for the in-window picker).
+- <CR> expands a group or opens a key in the value viewer (HSCAN/SSCAN/
+  ZSCAN/LRANGE pages, `value_page_size` per page; truncated strings load
+  fully with `F`).
+- `d` deletes the key under the cursor, `D` deletes a whole prefix — both
+  multi-select aware via <Tab>; `t` sets a TTL (one prompt per selected
+  key), `R` renames, `i` shows key info, `y` yanks the key name.
+- Render caps: beyond `render_max_lines` (whole tree) or
+  `render_max_per_node` (one group) a "... N more" notice renders and the
+  scan stops early — narrow with <leader>/ instead of forcing a 100k-line
+  buffer. `browser_auto_width` grows the split to fit the longest visible
+  row between `browser_min_width` and `browser_width_max_ratio`.
+
+==============================================================================
+9. HISTORY                                                   *poste-redis-history*
+
+Every execution lands in an in-memory history (`history_max` entries):
+
+- <leader>rh (or :PosteRedisHistory) opens the sidebar beside the panel.
+- `j`/`k` preview the snapshot live in a tab; <CR> restores it; `y` yanks an
+  executable form of the command.
+
+The history is per-session memory, not a persistent store — restarting
+Neovim starts empty.
+
+==============================================================================
+10. COMPLETION AND INLINE DOCS                          *poste-redis-completion*
+
+With blink.cmp installed, <C-Space> completes Redis commands, subcommands,
+and key names (key candidates come from a cached `SCAN MATCH prefix*`, capped
+at `completion_max_keys` per prefix). The bundled tree-sitter `poste_redis`
+grammar drives highlight and command-aware completion; without a compiler
+the plugin falls back to regex syntax and stays usable.
+
+`K` on a Redis command (HSET, RPUSH, ...) opens a markdown doc popup —
+syntax plus examples; pressing `K` again focuses it for scrolling.
+:PosteRedisInfo prints the active connection, the winning binary candidate
+with its `from:` source, and the connections.toml in use.
+
+==============================================================================
+11. AI CHAT                                                     *poste-redis-ai*
+
+With poste-ai.nvim installed, :PosteRedisChat opens the AI chat with the
+active connection, the browser's current position, and the viewed value as
+real context. Without it the command is registered but reports the missing
+plugin, and setup stays silent.
+
+==============================================================================
+12. COMMANDS                                                *poste-redis-commands*
+
+    :PosteRedisConnection            Select a redis connection from connections.toml
+    :PosteRedisContext               Select the connection used as the current context
+    :PosteRedisRunFile [file]        Run the whole .redis file (honoring USE)
+    :PosteRedisBrowser               Open the key browser
+    :PosteRedisBrowserConnection     Switch the browser's connection (in-window picker)
+    :PosteRedisBrowserView [layout]  Toggle flat/flatten/nested, or set one
+    :PosteRedisReveal [key]          Reveal a key in the browser tree (default: the
+                                     active result tab's key)
+    :PosteRedisHistory               Open/focus the history sidebar (q closes)
+    :PosteRedisChat                  AI chat with the PosteRedis context (needs poste-ai.nvim)
+    :PosteRedisInfo                  Active connection, winning binary candidate, config
+
+==============================================================================
+13. CONFIGURATION                                          *poste-redis-config*
+
+All options go to `setup(opts)` (lazy.nvim: `opts`); defaults shown:
+
+>lua
+    {
+      preview_max_bytes = 65536,   -- payload cap before a value renders truncated
+      scan_count = 500,            -- browser SCAN page size
+      header_scan_count = 5000,    -- SCAN page for db-level group discovery
+      type_fetch_limit = 500,      -- per-key TYPE lookups cap (browser icons)
+      value_page_size = 500,       -- elements per value-viewer page
+      render_max_lines = 5000,     -- browser tree render cap
+      render_max_per_node = 500,   -- children per expanded node cap
+      completion_max_keys = 50,    -- key candidates per completion prefix
+      browser_view_mode = "flatten", -- "flat" / "flatten" / "nested"
+      browser_split_nest = 6,      -- max folder depth in nested view
+      browser_auto_width = true,   -- split follows the longest visible row
+      browser_min_width = 30,
+      browser_width_max_ratio = 0.7,
+      result_height_ratio = 0.4,   -- result panel share of editor height
+      history_max = 200,           -- in-memory execution history cap
+      source_winbar = true,        -- context winbar on .redis buffers
+      confirm_commands = true,     -- yes-gate for dangerous commands
+      keymaps = { ... },           -- see |poste-redis-keymaps|
+    }
+<
+
+The caps exist to protect the shared redis-session transport: a 100k-key
+keyspace must not turn into 100k pipelined TYPE requests or a 100k-line
+buffer re-render, or every later command queues behind the flood. Raise them
+for small keyspaces; narrow with the browser's <leader>/ search for large
+ones.
+
+==============================================================================
+14. KEYMAPS                                                *poste-redis-keymaps*
+
+Defaults, grouped by buffer type. Override any entry via
+`keymaps.<section>.<action>` in setup(opts); set one to `false` to unmap it.
+
+`redis_source` (a `.redis` buffer): >lua
+    { run = "<CR>",                history = "<leader>rh",
+      help = "g?",                 trigger_completion = "<C-Space>",
+      show_doc = "K",              reveal_key = "gd",
+      cancel = "<Esc>" }
+<
+
+`redis_result` (the result panel): >lua
+    { close = "q",                 next_tab = "<Tab>",      prev_tab = "<S-Tab>",
+      move_left = "h",             move_down = "j",         move_up = "k",
+      move_right = "l",            first_row = "gg",        last_row = "G",
+      prev_page = "H",             next_page = "L",
+      goto_first_page = "<leader>hh", goto_last_page = "<leader>ll",
+      preview_cell = "K",          yank_cell = "yy",        yank_column = "yc",
+      export_grid = "E",           show_search = "<leader>/",
+      next_search = "n",           prev_search = "N",       load_full = "F",
+      refresh = "r",               sort_column = "s",       reveal_key = "gd",
+      history = "<leader>rh",      edit_cell = "i",         add_row = "o",
+      delete_row = "dd" }
+<
+
+`redis_browser` (the key browser): >lua
+    { toggle_node = "<CR>",        move_left = "h",         move_right = "l",
+      refresh_node = "r",          search = "<leader>/",    search_clear = "<Esc>",
+      db_select = "<Space>",       switch_connection = "o", close = "q",
+      help = "g?",                 delete = "d",            delete_prefix = "D",
+      ttl = "t",                   rename = "R",            info = "i",
+      yank_key = "y",              multi_select_toggle = "<Tab>" }
+<
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
