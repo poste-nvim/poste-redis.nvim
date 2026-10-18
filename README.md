@@ -2,9 +2,16 @@
 
 [![CI](https://github.com/poste-nvim/poste-redis.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/poste-nvim/poste-redis.nvim/actions/workflows/ci.yml)
 
-Redis for Neovim in the [Poste](https://github.com/poste-nvim/poste.nvim) plugin family —
+**Redis for Neovim in the [Poste](https://github.com/poste-nvim/poste.nvim) plugin family —**
 write Redis commands in a `.redis` buffer, hit `<CR>`, and read the results in a result
 panel. A key browser, value viewer and executable history are included.
+
+<!--
+Hero screenshot: a .redis buffer with the cursor on a SET line, the result
+panel below, and the key browser split on the side showing the db tree.
+Drop the image at .github/assets/browser.png and uncomment.
+![poste-redis.nvim — command buffer + result panel + key browser](.github/assets/browser.png)
+-->
 
 ## Install
 
@@ -13,9 +20,16 @@ With lazy.nvim:
 ```lua
 {
   "poste-nvim/poste-redis.nvim",
+  dependencies = {
+    "saghen/blink.cmp",        -- completion (optional but recommended)
+    "poste-nvim/poste-ai.nvim", -- optional: :PosteRedisChat with real context
+  },
   opts = {},
 }
 ```
+
+Requires Neovim **>= 0.10.0** (`vim.system`, `vim.treesitter.language`) — the
+CI matrix verifies current stable and nightly.
 
 The plugin shells out to the `poste` binary: a usable one (readable **and**
 executable, and on Windows also matched as `<candidate>.exe`) is resolved from
@@ -88,10 +102,12 @@ GET session:abc
   to inspect the active connection.
 - `<C-Space>` completes commands, keys and subcommands (blink.cmp source;
   works out of the box when blink is installed).
+- With [poste-ai.nvim](https://github.com/poste-nvim/poste-ai.nvim)
+  installed: `:PosteRedisChat` opens the AI chat with the active connection,
+  key browser position, and value viewer content as real context.
 
 `requirements.md` and `EXECUTION-PLAN.md` are the historical M1/M2 specs
-(both milestones shipped); the
-[doc site](https://github.com/beyondlex/doc-poste) documents current behavior.
+(both milestones shipped); developer docs live in `docs/dev/`.
 
 ## License
 

@@ -40,5 +40,5 @@ body:
       options:
         - label: "I have checked existing issues (open and closed) for duplicates"
           required: true
-        - label: "I have read the relevant section of `:h poste-redis`"
+        - label: "I have read the relevant section of the README"
           required: true
